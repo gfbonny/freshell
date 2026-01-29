@@ -13,7 +13,8 @@ import TabContent from '@/components/TabContent'
 import HistoryView from '@/components/HistoryView'
 import SettingsView from '@/components/SettingsView'
 import OverviewView from '@/components/OverviewView'
-import { Wifi, WifiOff } from 'lucide-react'
+import { Wifi, WifiOff, Moon, Sun } from 'lucide-react'
+import { updateSettingsLocal, markSaved } from '@/store/settingsSlice'
 
 export default function App() {
   useThemeEffect()
@@ -23,8 +24,18 @@ export default function App() {
   const activeTabId = useAppSelector((s) => s.tabs.activeTabId)
   const connection = useAppSelector((s) => s.connection.status)
   const connectionError = useAppSelector((s) => s.connection.lastError)
+  const settings = useAppSelector((s) => s.settings.settings)
 
   const [view, setView] = useState<AppView>('terminal')
+
+  const toggleTheme = async () => {
+    const newTheme = settings.theme === 'dark' ? 'light' : settings.theme === 'light' ? 'system' : 'dark'
+    dispatch(updateSettingsLocal({ theme: newTheme }))
+    try {
+      await api.patch('/api/settings', { theme: newTheme })
+      dispatch(markSaved())
+    } catch {}
+  }
 
   // Bootstrap: load settings, sessions, and connect websocket.
   useEffect(() => {
@@ -187,17 +198,30 @@ export default function App() {
       {/* Top header bar spanning full width */}
       <div className="h-8 px-4 flex items-center justify-between border-b border-border/30 bg-background flex-shrink-0">
         <span className="font-mono text-sm font-semibold tracking-tight">🐚freshell</span>
-        <div className="flex items-center gap-2">
-          {connection === 'ready' ? (
-            <Wifi className="h-3.5 w-3.5 text-success" />
-          ) : connection === 'connecting' ? (
-            <Wifi className="h-3.5 w-3.5 text-warning animate-pulse" />
-          ) : (
-            <WifiOff className="h-3.5 w-3.5 text-destructive" />
-          )}
-          {connectionError && (
-            <span className="text-2xs text-destructive">{connectionError}</span>
-          )}
+        <div className="flex items-center gap-1">
+          <button
+            onClick={toggleTheme}
+            className="p-1.5 rounded-md hover:bg-muted transition-colors"
+            title={`Theme: ${settings.theme}`}
+          >
+            {settings.theme === 'dark' ? (
+              <Moon className="h-3.5 w-3.5 text-muted-foreground" />
+            ) : (
+              <Sun className="h-3.5 w-3.5 text-muted-foreground" />
+            )}
+          </button>
+          <div
+            className="p-1.5"
+            title={connection === 'ready' ? 'Connected' : connection === 'connecting' ? 'Connecting...' : connectionError || 'Disconnected'}
+          >
+            {connection === 'ready' ? (
+              <Wifi className="h-3.5 w-3.5 text-muted-foreground" />
+            ) : connection === 'connecting' ? (
+              <Wifi className="h-3.5 w-3.5 text-muted-foreground animate-pulse" />
+            ) : (
+              <WifiOff className="h-3.5 w-3.5 text-muted-foreground" />
+            )}
+          </div>
         </div>
       </div>
       {/* Main content area with sidebar */}
