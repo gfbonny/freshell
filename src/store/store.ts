@@ -3,6 +3,7 @@ import tabsReducer, { hydrateTabs } from './tabsSlice'
 import connectionReducer from './connectionSlice'
 import sessionsReducer from './sessionsSlice'
 import settingsReducer from './settingsSlice'
+import claudeReducer from './claudeSlice'
 import { persistMiddleware, loadPersistedTabs } from './persistMiddleware'
 
 export const store = configureStore({
@@ -11,6 +12,7 @@ export const store = configureStore({
     connection: connectionReducer,
     sessions: sessionsReducer,
     settings: settingsReducer,
+    claude: claudeReducer,
   },
   middleware: (getDefault) =>
     getDefault({
