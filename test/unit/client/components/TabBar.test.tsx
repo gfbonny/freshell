@@ -612,4 +612,120 @@ describe('TabBar', () => {
       expect(state.activeTabId).toBeNull()
     })
   })
+
+  describe('drag and drop reordering', () => {
+    it('renders tabs in a sortable container', () => {
+      const tab1 = createTab({ id: 'tab-1', title: 'Tab 1' })
+      const tab2 = createTab({ id: 'tab-2', title: 'Tab 2' })
+
+      const store = createStore({
+        tabs: [tab1, tab2],
+        activeTabId: 'tab-1',
+      })
+
+      renderWithStore(<TabBar />, store)
+
+      // Both tabs should be rendered (sortable context doesn't change this)
+      expect(screen.getByTitle('Tab 1')).toBeInTheDocument()
+      expect(screen.getByTitle('Tab 2')).toBeInTheDocument()
+    })
+
+    it('Ctrl+Shift+ArrowRight moves active tab right', () => {
+      const tab1 = createTab({ id: 'tab-1', title: 'Tab 1' })
+      const tab2 = createTab({ id: 'tab-2', title: 'Tab 2' })
+      const tab3 = createTab({ id: 'tab-3', title: 'Tab 3' })
+
+      const store = createStore({
+        tabs: [tab1, tab2, tab3],
+        activeTabId: 'tab-1',
+      })
+
+      renderWithStore(<TabBar />, store)
+
+      // Press Ctrl+Shift+ArrowRight
+      fireEvent.keyDown(window, {
+        key: 'ArrowRight',
+        ctrlKey: true,
+        shiftKey: true,
+      })
+
+      // Tab 1 should have moved from index 0 to index 1
+      const state = store.getState().tabs
+      expect(state.tabs[0].id).toBe('tab-2')
+      expect(state.tabs[1].id).toBe('tab-1')
+      expect(state.tabs[2].id).toBe('tab-3')
+    })
+
+    it('Ctrl+Shift+ArrowLeft moves active tab left', () => {
+      const tab1 = createTab({ id: 'tab-1', title: 'Tab 1' })
+      const tab2 = createTab({ id: 'tab-2', title: 'Tab 2' })
+      const tab3 = createTab({ id: 'tab-3', title: 'Tab 3' })
+
+      const store = createStore({
+        tabs: [tab1, tab2, tab3],
+        activeTabId: 'tab-2',
+      })
+
+      renderWithStore(<TabBar />, store)
+
+      // Press Ctrl+Shift+ArrowLeft
+      fireEvent.keyDown(window, {
+        key: 'ArrowLeft',
+        ctrlKey: true,
+        shiftKey: true,
+      })
+
+      // Tab 2 should have moved from index 1 to index 0
+      const state = store.getState().tabs
+      expect(state.tabs[0].id).toBe('tab-2')
+      expect(state.tabs[1].id).toBe('tab-1')
+      expect(state.tabs[2].id).toBe('tab-3')
+    })
+
+    it('Ctrl+Shift+ArrowLeft at first position does nothing', () => {
+      const tab1 = createTab({ id: 'tab-1', title: 'Tab 1' })
+      const tab2 = createTab({ id: 'tab-2', title: 'Tab 2' })
+
+      const store = createStore({
+        tabs: [tab1, tab2],
+        activeTabId: 'tab-1',
+      })
+
+      renderWithStore(<TabBar />, store)
+
+      fireEvent.keyDown(window, {
+        key: 'ArrowLeft',
+        ctrlKey: true,
+        shiftKey: true,
+      })
+
+      // Order unchanged
+      const state = store.getState().tabs
+      expect(state.tabs[0].id).toBe('tab-1')
+      expect(state.tabs[1].id).toBe('tab-2')
+    })
+
+    it('Ctrl+Shift+ArrowRight at last position does nothing', () => {
+      const tab1 = createTab({ id: 'tab-1', title: 'Tab 1' })
+      const tab2 = createTab({ id: 'tab-2', title: 'Tab 2' })
+
+      const store = createStore({
+        tabs: [tab1, tab2],
+        activeTabId: 'tab-2',
+      })
+
+      renderWithStore(<TabBar />, store)
+
+      fireEvent.keyDown(window, {
+        key: 'ArrowRight',
+        ctrlKey: true,
+        shiftKey: true,
+      })
+
+      // Order unchanged
+      const state = store.getState().tabs
+      expect(state.tabs[0].id).toBe('tab-1')
+      expect(state.tabs[1].id).toBe('tab-2')
+    })
+  })
 })

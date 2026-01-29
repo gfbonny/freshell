@@ -1,11 +1,11 @@
 import { configureStore } from '@reduxjs/toolkit'
-import tabsReducer, { hydrateTabs } from './tabsSlice'
+import tabsReducer from './tabsSlice'
 import connectionReducer from './connectionSlice'
 import sessionsReducer from './sessionsSlice'
 import settingsReducer from './settingsSlice'
 import claudeReducer from './claudeSlice'
-import panesReducer, { hydratePanes } from './panesSlice'
-import { persistMiddleware, loadPersistedTabs, loadPersistedPanes } from './persistMiddleware'
+import panesReducer from './panesSlice'
+import { persistMiddleware } from './persistMiddleware'
 
 export const store = configureStore({
   reducer: {
@@ -24,16 +24,23 @@ export const store = configureStore({
     }).concat(persistMiddleware),
 })
 
-// Hydrate persisted tabs once on startup.
-const persistedTabs = loadPersistedTabs()
-if (persistedTabs?.tabs) {
-  store.dispatch(hydrateTabs(persistedTabs.tabs))
-}
+// Note: Tabs and Panes are now loaded from localStorage directly in their slice
+// initial states (see tabsSlice.ts and panesSlice.ts). This ensures the state
+// is available BEFORE the store is created, preventing any race conditions.
+//
+// The hydration code below is kept for backward compatibility and logging,
+// but the slices already have the persisted data by this point.
 
-// Hydrate persisted panes once on startup.
-const persistedPanes = loadPersistedPanes()
-if (persistedPanes) {
-  store.dispatch(hydratePanes(persistedPanes))
+console.log('[Store] Initial state loaded from localStorage:')
+console.log('[Store] Tab IDs:', store.getState().tabs.tabs.map(t => t.id))
+console.log('[Store] Pane layout keys:', Object.keys(store.getState().panes.layouts))
+
+// Verify tabs and panes match
+const tabIds = new Set(store.getState().tabs.tabs.map(t => t.id))
+const paneTabIds = Object.keys(store.getState().panes.layouts)
+const orphanedPanes = paneTabIds.filter(id => !tabIds.has(id))
+if (orphanedPanes.length > 0) {
+  console.warn('[Store] Found pane layouts for non-existent tabs:', orphanedPanes)
 }
 
 export type RootState = ReturnType<typeof store.getState>

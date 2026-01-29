@@ -2,10 +2,30 @@ import { createSlice, PayloadAction } from '@reduxjs/toolkit'
 import { nanoid } from 'nanoid'
 import type { PanesState, PaneContent, PaneNode } from './paneTypes'
 
-const initialState: PanesState = {
-  layouts: {},
-  activePane: {},
+// Load persisted panes state directly at module initialization time
+// This ensures the initial state includes persisted data BEFORE the store is created
+function loadInitialPanesState(): PanesState {
+  const defaultState: PanesState = {
+    layouts: {},
+    activePane: {},
+  }
+
+  try {
+    const raw = localStorage.getItem('freshell.panes.v1')
+    if (!raw) return defaultState
+    const parsed = JSON.parse(raw) as PanesState
+    console.log('[PanesSlice] Loaded initial state from localStorage:', Object.keys(parsed.layouts || {}))
+    return {
+      layouts: parsed.layouts || {},
+      activePane: parsed.activePane || {},
+    }
+  } catch (err) {
+    console.error('[PanesSlice] Failed to load from localStorage:', err)
+    return defaultState
+  }
 }
+
+const initialState: PanesState = loadInitialPanesState()
 
 // Helper to find and replace a node (leaf or split) in the tree
 function findAndReplace(

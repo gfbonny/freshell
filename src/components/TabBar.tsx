@@ -1,25 +1,87 @@
-import { X, Plus, Circle } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { Plus } from 'lucide-react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { addTab, closeTab, setActiveTab, updateTab } from '@/store/tabsSlice'
+import { addTab, closeTab, setActiveTab, updateTab, reorderTabs } from '@/store/tabsSlice'
 import { getWsClient } from '@/lib/ws-client'
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import TabItem from './TabItem'
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+  DragStartEvent,
+  DragOverlay,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  horizontalListSortingStrategy,
+  useSortable,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import type { Tab } from '@/store/types'
 
-function StatusIndicator({ status }: { status: string }) {
-  if (status === 'running') {
-    return (
-      <div className="relative">
-        <Circle className="h-2 w-2 fill-success text-success" />
-      </div>
-    )
+interface SortableTabProps {
+  tab: Tab
+  isActive: boolean
+  isDragging: boolean
+  isRenaming: boolean
+  renameValue: string
+  onRenameChange: (value: string) => void
+  onRenameBlur: () => void
+  onRenameKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void
+  onClose: (e: React.MouseEvent<HTMLButtonElement>) => void
+  onClick: () => void
+  onDoubleClick: () => void
+}
+
+function SortableTab({
+  tab,
+  isActive,
+  isDragging,
+  isRenaming,
+  renameValue,
+  onRenameChange,
+  onRenameBlur,
+  onRenameKeyDown,
+  onClose,
+  onClick,
+  onDoubleClick,
+}: SortableTabProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+  } = useSortable({ id: tab.id })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition: transition || 'transform 150ms ease',
   }
-  if (status === 'exited') {
-    return <Circle className="h-2 w-2 text-muted-foreground/40" />
-  }
-  if (status === 'error') {
-    return <Circle className="h-2 w-2 fill-destructive text-destructive" />
-  }
-  return <Circle className="h-2 w-2 text-muted-foreground/20 animate-pulse" />
+
+  return (
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+      <TabItem
+        tab={tab}
+        isActive={isActive}
+        isDragging={isDragging}
+        isRenaming={isRenaming}
+        renameValue={renameValue}
+        onRenameChange={onRenameChange}
+        onRenameBlur={onRenameBlur}
+        onRenameKeyDown={onRenameKeyDown}
+        onClose={onClose}
+        onClick={onClick}
+        onDoubleClick={onDoubleClick}
+      />
+    </div>
+  )
 }
 
 export default function TabBar() {
@@ -30,65 +92,96 @@ export default function TabBar() {
 
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
+  const [activeId, setActiveId] = useState<string | null>(null)
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 5 },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 250, tolerance: 5 },
+    })
+  )
+
+  const handleDragStart = useCallback((event: DragStartEvent) => {
+    setActiveId(event.active.id as string)
+  }, [])
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event
+      setActiveId(null)
+
+      if (over && active.id !== over.id) {
+        const oldIndex = tabs.findIndex((t: Tab) => t.id === active.id)
+        const newIndex = tabs.findIndex((t: Tab) => t.id === over.id)
+        dispatch(reorderTabs({ fromIndex: oldIndex, toIndex: newIndex }))
+      }
+    },
+    [tabs, dispatch]
+  )
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && activeTabId) {
+        const currentIndex = tabs.findIndex((t: Tab) => t.id === activeTabId)
+        if (e.key === 'ArrowLeft' && currentIndex > 0) {
+          dispatch(reorderTabs({ fromIndex: currentIndex, toIndex: currentIndex - 1 }))
+          e.preventDefault()
+        } else if (e.key === 'ArrowRight' && currentIndex < tabs.length - 1) {
+          dispatch(reorderTabs({ fromIndex: currentIndex, toIndex: currentIndex + 1 }))
+          e.preventDefault()
+        }
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [activeTabId, tabs, dispatch])
+
+  const activeTab = activeId ? tabs.find((t: Tab) => t.id === activeId) : null
 
   if (tabs.length === 0) return null
 
   return (
     <div className="h-10 flex items-center gap-1 px-2 border-b border-border/30 bg-background">
-      <div className="flex items-center gap-0.5 overflow-x-auto flex-1 py-1">
-        {tabs.map((tab) => {
-          const active = tab.id === activeTabId
-          return (
-            <div
-              key={tab.id}
-              className={cn(
-                'group flex items-center gap-2 h-7 px-3 rounded-md text-sm cursor-pointer transition-all',
-                active
-                  ? 'bg-muted text-foreground'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
-              )}
-              onClick={() => dispatch(setActiveTab(tab.id))}
-              onDoubleClick={() => {
-                setRenamingId(tab.id)
-                setRenameValue(tab.title)
-              }}
-            >
-              <StatusIndicator status={tab.status} />
-
-              {renamingId === tab.id ? (
-                <input
-                  className="bg-transparent outline-none w-32 text-sm"
-                  value={renameValue}
-                  autoFocus
-                  onChange={(e) => setRenameValue(e.target.value)}
-                  onBlur={() => {
-                    dispatch(updateTab({ id: tab.id, updates: { title: renameValue || tab.title, titleSetByUser: true } }))
-                    setRenamingId(null)
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === 'Escape') {
-                      ;(e.target as HTMLInputElement).blur()
-                    }
-                  }}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              ) : (
-                <span
-                  className={cn("whitespace-nowrap truncate text-sm", active ? "max-w-[10rem]" : "max-w-[5rem]")}
-                  title={tab.title}
-                >
-                  {tab.title}
-                </span>
-              )}
-
-              <button
-                className={cn(
-                  'ml-0.5 p-0.5 rounded transition-opacity',
-                  active ? 'opacity-60 hover:opacity-100' : 'opacity-0 group-hover:opacity-60 hover:!opacity-100'
-                )}
-                title="Close (Shift+Click to kill)"
-                onClick={(e) => {
-                  e.stopPropagation()
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+      >
+        <SortableContext
+          items={tabs.map((t: Tab) => t.id)}
+          strategy={horizontalListSortingStrategy}
+        >
+          <div className="flex items-center gap-0.5 overflow-x-auto flex-1 py-1">
+            {tabs.map((tab: Tab) => (
+              <SortableTab
+                key={tab.id}
+                tab={tab}
+                isActive={tab.id === activeTabId}
+                isDragging={activeId === tab.id}
+                isRenaming={renamingId === tab.id}
+                renameValue={renameValue}
+                onRenameChange={setRenameValue}
+                onRenameBlur={() => {
+                  dispatch(
+                    updateTab({
+                      id: tab.id,
+                      updates: { title: renameValue || tab.title, titleSetByUser: true },
+                    })
+                  )
+                  setRenamingId(null)
+                }}
+                onRenameKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === 'Escape') {
+                    ;(e.target as HTMLInputElement).blur()
+                  }
+                }}
+                onClose={(e) => {
                   if (tab.terminalId) {
                     ws.send({
                       type: e.shiftKey ? 'terminal.kill' : 'terminal.detach',
@@ -97,13 +190,43 @@ export default function TabBar() {
                   }
                   dispatch(closeTab(tab.id))
                 }}
-              >
-                <X className="h-3 w-3" />
-              </button>
+                onClick={() => dispatch(setActiveTab(tab.id))}
+                onDoubleClick={() => {
+                  setRenamingId(tab.id)
+                  setRenameValue(tab.title)
+                }}
+              />
+            ))}
+          </div>
+        </SortableContext>
+
+        <DragOverlay>
+          {activeTab ? (
+            <div
+              style={{
+                opacity: 0.9,
+                transform: 'scale(1.02)',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                cursor: 'grabbing',
+              }}
+            >
+              <TabItem
+                tab={activeTab}
+                isActive={activeTab.id === activeTabId}
+                isDragging={false}
+                isRenaming={false}
+                renameValue=""
+                onRenameChange={() => {}}
+                onRenameBlur={() => {}}
+                onRenameKeyDown={() => {}}
+                onClose={() => {}}
+                onClick={() => {}}
+                onDoubleClick={() => {}}
+              />
             </div>
-          )
-        })}
-      </div>
+          ) : null}
+        </DragOverlay>
+      </DndContext>
 
       <button
         className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"

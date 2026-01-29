@@ -16,12 +16,19 @@ export default function PaneLayout({ tabId, defaultContent }: PaneLayoutProps) {
   const activePane = useAppSelector((s) => s.panes.activePane[tabId])
   const containerRef = useRef<HTMLDivElement>(null)
 
+  // Debug: check what's in the store
+  const allLayouts = useAppSelector((s) => s.panes.layouts)
+
   // Initialize layout if not exists
   useEffect(() => {
     if (!layout) {
+      // Only log when actually creating a new layout
+      console.log('[PaneLayout] Creating new layout for tabId:', tabId)
+      console.log('[PaneLayout] Available layout keys:', Object.keys(allLayouts))
       dispatch(initLayout({ tabId, content: defaultContent }))
     }
-  }, [dispatch, tabId, layout, defaultContent])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dispatch, tabId, layout])
 
   // Determine split direction based on container dimensions
   const getSplitDirection = useCallback((): 'horizontal' | 'vertical' => {
