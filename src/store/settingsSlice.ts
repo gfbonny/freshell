@@ -6,7 +6,7 @@ export const defaultSettings: AppSettings = {
   uiScale: 1.0, // 100% = UI text matches terminal font size
   terminal: {
     fontSize: 16,
-    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+    fontFamily: 'JetBrains Mono',
     lineHeight: 1,
     cursorBlink: true,
     scrollback: 5000,

@@ -6,6 +6,19 @@ import { cn } from '@/lib/utils'
 import { terminalThemes, darkThemes, lightThemes } from '@/lib/terminal-themes'
 import type { SidebarSortMode, TerminalTheme } from '@/store/types'
 
+/** Monospace fonts with good Unicode block element support for terminal use */
+const terminalFonts = [
+  { value: 'JetBrains Mono', label: 'JetBrains Mono' },
+  { value: 'Cascadia Code', label: 'Cascadia Code' },
+  { value: 'Fira Code', label: 'Fira Code' },
+  { value: 'Source Code Pro', label: 'Source Code Pro' },
+  { value: 'IBM Plex Mono', label: 'IBM Plex Mono' },
+  { value: 'Consolas', label: 'Consolas' },
+  { value: 'Monaco', label: 'Monaco' },
+  { value: 'Menlo', label: 'Menlo' },
+  { value: 'monospace', label: 'System monospace' },
+]
+
 export default function SettingsView() {
   const dispatch = useAppDispatch()
   const settings = useAppSelector((s) => s.settings.settings)
@@ -198,15 +211,18 @@ export default function SettingsView() {
             </SettingsRow>
 
             <SettingsRow label="Font family">
-              <input
-                type="text"
+              <select
                 value={settings.terminal.fontFamily}
                 onChange={(e) => {
                   dispatch(updateSettingsLocal({ terminal: { fontFamily: e.target.value } } as any))
                   scheduleSave({ terminal: { fontFamily: e.target.value } })
                 }}
-                className="w-full max-w-xs h-8 px-3 text-sm bg-muted border-0 rounded-md focus:outline-none focus:ring-1 focus:ring-border"
-              />
+                className="h-8 px-3 text-sm bg-muted border-0 rounded-md focus:outline-none focus:ring-1 focus:ring-border"
+              >
+                {terminalFonts.map((font) => (
+                  <option key={font.value} value={font.value}>{font.label}</option>
+                ))}
+              </select>
             </SettingsRow>
           </SettingsSection>
 
