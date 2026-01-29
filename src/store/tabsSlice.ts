@@ -18,6 +18,7 @@ type AddTabPayload = {
   title?: string
   description?: string
   terminalId?: string
+  claudeSessionId?: string
   status?: TerminalStatus
   mode?: TabMode
   shell?: ShellType
@@ -38,6 +39,7 @@ export const tabsSlice = createSlice({
         title: payload.title || `Terminal ${state.tabs.length + 1}`,
         description: payload.description,
         terminalId: payload.terminalId,
+        claudeSessionId: payload.claudeSessionId,
         status: payload.status || 'creating',
         mode: payload.mode || 'shell',
         shell: payload.shell || 'system',

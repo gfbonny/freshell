@@ -18,7 +18,8 @@ export interface Tab {
   createRequestId: string
   title: string
   description?: string
-  terminalId?: string
+  terminalId?: string          // For shell mode
+  claudeSessionId?: string     // For claude mode
   status: TerminalStatus
   mode: TabMode
   shell?: ShellType

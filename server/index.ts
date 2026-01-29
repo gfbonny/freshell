@@ -10,6 +10,7 @@ import { configStore } from './config-store'
 import { TerminalRegistry } from './terminal-registry'
 import { WsHandler } from './ws-handler'
 import { claudeIndexer } from './claude-indexer'
+import { claudeSessionManager } from './claude-session'
 import { AI_CONFIG, PROMPTS, stripAnsi } from './ai-prompts'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -56,7 +57,7 @@ async function main() {
   const registry = new TerminalRegistry(settings)
 
   const server = http.createServer(app)
-  const wsHandler = new WsHandler(server, registry)
+  const wsHandler = new WsHandler(server, registry, claudeSessionManager)
 
   // --- API: settings ---
   //
@@ -253,10 +254,13 @@ async function main() {
     // 2. Kill all running terminals
     registry.shutdown()
 
-    // 3. Close WebSocket connections gracefully
+    // 3. Kill all Claude sessions
+    claudeSessionManager.shutdown()
+
+    // 4. Close WebSocket connections gracefully
     wsHandler.close()
 
-    // 4. Stop the Claude indexer
+    // 5. Stop the Claude indexer
     claudeIndexer.stop()
 
     // 5. Exit cleanly

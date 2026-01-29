@@ -9,7 +9,7 @@ import { getWsClient } from '@/lib/ws-client'
 import { useThemeEffect } from '@/hooks/useTheme'
 import Sidebar, { AppView } from '@/components/Sidebar'
 import TabBar from '@/components/TabBar'
-import TerminalView from '@/components/TerminalView'
+import TabContent from '@/components/TabContent'
 import HistoryView from '@/components/HistoryView'
 import SettingsView from '@/components/SettingsView'
 import OverviewView from '@/components/OverviewView'
@@ -175,7 +175,7 @@ export default function App() {
         <TabBar />
         <div className="flex-1 min-h-0 relative">
           {tabs.map((t) => (
-            <TerminalView key={t.id} tabId={t.id} hidden={t.id !== activeTabId} />
+            <TabContent key={t.id} tabId={t.id} hidden={t.id !== activeTabId} />
           ))}
         </div>
       </div>
