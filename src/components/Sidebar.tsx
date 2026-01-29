@@ -1,28 +1,25 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Terminal, History, Settings, LayoutGrid, Search, Plus, Moon, Sun, Circle, Play } from 'lucide-react'
+import { Terminal, History, Settings, LayoutGrid, Search, Plus, Play } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { addTab, setActiveTab } from '@/store/tabsSlice'
-import { updateSettingsLocal, markSaved } from '@/store/settingsSlice'
 import { getWsClient } from '@/lib/ws-client'
-import { api } from '@/lib/api'
 import type { BackgroundTerminal, ClaudeSession, ProjectGroup } from '@/store/types'
 
 export type AppView = 'terminal' | 'sessions' | 'overview' | 'settings'
 
-interface UnifiedItem {
-  type: 'terminal' | 'session'
+interface SessionItem {
   id: string
+  sessionId: string
   title: string
   subtitle?: string
   projectPath?: string
   projectColor?: string
   timestamp: number
-  isRunning?: boolean
-  isActive?: boolean
-  terminalId?: string
-  sessionId?: string
   cwd?: string
+  // Running state (derived from terminals)
+  isRunning: boolean
+  runningTerminalId?: string
 }
 
 function formatRelativeTime(timestamp: number): string {
@@ -90,59 +87,53 @@ export default function Sidebar({
     }
   }, [ws])
 
-  // Build unified list
-  const unifiedItems = useMemo(() => {
-    const items: UnifiedItem[] = []
-    const tabsArray = tabs ?? []
+  // Build session list with running state from terminals
+  const sessionItems = useMemo(() => {
+    const items: SessionItem[] = []
     const terminalsArray = terminals ?? []
-    const openTerminalIds = new Set(tabsArray.map((t) => t.terminalId).filter(Boolean))
+    const projectsArray = projects ?? []
 
-    // Add terminals
+    // Build map: sessionId -> running terminalId
+    const runningSessionMap = new Map<string, string>()
     terminalsArray.forEach((t) => {
-      items.push({
-        type: 'terminal',
-        id: `terminal-${t.terminalId}`,
-        title: t.title,
-        subtitle: t.cwd ? getProjectName(t.cwd) : undefined,
-        timestamp: t.lastActivityAt || t.createdAt,
-        isRunning: t.status === 'running',
-        isActive: openTerminalIds.has(t.terminalId),
-        terminalId: t.terminalId,
-      })
+      if (t.mode === 'claude' && t.status === 'running' && t.resumeSessionId) {
+        runningSessionMap.set(t.resumeSessionId, t.terminalId)
+      }
     })
 
-    // Add sessions from all projects
-    const projectsArray = projects ?? []
+    // Add sessions with running state
     projectsArray.forEach((project) => {
       project.sessions.forEach((session) => {
+        const runningTerminalId = runningSessionMap.get(session.sessionId)
         items.push({
-          type: 'session',
           id: `session-${session.sessionId}`,
+          sessionId: session.sessionId,
           title: session.title || session.sessionId.slice(0, 8),
           subtitle: getProjectName(project.projectPath),
           projectPath: project.projectPath,
           projectColor: project.color,
           timestamp: session.updatedAt,
-          sessionId: session.sessionId,
           cwd: session.cwd,
+          isRunning: !!runningTerminalId,
+          runningTerminalId,
         })
       })
     })
 
     return items
-  }, [terminals, projects, tabs])
+  }, [terminals, projects])
 
   // Filter items
   const filteredItems = useMemo(() => {
-    if (!filter.trim()) return unifiedItems
+    if (!filter.trim()) return sessionItems
     const q = filter.toLowerCase()
-    return unifiedItems.filter(
+    return sessionItems.filter(
       (item) =>
         item.title.toLowerCase().includes(q) ||
         item.subtitle?.toLowerCase().includes(q) ||
         item.projectPath?.toLowerCase().includes(q)
     )
-  }, [unifiedItems, filter])
+  }, [sessionItems, filter])
 
   // Sort items based on settings
   const sortedItems = useMemo(() => {
@@ -170,42 +161,45 @@ export default function Sidebar({
       })
     }
 
-    // Hybrid: running terminals first, then recency
-    const running = items.filter((i) => i.type === 'terminal' && i.isRunning)
-    const rest = items.filter((i) => !(i.type === 'terminal' && i.isRunning))
+    // Hybrid: running sessions first, then recency
+    const running = items.filter((i) => i.isRunning)
+    const rest = items.filter((i) => !i.isRunning)
     running.sort((a, b) => b.timestamp - a.timestamp)
     rest.sort((a, b) => b.timestamp - a.timestamp)
     return [...running, ...rest]
   }, [filteredItems, settings.sidebar?.sortMode])
 
-  // Separate running terminals for hybrid display
-  const runningTerminals = sortedItems.filter((i) => i.type === 'terminal' && i.isRunning)
+  // Separate running sessions for hybrid display
+  const runningSessions = sortedItems.filter((i) => i.isRunning)
   const otherItems = settings.sidebar?.sortMode === 'hybrid'
-    ? sortedItems.filter((i) => !(i.type === 'terminal' && i.isRunning))
+    ? sortedItems.filter((i) => !i.isRunning)
     : sortedItems
 
-  const handleItemClick = (item: UnifiedItem) => {
-    if (item.type === 'terminal' && item.terminalId) {
-      const existingTab = tabs.find((t) => t.terminalId === item.terminalId)
+  const handleItemClick = (item: SessionItem) => {
+    if (item.isRunning && item.runningTerminalId) {
+      // Session is running - switch to existing terminal
+      const existingTab = tabs.find((t) => t.terminalId === item.runningTerminalId)
       if (existingTab) {
         dispatch(setActiveTab(existingTab.id))
       } else {
-        dispatch(addTab({ title: item.title, terminalId: item.terminalId, status: item.isRunning ? 'running' : 'exited', mode: 'shell' }))
+        // Attach to the running terminal
+        dispatch(addTab({
+          title: item.title,
+          terminalId: item.runningTerminalId,
+          status: 'running',
+          mode: 'claude'
+        }))
       }
-      onNavigate('terminal')
-    } else if (item.type === 'session' && item.sessionId) {
-      dispatch(addTab({ title: item.title, mode: 'claude', initialCwd: item.cwd, resumeSessionId: item.sessionId }))
-      onNavigate('terminal')
+    } else {
+      // Session not running - resume it
+      dispatch(addTab({
+        title: item.title,
+        mode: 'claude',
+        initialCwd: item.cwd,
+        resumeSessionId: item.sessionId
+      }))
     }
-  }
-
-  const toggleTheme = async () => {
-    const newTheme = settings.theme === 'dark' ? 'light' : settings.theme === 'light' ? 'system' : 'dark'
-    dispatch(updateSettingsLocal({ theme: newTheme }))
-    try {
-      await api.patch('/api/settings', { theme: newTheme })
-      dispatch(markSaved())
-    } catch {}
+    onNavigate('terminal')
   }
 
   const nav = [
@@ -220,29 +214,16 @@ export default function Sidebar({
       {/* Header */}
       <div className="px-4 py-4 flex items-center justify-between">
         <span className="text-sm font-medium tracking-tight">Sessions</span>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={toggleTheme}
-            className="p-1.5 rounded-md hover:bg-muted transition-colors"
-            title={`Theme: ${settings.theme}`}
-          >
-            {settings.theme === 'dark' ? (
-              <Moon className="h-4 w-4 text-muted-foreground" />
-            ) : (
-              <Sun className="h-4 w-4 text-muted-foreground" />
-            )}
-          </button>
-          <button
-            onClick={() => {
-              dispatch(addTab({ mode: 'shell' }))
-              onNavigate('terminal')
-            }}
-            className="p-1.5 rounded-md hover:bg-muted transition-colors"
-            title="New terminal"
-          >
-            <Plus className="h-4 w-4 text-muted-foreground" />
-          </button>
-        </div>
+        <button
+          onClick={() => {
+            dispatch(addTab({ mode: 'shell' }))
+            onNavigate('terminal')
+          }}
+          className="p-1.5 rounded-md hover:bg-muted transition-colors"
+          title="New terminal"
+        >
+          <Plus className="h-4 w-4 text-muted-foreground" />
+        </button>
       </div>
 
       {/* Search */}
@@ -284,50 +265,62 @@ export default function Sidebar({
         </div>
       </div>
 
-      {/* Unified List */}
+      {/* Session List */}
       <div className="flex-1 overflow-y-auto px-2">
-        {/* Running terminals section (hybrid mode) */}
-        {settings.sidebar?.sortMode === 'hybrid' && runningTerminals.length > 0 && (
+        {/* Running sessions section (hybrid mode) */}
+        {settings.sidebar?.sortMode === 'hybrid' && runningSessions.length > 0 && (
           <div className="mb-3">
             <div className="px-2 py-1.5 text-2xs font-medium text-muted-foreground uppercase tracking-wider">
               Running
             </div>
             <div className="space-y-0.5">
-              {runningTerminals.map((item) => (
-                <SidebarItem
-                  key={item.id}
-                  item={item}
-                  isActiveTab={item.terminalId === tabs.find((t) => t.id === activeTabId)?.terminalId}
-                  showProjectBadge={settings.sidebar?.showProjectBadges}
-                  onClick={() => handleItemClick(item)}
-                />
-              ))}
+              {runningSessions.map((item) => {
+                const activeTab = tabs.find((t) => t.id === activeTabId)
+                const isActive = item.runningTerminalId === activeTab?.terminalId
+
+                return (
+                  <SidebarItem
+                    key={item.id}
+                    item={item}
+                    isActiveTab={isActive}
+                    showProjectBadge={settings.sidebar?.showProjectBadges}
+                    onClick={() => handleItemClick(item)}
+                  />
+                )
+              })}
             </div>
           </div>
         )}
 
         {/* Recent items */}
         <div>
-          {settings.sidebar?.sortMode === 'hybrid' && runningTerminals.length > 0 && otherItems.length > 0 && (
+          {settings.sidebar?.sortMode === 'hybrid' && runningSessions.length > 0 && otherItems.length > 0 && (
             <div className="px-2 py-1.5 text-2xs font-medium text-muted-foreground uppercase tracking-wider">
               Recent
             </div>
           )}
           <div className="space-y-0.5">
-            {otherItems.length === 0 && runningTerminals.length === 0 ? (
+            {otherItems.length === 0 && runningSessions.length === 0 ? (
               <div className="px-2 py-8 text-center text-sm text-muted-foreground">
                 No sessions yet
               </div>
             ) : (
-              otherItems.map((item) => (
-                <SidebarItem
-                  key={item.id}
-                  item={item}
-                  isActiveTab={item.terminalId === tabs.find((t) => t.id === activeTabId)?.terminalId}
-                  showProjectBadge={settings.sidebar?.showProjectBadges}
-                  onClick={() => handleItemClick(item)}
-                />
-              ))
+              otherItems.map((item) => {
+                const activeTab = tabs.find((t) => t.id === activeTabId)
+                const isActive = item.isRunning
+                  ? item.runningTerminalId === activeTab?.terminalId
+                  : item.sessionId === activeTab?.resumeSessionId
+
+                return (
+                  <SidebarItem
+                    key={item.id}
+                    item={item}
+                    isActiveTab={isActive}
+                    showProjectBadge={settings.sidebar?.showProjectBadges}
+                    onClick={() => handleItemClick(item)}
+                  />
+                )
+              })
             )}
           </div>
         </div>
@@ -356,7 +349,7 @@ function SidebarItem({
   showProjectBadge,
   onClick,
 }: {
-  item: UnifiedItem
+  item: SessionItem
   isActiveTab?: boolean
   showProjectBadge?: boolean
   onClick: () => void
@@ -373,15 +366,11 @@ function SidebarItem({
     >
       {/* Status indicator */}
       <div className="flex-shrink-0">
-        {item.type === 'terminal' ? (
-          item.isRunning ? (
-            <div className="relative">
-              <Circle className="h-2 w-2 fill-success text-success" />
-              <div className="absolute inset-0 h-2 w-2 rounded-full bg-success animate-pulse-subtle" />
-            </div>
-          ) : (
-            <Circle className="h-2 w-2 text-muted-foreground/40" />
-          )
+        {item.isRunning ? (
+          <div className="relative">
+            <Play className="h-2.5 w-2.5 fill-success text-success" />
+            <div className="absolute inset-0 h-2.5 w-2.5 rounded-full bg-success/30 animate-pulse-subtle" />
+          </div>
         ) : (
           <div
             className="h-2 w-2 rounded-sm"
@@ -399,9 +388,6 @@ function SidebarItem({
           )}>
             {item.title}
           </span>
-          {item.type === 'terminal' && item.isRunning && (
-            <Play className="h-2.5 w-2.5 text-success flex-shrink-0" />
-          )}
         </div>
         {item.subtitle && showProjectBadge && (
           <div className="text-2xs text-muted-foreground truncate">
