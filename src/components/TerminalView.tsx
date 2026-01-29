@@ -116,17 +116,21 @@ export default function TerminalView({ tabId, hidden }: { tabId: string; hidden?
       if (event.ctrlKey && event.shiftKey && event.key === 'C' && event.type === 'keydown') {
         const selection = term.getSelection()
         if (selection) {
-          navigator.clipboard.writeText(selection)
+          void navigator.clipboard.writeText(selection).catch(() => {
+            // Ignore clipboard errors (e.g., permission denied)
+          })
         }
         return false // Prevent default
       }
       // Ctrl+Shift+V to paste
       if (event.ctrlKey && event.shiftKey && event.key === 'V' && event.type === 'keydown') {
-        navigator.clipboard.readText().then((text) => {
+        void navigator.clipboard.readText().then((text) => {
           const terminalId = terminalIdRef.current
           if (terminalId && text) {
             ws.send({ type: 'terminal.input', terminalId, data: text })
           }
+        }).catch(() => {
+          // Ignore clipboard errors (e.g., permission denied)
         })
         return false // Prevent default
       }
