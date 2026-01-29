@@ -182,17 +182,21 @@ describe('SettingsView Component', () => {
       expect(screen.getByText('10,000')).toBeInTheDocument()
     })
 
-    it('displays current font family value', () => {
+    it('displays current font family value in dropdown', () => {
       const store = createTestStore({
         settings: {
           ...defaultSettings,
-          terminal: { ...defaultSettings.terminal, fontFamily: 'Monaco' },
+          terminal: { ...defaultSettings.terminal, fontFamily: 'JetBrains Mono' },
         },
       })
       renderWithStore(store)
 
-      const fontInput = screen.getByDisplayValue('Monaco')
-      expect(fontInput).toBeInTheDocument()
+      // Font family is now a dropdown
+      const selects = screen.getAllByRole('combobox')
+      const fontFamilySelect = selects.find((select) => {
+        return select.querySelector('option[value="JetBrains Mono"]') !== null
+      })!
+      expect(fontFamilySelect).toHaveValue('JetBrains Mono')
     })
 
     it('displays sidebar sort mode value', () => {
@@ -621,22 +625,44 @@ describe('SettingsView Component', () => {
       expect(store.getState().settings.settings.terminal.scrollback).toBe(15000)
     })
 
-    it('updates font family input', async () => {
+    it('updates font family from dropdown', async () => {
       const store = createTestStore()
       renderWithStore(store)
 
-      const fontInput = screen.getByDisplayValue(defaultSettings.terminal.fontFamily)
-      fireEvent.change(fontInput, { target: { value: 'Consolas' } })
+      // Font family is now a dropdown, find it by looking for the select with font options
+      const selects = screen.getAllByRole('combobox')
+      const fontFamilySelect = selects.find((select) => {
+        return select.querySelector('option[value="JetBrains Mono"]') !== null
+      })!
+      expect(fontFamilySelect).toBeDefined()
 
-      expect(store.getState().settings.settings.terminal.fontFamily).toBe('Consolas')
+      fireEvent.change(fontFamilySelect, { target: { value: 'Cascadia Code' } })
+
+      expect(store.getState().settings.settings.terminal.fontFamily).toBe('Cascadia Code')
 
       await act(async () => {
         vi.advanceTimersByTime(500)
       })
 
       expect(api.patch).toHaveBeenCalledWith('/api/settings', {
-        terminal: { fontFamily: 'Consolas' },
+        terminal: { fontFamily: 'Cascadia Code' },
       })
+    })
+
+    it('displays current font family in dropdown', () => {
+      const store = createTestStore({
+        settings: {
+          ...defaultSettings,
+          terminal: { ...defaultSettings.terminal, fontFamily: 'Fira Code' },
+        },
+      })
+      renderWithStore(store)
+
+      const selects = screen.getAllByRole('combobox')
+      const fontFamilySelect = selects.find((select) => {
+        return select.querySelector('option[value="JetBrains Mono"]') !== null
+      })!
+      expect(fontFamilySelect).toHaveValue('Fira Code')
     })
 
     it('updates auto-kill idle minutes slider', () => {
