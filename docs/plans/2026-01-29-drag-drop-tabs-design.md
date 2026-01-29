@@ -130,6 +130,10 @@ Opacity 0.5 to indicate original position.
 
 No changes required - existing `persistMiddleware` serializes `tabs` array order to localStorage.
 
+## Integration Notes
+
+**closeTab Thunk**: The `closeTab` action is now an async thunk that dispatches both `removeTab` and `removeLayout` (for pane cleanup). The TabBar already uses this correctly - no changes needed for close behavior.
+
 ## Testing Strategy
 
 ### Unit Tests (tabsSlice.test.ts)
