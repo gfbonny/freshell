@@ -86,6 +86,8 @@ vi.mock('lucide-react', () => ({
   RefreshCw: ({ className }: { className?: string }) => <svg data-testid="refresh-icon" className={className} />,
   Sparkles: ({ className }: { className?: string }) => <svg data-testid="sparkles-icon" className={className} />,
   ExternalLink: ({ className }: { className?: string }) => <svg data-testid="external-icon" className={className} />,
+  ChevronDown: ({ className }: { className?: string }) => <svg data-testid="chevron-down-icon" className={className} />,
+  MessageSquare: ({ className }: { className?: string }) => <svg data-testid="message-square-icon" className={className} />,
 }))
 
 // Now import the components and store slices after mocks are set up
@@ -99,6 +101,7 @@ import tabsReducer, { TabsState } from '@/store/tabsSlice'
 import settingsReducer, { defaultSettings, SettingsState } from '@/store/settingsSlice'
 import sessionsReducer, { SessionsState } from '@/store/sessionsSlice'
 import connectionReducer from '@/store/connectionSlice'
+import claudeReducer from '@/store/claudeSlice'
 import type { Tab, AppSettings, ProjectGroup, BackgroundTerminal } from '@/store/types'
 
 // Import the mocked api to get access to the mocks
@@ -122,6 +125,7 @@ function createTestStore(state: TestStoreState = {}) {
       settings: settingsReducer,
       sessions: sessionsReducer,
       connection: connectionReducer,
+      claude: claudeReducer,
     },
     middleware: (getDefault) =>
       getDefault({

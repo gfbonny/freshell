@@ -1,9 +1,10 @@
-import { X, Plus, Circle } from 'lucide-react'
+import { X, Plus, Circle, Terminal, MessageSquare, ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { addTab, removeTab, setActiveTab, updateTab } from '@/store/tabsSlice'
+import { createClaudeSession } from '@/store/claudeSlice'
 import { getWsClient } from '@/lib/ws-client'
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useRef, useEffect } from 'react'
 
 function StatusIndicator({ status }: { status: string }) {
   if (status === 'running') {
@@ -30,6 +31,65 @@ export default function TabBar() {
 
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
+  const [showNewMenu, setShowNewMenu] = useState(false)
+  const [showPromptDialog, setShowPromptDialog] = useState(false)
+  const [claudePrompt, setClaudePrompt] = useState('')
+  const menuRef = useRef<HTMLDivElement>(null)
+  const promptInputRef = useRef<HTMLInputElement>(null)
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setShowNewMenu(false)
+      }
+    }
+    if (showNewMenu) {
+      document.addEventListener('mousedown', handleClickOutside)
+      return () => document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [showNewMenu])
+
+  // Focus prompt input when dialog opens
+  useEffect(() => {
+    if (showPromptDialog && promptInputRef.current) {
+      promptInputRef.current.focus()
+    }
+  }, [showPromptDialog])
+
+  const handleCreateClaudeSession = () => {
+    if (!claudePrompt.trim()) return
+
+    const requestId = `claude-${Date.now()}`
+
+    // Create Claude session in Redux
+    dispatch(
+      createClaudeSession({
+        sessionId: requestId,
+        prompt: claudePrompt.trim(),
+      })
+    )
+
+    // Create tab linked to Claude session
+    dispatch(
+      addTab({
+        title: claudePrompt.trim().slice(0, 30) + (claudePrompt.trim().length > 30 ? '...' : ''),
+        mode: 'claude',
+        claudeSessionId: requestId,
+        status: 'creating',
+      })
+    )
+
+    // Send WebSocket request to create the Claude session on server
+    ws.send({
+      type: 'claude.create',
+      requestId,
+      prompt: claudePrompt.trim(),
+    })
+
+    setClaudePrompt('')
+    setShowPromptDialog(false)
+  }
 
   if (tabs.length === 0) return null
 
@@ -102,13 +162,83 @@ export default function TabBar() {
         })}
       </div>
 
-      <button
-        className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-        title="New tab"
-        onClick={() => dispatch(addTab({ mode: 'shell' }))}
-      >
-        <Plus className="h-3.5 w-3.5" />
-      </button>
+      <div className="relative" ref={menuRef}>
+        <button
+          className="flex items-center gap-0.5 p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+          title="New tab"
+          onClick={() => setShowNewMenu(!showNewMenu)}
+        >
+          <Plus className="h-3.5 w-3.5" />
+          <ChevronDown className="h-2.5 w-2.5" />
+        </button>
+
+        {showNewMenu && (
+          <div className="absolute right-0 top-full mt-1 bg-popover border border-border rounded-md shadow-lg z-50 min-w-[140px] py-1">
+            <button
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left hover:bg-muted/50 transition-colors"
+              onClick={() => {
+                dispatch(addTab({ mode: 'shell' }))
+                setShowNewMenu(false)
+              }}
+            >
+              <Terminal className="h-3.5 w-3.5" />
+              <span>Shell</span>
+            </button>
+            <button
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left hover:bg-muted/50 transition-colors"
+              onClick={() => {
+                setShowNewMenu(false)
+                setShowPromptDialog(true)
+              }}
+            >
+              <MessageSquare className="h-3.5 w-3.5" />
+              <span>Claude</span>
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Claude Prompt Dialog */}
+      {showPromptDialog && (
+        <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center">
+          <div className="bg-popover border border-border rounded-lg shadow-lg p-4 w-full max-w-md">
+            <h3 className="text-lg font-medium mb-3">New Claude Session</h3>
+            <input
+              ref={promptInputRef}
+              type="text"
+              className="w-full px-3 py-2 bg-background border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              placeholder="Enter your prompt..."
+              value={claudePrompt}
+              onChange={(e) => setClaudePrompt(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleCreateClaudeSession()
+                if (e.key === 'Escape') {
+                  setShowPromptDialog(false)
+                  setClaudePrompt('')
+                }
+              }}
+            />
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                className="px-3 py-1.5 text-sm rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                onClick={() => {
+                  setShowPromptDialog(false)
+                  setClaudePrompt('')
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className="px-3 py-1.5 text-sm rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+                disabled={!claudePrompt.trim()}
+                onClick={handleCreateClaudeSession}
+              >
+                Create
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

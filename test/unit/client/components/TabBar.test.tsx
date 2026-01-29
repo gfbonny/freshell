@@ -4,6 +4,7 @@ import { configureStore } from '@reduxjs/toolkit'
 import { Provider } from 'react-redux'
 import TabBar from '@/components/TabBar'
 import tabsReducer, { TabsState } from '@/store/tabsSlice'
+import claudeReducer from '@/store/claudeSlice'
 import type { Tab } from '@/store/types'
 
 // Mock the ws-client module
@@ -25,6 +26,15 @@ vi.mock('lucide-react', () => ({
   Circle: ({ className }: { className?: string }) => (
     <svg data-testid="circle-icon" className={className} />
   ),
+  ChevronDown: ({ className }: { className?: string }) => (
+    <svg data-testid="chevron-down-icon" className={className} />
+  ),
+  Terminal: ({ className }: { className?: string }) => (
+    <svg data-testid="terminal-icon" className={className} />
+  ),
+  MessageSquare: ({ className }: { className?: string }) => (
+    <svg data-testid="message-square-icon" className={className} />
+  ),
 }))
 
 function createTab(overrides: Partial<Tab> = {}): Tab {
@@ -44,12 +54,16 @@ function createStore(initialState: Partial<TabsState> = {}) {
   return configureStore({
     reducer: {
       tabs: tabsReducer,
+      claude: claudeReducer,
     },
     preloadedState: {
       tabs: {
         tabs: [],
         activeTabId: null,
         ...initialState,
+      },
+      claude: {
+        sessions: {},
       },
     },
   })
@@ -197,7 +211,7 @@ describe('TabBar', () => {
       expect(store.getState().tabs.activeTabId).toBe('tab-2')
     })
 
-    it('add button creates new tab', () => {
+    it('add button opens dropdown menu and Shell option creates new tab', () => {
       const tab1 = createTab({ id: 'tab-1', title: 'Terminal 1' })
 
       const store = createStore({
@@ -207,8 +221,16 @@ describe('TabBar', () => {
 
       renderWithStore(<TabBar />, store)
 
+      // Click the dropdown button
       const addButton = screen.getByTitle('New tab')
       fireEvent.click(addButton)
+
+      // Dropdown menu should appear with Shell option
+      const shellOption = screen.getByText('Shell')
+      expect(shellOption).toBeInTheDocument()
+
+      // Click Shell option
+      fireEvent.click(shellOption)
 
       // Check that a new tab was added
       const state = store.getState().tabs
