@@ -5,3 +5,4 @@ dist
 nul
 *.txt
 *.log
+.worktrees
