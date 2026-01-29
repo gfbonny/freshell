@@ -71,6 +71,16 @@ export interface TerminalOverride {
 
 export type SidebarSortMode = 'recency' | 'activity' | 'project' | 'hybrid'
 
+export type TerminalTheme =
+  | 'auto'           // Follow app theme (dark/light)
+  | 'dracula'
+  | 'one-dark'
+  | 'solarized-dark'
+  | 'github-dark'
+  | 'one-light'
+  | 'solarized-light'
+  | 'github-light'
+
 export interface AppSettings {
   theme: 'system' | 'light' | 'dark'
   uiScale: number // 1 = 100%, 1.5 = 150%, 2 = 200%
@@ -80,7 +90,7 @@ export interface AppSettings {
     lineHeight: number
     cursorBlink: boolean
     scrollback: number
-    theme: 'default' | 'dark' | 'light'
+    theme: TerminalTheme
   }
   defaultCwd?: string
   safety: {

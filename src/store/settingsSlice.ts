@@ -5,12 +5,12 @@ export const defaultSettings: AppSettings = {
   theme: 'system',
   uiScale: 1.25, // 125% default for comfortable desktop viewing
   terminal: {
-    fontSize: 12,
+    fontSize: 16,
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
     lineHeight: 1,
     cursorBlink: true,
     scrollback: 5000,
-    theme: 'default',
+    theme: 'auto',
   },
   defaultCwd: undefined,
   safety: {

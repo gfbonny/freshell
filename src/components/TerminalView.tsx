@@ -2,40 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { updateTab } from '@/store/tabsSlice'
 import { getWsClient } from '@/lib/ws-client'
+import { getTerminalTheme } from '@/lib/terminal-themes'
 import { nanoid } from 'nanoid'
 import { cn } from '@/lib/utils'
 import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
 import { Loader2 } from 'lucide-react'
 import 'xterm/css/xterm.css'
-
-function getSystemPrefersDark(): boolean {
-  return window.matchMedia?.('(prefers-color-scheme: dark)')?.matches ?? false
-}
-
-function getXtermTheme(appTheme: 'dark' | 'light' | 'system') {
-  // Always follow app theme
-  const isDark = appTheme === 'dark' ? true : appTheme === 'light' ? false : getSystemPrefersDark()
-
-  if (!isDark) {
-    return {
-      background: '#ffffff',
-      foreground: '#1a1a2e',
-      cursor: '#1a1a2e',
-      cursorAccent: '#ffffff',
-      selectionBackground: 'rgba(0, 0, 0, 0.1)',
-      selectionForeground: '#1a1a2e',
-    }
-  }
-  return {
-    background: '#09090b',
-    foreground: '#fafafa',
-    cursor: '#fafafa',
-    cursorAccent: '#09090b',
-    selectionBackground: 'rgba(255, 255, 255, 0.15)',
-    selectionForeground: '#fafafa',
-  }
-}
 
 export default function TerminalView({ tabId, hidden }: { tabId: string; hidden?: boolean }) {
   const dispatch = useAppDispatch()
@@ -85,7 +58,7 @@ export default function TerminalView({ tabId, hidden }: { tabId: string; hidden?
       fontFamily: settings.terminal.fontFamily,
       lineHeight: settings.terminal.lineHeight,
       scrollback: settings.terminal.scrollback,
-      theme: getXtermTheme(settings.theme),
+      theme: getTerminalTheme(settings.terminal.theme, settings.theme),
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
@@ -175,7 +148,7 @@ export default function TerminalView({ tabId, hidden }: { tabId: string; hidden?
     term.options.fontFamily = settings.terminal.fontFamily
     term.options.lineHeight = settings.terminal.lineHeight
     term.options.scrollback = settings.terminal.scrollback
-    term.options.theme = getXtermTheme(settings.theme)
+    term.options.theme = getTerminalTheme(settings.terminal.theme, settings.theme)
     // Fit after font changes
     if (!hidden) fitRef.current?.fit()
   }, [settings, hidden])

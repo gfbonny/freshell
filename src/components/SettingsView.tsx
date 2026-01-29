@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { updateSettingsLocal, markSaved } from '@/store/settingsSlice'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
-import type { SidebarSortMode } from '@/store/types'
+import { terminalThemes, darkThemes, lightThemes } from '@/lib/terminal-themes'
+import type { SidebarSortMode, TerminalTheme } from '@/store/types'
 
 export default function SettingsView() {
   const dispatch = useAppDispatch()
@@ -11,6 +12,7 @@ export default function SettingsView() {
   const lastSavedAt = useAppSelector((s) => s.settings.lastSavedAt)
 
   const pendingRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [draggingScale, setDraggingScale] = useState<number | null>(null)
 
   const patch = useMemo(
     () => async (updates: any) => {
@@ -76,15 +78,18 @@ export default function SettingsView() {
                   min={0.75}
                   max={2}
                   step={0.125}
-                  value={settings.uiScale ?? 1.25}
-                  onChange={(e) => {
-                    const v = Number(e.target.value)
-                    dispatch(updateSettingsLocal({ uiScale: v }))
-                    scheduleSave({ uiScale: v })
+                  value={draggingScale ?? settings.uiScale ?? 1.25}
+                  onChange={(e) => setDraggingScale(Number(e.target.value))}
+                  onPointerUp={() => {
+                    if (draggingScale !== null) {
+                      dispatch(updateSettingsLocal({ uiScale: draggingScale }))
+                      scheduleSave({ uiScale: draggingScale })
+                      setDraggingScale(null)
+                    }
                   }}
                   className="w-32 h-1.5 bg-muted rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-foreground"
                 />
-                <span className="text-sm tabular-nums w-12">{Math.round((settings.uiScale ?? 1.25) * 100)}%</span>
+                <span className="text-sm tabular-nums w-12">{Math.round((draggingScale ?? settings.uiScale ?? 1.25) * 100)}%</span>
               </div>
             </SettingsRow>
 
@@ -122,6 +127,30 @@ export default function SettingsView() {
 
           {/* Terminal */}
           <SettingsSection title="Terminal" description="Font and rendering options">
+            <SettingsRow label="Color scheme">
+              <select
+                value={settings.terminal.theme}
+                onChange={(e) => {
+                  const v = e.target.value as TerminalTheme
+                  dispatch(updateSettingsLocal({ terminal: { theme: v } } as any))
+                  scheduleSave({ terminal: { theme: v } })
+                }}
+                className="h-8 px-3 text-sm bg-muted border-0 rounded-md focus:outline-none focus:ring-1 focus:ring-border"
+              >
+                <option value="auto">Auto (follow app theme)</option>
+                <optgroup label="Dark themes">
+                  {darkThemes.map((t) => (
+                    <option key={t} value={t}>{terminalThemes[t].name}</option>
+                  ))}
+                </optgroup>
+                <optgroup label="Light themes">
+                  {lightThemes.map((t) => (
+                    <option key={t} value={t}>{terminalThemes[t].name}</option>
+                  ))}
+                </optgroup>
+              </select>
+            </SettingsRow>
+
             <SettingsRow label="Font size">
               <div className="flex items-center gap-3">
                 <input
