@@ -5,6 +5,7 @@ import fs from 'fs'
 import chokidar from 'chokidar'
 import { logger } from './logger'
 import { configStore, SessionOverride } from './config-store'
+import { extractTitleFromMessage } from './title-utils'
 
 export type ClaudeSession = {
   sessionId: string
@@ -131,7 +132,8 @@ export function parseSessionContent(content: string): JsonlMeta {
           : undefined)
 
       if (typeof t === 'string' && t.trim()) {
-        title = t.trim().replace(/\s+/g, ' ').slice(0, 80)
+        // Store up to 200 chars - UI truncates visually, tooltip shows full text
+        title = extractTitleFromMessage(t, 200)
       }
     }
 

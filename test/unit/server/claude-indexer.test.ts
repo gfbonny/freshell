@@ -340,12 +340,12 @@ describe('claude-indexer cross-platform tests', () => {
       expect(meta.title).toBe('Another Title')
     })
 
-    it('should truncate long titles to 80 characters', () => {
-      const longMessage = 'A'.repeat(100)
+    it('should truncate long titles to 200 characters', () => {
+      const longMessage = 'A'.repeat(250)
       const content = `{"role": "user", "content": "${longMessage}"}\n`
       const meta = parseSessionContent(content)
-      expect(meta.title?.length).toBe(80)
-      expect(meta.title).toBe('A'.repeat(80))
+      expect(meta.title?.length).toBe(200)
+      expect(meta.title).toBe('A'.repeat(200))
     })
 
     it('should normalize whitespace in titles', () => {

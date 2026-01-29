@@ -115,7 +115,7 @@ describe('TabBar', () => {
 
       renderWithStore(<TabBar />, store)
 
-      const addButton = screen.getByTitle('New tab')
+      const addButton = screen.getByTitle('New shell tab')
       expect(addButton).toBeInTheDocument()
     })
 
@@ -211,7 +211,7 @@ describe('TabBar', () => {
       expect(store.getState().tabs.activeTabId).toBe('tab-2')
     })
 
-    it('add button opens dropdown menu and Shell option creates new tab', () => {
+    it('add button creates new shell tab', () => {
       const tab1 = createTab({ id: 'tab-1', title: 'Terminal 1' })
 
       const store = createStore({
@@ -221,16 +221,9 @@ describe('TabBar', () => {
 
       renderWithStore(<TabBar />, store)
 
-      // Click the dropdown button
-      const addButton = screen.getByTitle('New tab')
+      // Click the add button
+      const addButton = screen.getByTitle('New shell tab')
       fireEvent.click(addButton)
-
-      // Dropdown menu should appear with Shell option
-      const shellOption = screen.getByText('Shell')
-      expect(shellOption).toBeInTheDocument()
-
-      // Click Shell option
-      fireEvent.click(shellOption)
 
       // Check that a new tab was added
       const state = store.getState().tabs

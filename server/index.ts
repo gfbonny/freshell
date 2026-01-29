@@ -229,6 +229,27 @@ async function main() {
   await claudeIndexer.start()
   claudeIndexer.onUpdate((projects) => {
     wsHandler.broadcast({ type: 'sessions.updated', projects })
+
+    // Auto-update terminal titles based on session data
+    for (const project of projects) {
+      for (const session of project.sessions) {
+        if (!session.title) continue
+
+        // Find terminals that match this session
+        const matchingTerminals = registry.findClaudeTerminalsBySession(session.sessionId, session.cwd)
+        for (const term of matchingTerminals) {
+          // Only update if title is still the default "Claude"
+          if (term.title === 'Claude') {
+            registry.updateTitle(term.terminalId, session.title)
+            wsHandler.broadcast({
+              type: 'terminal.title.updated',
+              terminalId: term.terminalId,
+              title: session.title,
+            })
+          }
+        }
+      }
+    }
   })
 
   const port = Number(process.env.PORT || 3001)

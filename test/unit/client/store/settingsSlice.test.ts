@@ -29,7 +29,7 @@ describe('settingsSlice', () => {
         lineHeight: 1,
         cursorBlink: true,
         scrollback: 5000,
-        theme: 'dark',
+        theme: 'default',
       })
       expect(state.settings.defaultCwd).toBeUndefined()
       expect(state.settings.safety).toEqual({

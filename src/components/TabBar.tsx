@@ -62,7 +62,7 @@ export default function TabBar() {
                   autoFocus
                   onChange={(e) => setRenameValue(e.target.value)}
                   onBlur={() => {
-                    dispatch(updateTab({ id: tab.id, updates: { title: renameValue || tab.title } }))
+                    dispatch(updateTab({ id: tab.id, updates: { title: renameValue || tab.title, titleSetByUser: true } }))
                     setRenamingId(null)
                   }}
                   onKeyDown={(e) => {
@@ -73,7 +73,10 @@ export default function TabBar() {
                   onClick={(e) => e.stopPropagation()}
                 />
               ) : (
-                <span className={cn("whitespace-nowrap truncate text-xs", active ? "max-w-[10rem]" : "max-w-[5rem]")}>
+                <span
+                  className={cn("whitespace-nowrap truncate text-xs", active ? "max-w-[10rem]" : "max-w-[5rem]")}
+                  title={tab.title}
+                >
                   {tab.title}
                 </span>
               )}

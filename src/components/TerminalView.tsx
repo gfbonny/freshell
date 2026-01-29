@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { updateTab } from '@/store/tabsSlice'
 import { getWsClient } from '@/lib/ws-client'
@@ -6,6 +6,7 @@ import { nanoid } from 'nanoid'
 import { cn } from '@/lib/utils'
 import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
+import { Loader2 } from 'lucide-react'
 import 'xterm/css/xterm.css'
 
 function getSystemPrefersDark(): boolean {
@@ -42,6 +43,7 @@ export default function TerminalView({ tabId, hidden }: { tabId: string; hidden?
   const settings = useAppSelector((s) => s.settings.settings)
 
   const ws = useMemo(() => getWsClient(), [])
+  const [isAttaching, setIsAttaching] = useState(false)
 
   const containerRef = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
@@ -108,6 +110,29 @@ export default function TerminalView({ tabId, hidden }: { tabId: string; hidden?
       const terminalId = terminalIdRef.current
       if (!terminalId) return
       ws.send({ type: 'terminal.input', terminalId, data })
+    })
+
+    // Handle copy/paste keyboard shortcuts
+    term.attachCustomKeyEventHandler((event) => {
+      // Ctrl+Shift+C to copy
+      if (event.ctrlKey && event.shiftKey && event.key === 'C' && event.type === 'keydown') {
+        const selection = term.getSelection()
+        if (selection) {
+          navigator.clipboard.writeText(selection)
+        }
+        return false // Prevent default
+      }
+      // Ctrl+Shift+V to paste
+      if (event.ctrlKey && event.shiftKey && event.key === 'V' && event.type === 'keydown') {
+        navigator.clipboard.readText().then((text) => {
+          const terminalId = terminalIdRef.current
+          if (terminalId && text) {
+            ws.send({ type: 'terminal.input', terminalId, data: text })
+          }
+        })
+        return false // Prevent default
+      }
+      return true // Allow other keys
     })
 
     const ro = new ResizeObserver(() => {
@@ -178,6 +203,7 @@ export default function TerminalView({ tabId, hidden }: { tabId: string; hidden?
     let unsubReconnect = () => {}
 
     function attach(terminalId: string) {
+      setIsAttaching(true)
       ws.send({ type: 'terminal.attach', terminalId })
       // Send current size after attach
       ws.send({ type: 'terminal.resize', terminalId, cols: term.cols, rows: term.rows })
@@ -233,6 +259,7 @@ export default function TerminalView({ tabId, hidden }: { tabId: string; hidden?
         }
 
         if (msg.type === 'terminal.attached' && msg.terminalId && msg.terminalId === terminalId) {
+          setIsAttaching(false)
           if (msg.snapshot) {
             try {
               term.clear()
@@ -254,7 +281,15 @@ export default function TerminalView({ tabId, hidden }: { tabId: string; hidden?
           )
         }
 
+        // Auto-update title from Claude session (only if user hasn't manually set it)
+        if (msg.type === 'terminal.title.updated' && msg.terminalId && msg.terminalId === terminalId) {
+          if (!tab.titleSetByUser && msg.title) {
+            dispatch(updateTab({ id: tab.id, updates: { title: msg.title } }))
+          }
+        }
+
         if (msg.type === 'error' && msg.requestId && msg.requestId === requestIdRef.current) {
+          setIsAttaching(false)
           dispatch(updateTab({ id: tab.id, updates: { status: 'error' } }))
           term.writeln(`\r\n[Error] ${msg.message || msg.code || 'Unknown error'}\r\n`)
         }
@@ -316,9 +351,21 @@ export default function TerminalView({ tabId, hidden }: { tabId: string; hidden?
 
   if (!tab) return null
 
+  const showSpinner = tab.status === 'creating' || isAttaching
+
   return (
-    <div className={cn('h-full w-full', hidden ? 'hidden' : '')}>
+    <div className={cn('h-full w-full relative', hidden ? 'hidden' : '')}>
       <div ref={containerRef} className="h-full w-full" />
+      {showSpinner && (
+        <div className="absolute inset-0 flex items-center justify-center bg-background/80">
+          <div className="flex flex-col items-center gap-3">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            <span className="text-sm text-muted-foreground">
+              {tab.status === 'creating' ? 'Starting terminal...' : 'Reconnecting...'}
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -979,9 +979,19 @@ describe('buildSpawnSpec Unix paths', () => {
 describe('TerminalRegistry', () => {
   let registry: TerminalRegistry
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetAllMocks()
     vi.mocked(fs.existsSync).mockReturnValue(true)
+    // Re-setup node-pty mock after resetAllMocks clears implementations
+    const pty = await import('node-pty')
+    vi.mocked(pty.spawn).mockImplementation(() => ({
+      onData: vi.fn(),
+      onExit: vi.fn(),
+      write: vi.fn(),
+      resize: vi.fn(),
+      kill: vi.fn(),
+      pid: 12345,
+    }) as any)
     // Create registry with a small maxTerminals limit for testing
     registry = new TerminalRegistry(undefined, 10)
   })
