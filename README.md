@@ -7,31 +7,30 @@
 <h1 align="center">🐚freshell</h1>
 
 <p align="center">
-  A local web-based terminal manager with Claude Code session indexing
+  Claudes Code, terminals, and other CLI friends in your browser. Speak with the dead, jump to your phone, and lots more
 </p>
 
 <p align="center">
-  <strong>Run multiple terminals in tabs | Detach & reattach sessions | Browse Claude Code history</strong>
+  <strong>Run multiple terminals in tabs | Detach & reattach sessions | Browse Claude Code history</strong> | What if tmux and Claude fell in love?
 </p>
 
 ---
 
 ## Features
 
-- **Multi-tab terminal sessions** — Run shell, Claude Code, or Codex in parallel tabs
+- **Multi-tab terminal sessions** — Run shell, Claude Code, and Codex in parallel tabs
 - **Detach/reattach** — Background terminals persist across browser sessions
-- **Claude session indexer** — Automatically discovers and indexes sessions from `~/.claude`
 - **Search & browse** — Filter Claude sessions by project, date, or content
-- **User overrides** — Custom titles, summaries, and colors per session
-- **AI summaries** — Optional Gemini-powered summaries for Claude sessions
-- **Dark/light themes** — System-aware theming with manual override
+- **Speak with the dead** — Invoke the spirits of ancient Claudes and ask them what they were thinking
+- **Keep it tidy** — AI (or your pedantic self) names, summarizes, and organizes
+- **Dark/light themes** — Are we savages?
 - **Keyboard-driven** — tmux-style prefix shortcuts for power users
 
 ## Quick Start
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/freshell.git
+git clone https://github.com/danshapiro/freshell.git
 cd freshell
 
 # Install dependencies
