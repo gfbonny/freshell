@@ -172,7 +172,7 @@ export class ClaudeSessionIndexer {
     await this.refresh()
 
     const projectsDir = path.join(this.claudeHome, 'projects')
-    const sessionsGlob = path.join(projectsDir, '**', 'sessions', '*.jsonl')
+    const sessionsGlob = path.join(projectsDir, '**', '*.jsonl')
     logger.info({ sessionsGlob }, 'Starting Claude sessions watcher')
 
     this.watcher = chokidar.watch(sessionsGlob, {
@@ -228,10 +228,19 @@ export class ClaudeSessionIndexer {
     }
 
     for (const projectDir of projectDirs) {
-      const sessionsDir = path.join(projectDir, 'sessions')
+      // Check if this is a directory (skip files at project root level)
+      let dirStat: any
+      try {
+        dirStat = await fsp.stat(projectDir)
+        if (!dirStat.isDirectory()) continue
+      } catch {
+        continue
+      }
+
+      // Look for .jsonl files directly in the project directory
       let files: string[] = []
       try {
-        files = (await fsp.readdir(sessionsDir)).filter((f) => f.endsWith('.jsonl'))
+        files = (await fsp.readdir(projectDir)).filter((f) => f.endsWith('.jsonl'))
       } catch {
         continue
       }
@@ -240,7 +249,7 @@ export class ClaudeSessionIndexer {
 
       const sessions: ClaudeSession[] = []
       for (const file of files) {
-        const full = path.join(sessionsDir, file)
+        const full = path.join(projectDir, file)
         let stat: any
         try {
           stat = await fsp.stat(full)
