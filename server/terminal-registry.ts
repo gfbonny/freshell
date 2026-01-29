@@ -3,6 +3,7 @@ import type WebSocket from 'ws'
 import * as pty from 'node-pty'
 import os from 'os'
 import path from 'path'
+import fs from 'fs'
 import { logger } from './logger'
 import type { AppSettings } from './config-store'
 
@@ -87,26 +88,52 @@ function resolveShell(requested: ShellType): ShellType {
 
 /**
  * Get the system shell for macOS/Linux.
- * Priority: $SHELL → platform fallback → /bin/sh
+ * Priority: $SHELL (if exists) → platform fallback (if exists) → /bin/sh
  */
-function getSystemShell(): string {
+export function getSystemShell(): string {
   const shell = process.env.SHELL
-  if (shell) return shell
+  // Check if SHELL is set, non-empty, non-whitespace, and exists
+  if (shell && shell.trim() && fs.existsSync(shell)) {
+    return shell
+  }
 
   if (process.platform === 'darwin') {
-    // macOS: prefer zsh (default since Catalina)
-    return '/bin/zsh'
+    // macOS: prefer zsh (default since Catalina), then bash, then sh
+    if (fs.existsSync('/bin/zsh')) return '/bin/zsh'
+    if (fs.existsSync('/bin/bash')) return '/bin/bash'
+  } else {
+    // Linux: prefer bash, then sh
+    if (fs.existsSync('/bin/bash')) return '/bin/bash'
   }
-  // Linux: prefer bash
-  return '/bin/bash'
+
+  // Ultimate fallback - /bin/sh should always exist on Unix systems
+  return '/bin/sh'
 }
 
-function isLinuxPath(p: string | undefined): boolean {
+export function isLinuxPath(p: unknown): boolean {
   // Detect Linux/WSL paths that won't work on native Windows
   return typeof p === 'string' && p.startsWith('/') && !p.startsWith('//')
 }
 
-function buildSpawnSpec(mode: TerminalMode, cwd: string | undefined, shell: ShellType, resumeSessionId?: string) {
+/**
+ * Escape special characters for cmd.exe shell commands.
+ * cmd.exe uses ^ as its escape character for most special characters.
+ * The % character is special and must be doubled (%%).
+ */
+export function escapeCmdExe(s: string): string {
+  // Escape ^ first (the escape char itself), then other special chars
+  // Order matters: ^ must be escaped before we add more ^
+  return s
+    .replace(/\^/g, '^^')
+    .replace(/&/g, '^&')
+    .replace(/\|/g, '^|')
+    .replace(/</g, '^<')
+    .replace(/>/g, '^>')
+    .replace(/%/g, '%%')
+    .replace(/"/g, '\\"')
+}
+
+export function buildSpawnSpec(mode: TerminalMode, cwd: string | undefined, shell: ShellType, resumeSessionId?: string) {
   const env = {
     ...process.env,
     TERM: process.env.TERM || 'xterm-256color',
