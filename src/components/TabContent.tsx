@@ -26,6 +26,7 @@ export default function TabContent({ tabId, hidden }: TabContentProps) {
     shell: tab.shell,
     resumeSessionId: tab.resumeSessionId,
     initialCwd: tab.initialCwd,
+    terminalId: tab.terminalId,
   }
 
   // Use PaneLayout for all terminal-based tabs

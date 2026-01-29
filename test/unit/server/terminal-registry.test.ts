@@ -1162,76 +1162,28 @@ describe('TerminalRegistry', () => {
     })
   })
 
-  describe('findClaudeTerminalsBySession() cwd match', () => {
-    it('finds terminal by matching cwd when resumeSessionId does not match', () => {
-      const record = registry.create({
+  describe('findClaudeTerminalsBySession() ignores cwd parameter', () => {
+    it('does not match by cwd, only by resumeSessionId', () => {
+      registry.create({
         mode: 'claude',
         cwd: '/home/user/project',
         resumeSessionId: 'session-different',
       })
 
+      // cwd matches but sessionId doesn't - should not find terminal
       const found = registry.findClaudeTerminalsBySession('session-nonexistent', '/home/user/project')
-
-      expect(found).toHaveLength(1)
-      expect(found[0].terminalId).toBe(record.terminalId)
-    })
-
-    it('matches cwd case-insensitively', () => {
-      registry.create({
-        mode: 'claude',
-        cwd: '/Home/User/Project',
-        resumeSessionId: 'session-other',
-      })
-
-      const found = registry.findClaudeTerminalsBySession('session-different', '/home/user/project')
-
-      expect(found).toHaveLength(1)
-    })
-
-    it('matches cwd with trailing slash differences', () => {
-      registry.create({
-        mode: 'claude',
-        cwd: '/home/user/project/',
-        resumeSessionId: 'session-other',
-      })
-
-      const found = registry.findClaudeTerminalsBySession('session-different', '/home/user/project')
-
-      expect(found).toHaveLength(1)
-    })
-
-    it('normalizes backslashes for Windows path comparison', () => {
-      registry.create({
-        mode: 'claude',
-        cwd: 'C:\\Users\\dan\\project',
-        resumeSessionId: 'session-other',
-      })
-
-      const found = registry.findClaudeTerminalsBySession('session-different', 'C:/Users/dan/project')
-
-      expect(found).toHaveLength(1)
-    })
-
-    it('does not match when cwd is different', () => {
-      registry.create({
-        mode: 'claude',
-        cwd: '/home/user/project-a',
-        resumeSessionId: 'session-other',
-      })
-
-      const found = registry.findClaudeTerminalsBySession('session-different', '/home/user/project-b')
 
       expect(found).toHaveLength(0)
     })
 
-    it('finds terminal by exact resumeSessionId even when cwd differs', () => {
+    it('finds terminal by exact resumeSessionId ignoring cwd', () => {
       const record = registry.create({
         mode: 'claude',
         cwd: '/home/user/project-a',
         resumeSessionId: 'session-target',
       })
 
-      // Searching with matching sessionId but different cwd
+      // cwd differs but sessionId matches - should find terminal
       const found = registry.findClaudeTerminalsBySession('session-target', '/home/user/different')
 
       expect(found).toHaveLength(1)
@@ -1240,7 +1192,7 @@ describe('TerminalRegistry', () => {
   })
 
   describe('findClaudeTerminalsBySession() ignores shell mode', () => {
-    it('does not return shell-mode terminals even with matching cwd', () => {
+    it('does not return shell-mode terminals even with matching resumeSessionId', () => {
       registry.create({
         mode: 'shell',
         cwd: '/home/user/project',

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Terminal, History, Settings, LayoutGrid, Search, Plus, Play } from 'lucide-react'
+import { Terminal, History, Settings, LayoutGrid, Search, Play } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { addTab, setActiveTab } from '@/store/tabsSlice'
@@ -218,18 +218,8 @@ export default function Sidebar({
   return (
     <div className="w-72 h-full flex flex-col bg-card border-r border-border/50">
       {/* Header */}
-      <div className="px-4 py-4 flex items-center justify-between">
-        <span className="text-sm font-medium tracking-tight">Sessions</span>
-        <button
-          onClick={() => {
-            dispatch(addTab({ mode: 'shell' }))
-            onNavigate('terminal')
-          }}
-          className="p-1.5 rounded-md hover:bg-muted transition-colors"
-          title="New terminal"
-        >
-          <Plus className="h-4 w-4 text-muted-foreground" />
-        </button>
+      <div className="px-4 py-4">
+        <span className="text-sm font-medium tracking-tight">Coding Agents</span>
       </div>
 
       {/* Search */}
@@ -332,19 +322,6 @@ export default function Sidebar({
         </div>
       </div>
 
-      {/* Footer */}
-      <div className="px-3 py-3 border-t border-border/50">
-        <button
-          onClick={() => {
-            dispatch(addTab({ mode: 'shell' }))
-            onNavigate('terminal')
-          }}
-          className="w-full h-8 flex items-center justify-center gap-2 text-sm font-medium rounded-md bg-foreground text-background hover:opacity-90 transition-opacity"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          New Terminal
-        </button>
-      </div>
     </div>
   )
 }

@@ -472,30 +472,18 @@ export class TerminalRegistry {
   }
 
   /**
-   * Find claude-mode terminals that could match a session.
-   * Matches by resumeSessionId (exact) or by cwd (fuzzy).
+   * Find claude-mode terminals that match a session by exact resumeSessionId.
+   * The cwd parameter is kept for API compatibility but ignored.
    */
-  findClaudeTerminalsBySession(sessionId: string, cwd?: string): TerminalRecord[] {
+  findClaudeTerminalsBySession(sessionId: string, _cwd?: string): TerminalRecord[] {
     const results: TerminalRecord[] = []
     for (const term of this.terminals.values()) {
       if (term.mode !== 'claude') continue
-      // Exact match by resumeSessionId
       if (term.resumeSessionId === sessionId) {
-        results.push(term)
-        continue
-      }
-      // Match by cwd if session cwd matches terminal cwd
-      if (cwd && term.cwd && this.cwdMatches(term.cwd, cwd)) {
         results.push(term)
       }
     }
     return results
-  }
-
-  private cwdMatches(termCwd: string, sessionCwd: string): boolean {
-    // Normalize paths for comparison
-    const normalize = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
-    return normalize(termCwd) === normalize(sessionCwd)
   }
 
   /**

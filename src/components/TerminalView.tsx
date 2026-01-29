@@ -244,7 +244,12 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           updateContent({ status: 'exited' })
           if (tab) {
             const code = typeof msg.exitCode === 'number' ? msg.exitCode : undefined
-            dispatch(updateTab({ id: tab.id, updates: { status: 'exited', title: tab.title + (code !== undefined ? ` (exit ${code})` : '') } }))
+            // Only modify title if user hasn't manually set it
+            const updates: { status: 'exited'; title?: string } = { status: 'exited' }
+            if (!tab.titleSetByUser) {
+              updates.title = tab.title + (code !== undefined ? ` (exit ${code})` : '')
+            }
+            dispatch(updateTab({ id: tab.id, updates }))
           }
         }
 

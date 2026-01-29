@@ -62,6 +62,46 @@ describe('TabContent', () => {
     cleanup()
   })
 
+  describe('terminalId passthrough', () => {
+    it('passes terminalId to PaneLayout defaultContent when tab has terminalId', () => {
+      const store = createStore([{ id: 'tab-1', mode: 'shell', terminalId: 'existing-terminal-123' }])
+
+      render(
+        <Provider store={store}>
+          <TabContent tabId="tab-1" />
+        </Provider>
+      )
+
+      expect(mockPaneLayout).toHaveBeenCalledWith(
+        expect.objectContaining({
+          defaultContent: expect.objectContaining({
+            terminalId: 'existing-terminal-123',
+          }),
+        }),
+        expect.anything()
+      )
+    })
+
+    it('passes undefined terminalId when tab has no terminalId', () => {
+      const store = createStore([{ id: 'tab-1', mode: 'shell' }])
+
+      render(
+        <Provider store={store}>
+          <TabContent tabId="tab-1" />
+        </Provider>
+      )
+
+      expect(mockPaneLayout).toHaveBeenCalledWith(
+        expect.objectContaining({
+          defaultContent: expect.objectContaining({
+            terminalId: undefined,
+          }),
+        }),
+        expect.anything()
+      )
+    })
+  })
+
   describe('hidden prop propagation', () => {
     it('passes hidden=true to PaneLayout when hidden prop is true', () => {
       const store = createStore([{ id: 'tab-1', mode: 'shell', terminalId: 'term-1' }])
