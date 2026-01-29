@@ -30,7 +30,7 @@ export default function TabContent({ tabId, hidden }: TabContentProps) {
   // Use PaneLayout for all terminal-based tabs
   return (
     <div className={hidden ? 'hidden' : 'h-full w-full'}>
-      <PaneLayout tabId={tabId} defaultContent={defaultContent} />
+      <PaneLayout tabId={tabId} defaultContent={defaultContent} hidden={hidden} />
     </div>
   )
 }
