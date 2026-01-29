@@ -121,16 +121,8 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         }
         return false
       }
-      // Ctrl+Shift+V to paste (ignore key repeat)
-      if (event.ctrlKey && event.shiftKey && event.key === 'V' && event.type === 'keydown' && !event.repeat) {
-        void navigator.clipboard.readText().then((text) => {
-          const tid = terminalIdRef.current
-          if (tid && text) {
-            ws.send({ type: 'terminal.input', terminalId: tid, data: text })
-          }
-        }).catch(() => {})
-        return false
-      }
+      // Paste is handled by xterm.js's internal paste handler, which fires onData.
+      // We intentionally do NOT handle Ctrl+Shift+V here to avoid double-paste.
       return true
     })
 
