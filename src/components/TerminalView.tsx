@@ -114,7 +114,11 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
 
       const currentTab = tabRef.current
       if (currentTab) {
-        dispatch(updateTab({ id: currentTab.id, updates: { lastInputAt: Date.now() } }))
+        const now = Date.now()
+        dispatch(updateTab({ id: currentTab.id, updates: { lastInputAt: now } }))
+        if (currentTab.resumeSessionId) {
+          dispatch(updateSessionActivity({ sessionId: currentTab.resumeSessionId, lastInputAt: now }))
+        }
       }
     })
 
