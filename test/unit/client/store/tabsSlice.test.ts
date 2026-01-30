@@ -35,7 +35,7 @@ describe('tabsSlice', () => {
 
       expect(state.tabs).toHaveLength(1)
       const tab = state.tabs[0]
-      expect(tab.title).toBe('Terminal 1')
+      expect(tab.title).toBe('Tab 1')
       expect(tab.status).toBe('creating')
       expect(tab.mode).toBe('shell')
       expect(tab.shell).toBe('system')
@@ -50,7 +50,7 @@ describe('tabsSlice', () => {
 
       expect(state.tabs).toHaveLength(1)
       const tab = state.tabs[0]
-      expect(tab.title).toBe('Terminal 1')
+      expect(tab.title).toBe('Tab 1')
       expect(tab.status).toBe('creating')
       expect(tab.mode).toBe('shell')
       expect(tab.shell).toBe('system')
@@ -98,15 +98,15 @@ describe('tabsSlice', () => {
       expect(tab.resumeSessionId).toBe('session-123')
     })
 
-    it('increments terminal number in default title', () => {
+    it('increments tab number in default title', () => {
       let state = tabsReducer(initialState, addTab())
-      expect(state.tabs[0].title).toBe('Terminal 1')
+      expect(state.tabs[0].title).toBe('Tab 1')
 
       state = tabsReducer(state, addTab())
-      expect(state.tabs[1].title).toBe('Terminal 2')
+      expect(state.tabs[1].title).toBe('Tab 2')
 
       state = tabsReducer(state, addTab())
-      expect(state.tabs[2].title).toBe('Terminal 3')
+      expect(state.tabs[2].title).toBe('Tab 3')
     })
 
     it('sets new tab as active tab', () => {

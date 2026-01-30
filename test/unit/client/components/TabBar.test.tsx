@@ -228,7 +228,7 @@ describe('TabBar', () => {
       // Check that a new tab was added
       const state = store.getState().tabs
       expect(state.tabs).toHaveLength(2)
-      expect(state.tabs[1].title).toBe('Terminal 2')
+      expect(state.tabs[1].title).toBe('Tab 2')
       expect(state.tabs[1].mode).toBe('shell')
       // New tab should become active
       expect(state.activeTabId).toBe(state.tabs[1].id)

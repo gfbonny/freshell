@@ -80,7 +80,7 @@ export const tabsSlice = createSlice({
       const tab: Tab = {
         id,
         createRequestId: id,
-        title: payload.title || `Terminal ${state.tabs.length + 1}`,
+        title: payload.title || `Tab ${state.tabs.length + 1}`,
         description: payload.description,
         terminalId: payload.terminalId,
         claudeSessionId: payload.claudeSessionId,
