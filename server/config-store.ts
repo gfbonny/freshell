@@ -1,7 +1,7 @@
 import fsp from 'fs/promises'
 import path from 'path'
 import os from 'os'
-import { logger } from './logger'
+import { logger } from './logger.js'
 
 /**
  * Simple promise-based mutex to serialize write operations.

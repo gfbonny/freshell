@@ -1,4 +1,4 @@
-import { detectLanIps } from './bootstrap' // Must be first - ensures .env exists before dotenv loads
+import { detectLanIps } from './bootstrap.js' // Must be first - ensures .env exists before dotenv loads
 import 'dotenv/config'
 import express from 'express'
 import fs from 'fs'
@@ -6,14 +6,14 @@ import http from 'http'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import rateLimit from 'express-rate-limit'
-import { logger } from './logger'
-import { validateStartupSecurity, httpAuthMiddleware } from './auth'
-import { configStore } from './config-store'
-import { TerminalRegistry } from './terminal-registry'
-import { WsHandler } from './ws-handler'
-import { claudeIndexer } from './claude-indexer'
-import { claudeSessionManager } from './claude-session'
-import { AI_CONFIG, PROMPTS, stripAnsi } from './ai-prompts'
+import { logger } from './logger.js'
+import { validateStartupSecurity, httpAuthMiddleware } from './auth.js'
+import { configStore } from './config-store.js'
+import { TerminalRegistry } from './terminal-registry.js'
+import { WsHandler } from './ws-handler.js'
+import { claudeIndexer } from './claude-indexer.js'
+import { claudeSessionManager } from './claude-session.js'
+import { AI_CONFIG, PROMPTS, stripAnsi } from './ai-prompts.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)

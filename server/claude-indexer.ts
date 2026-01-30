@@ -3,9 +3,9 @@ import os from 'os'
 import fsp from 'fs/promises'
 import fs from 'fs'
 import chokidar from 'chokidar'
-import { logger } from './logger'
-import { configStore, SessionOverride } from './config-store'
-import { extractTitleFromMessage } from './title-utils'
+import { logger } from './logger.js'
+import { configStore, SessionOverride } from './config-store.js'
+import { extractTitleFromMessage } from './title-utils.js'
 
 const SEEN_SESSION_RETENTION_MS = Number(process.env.CLAUDE_SEEN_SESSION_RETENTION_MS || 7 * 24 * 60 * 60 * 1000)
 const MAX_SEEN_SESSION_IDS = Number(process.env.CLAUDE_SEEN_SESSION_MAX || 10_000)

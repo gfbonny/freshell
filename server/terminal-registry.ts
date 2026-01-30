@@ -4,8 +4,8 @@ import * as pty from 'node-pty'
 import os from 'os'
 import path from 'path'
 import fs from 'fs'
-import { logger } from './logger'
-import type { AppSettings } from './config-store'
+import { logger } from './logger.js'
+import type { AppSettings } from './config-store.js'
 
 const MAX_WS_BUFFERED_AMOUNT = Number(process.env.MAX_WS_BUFFERED_AMOUNT || 2 * 1024 * 1024)
 const DEFAULT_MAX_SCROLLBACK_CHARS = Number(process.env.MAX_SCROLLBACK_CHARS || 64 * 1024)

@@ -14,6 +14,7 @@ Freshell is a self-hosted, browser-accessible terminal multiplexer and session o
 - Always check for an use applicable skills
 - Always work in a worktree (in \.worktrees\)
 - Specific user instructions override ALL other instructions, including the above, and including superpowers or skills
+- Server uses NodeNext/ESM; relative imports must include `.js` extensions
 
 ## Codex Agent in CMD Instructions (Codex agents only; only when running in CMD on windows; all other agents must ignore)
 - Prefer bash/WSL over PowerShell; Windows paths map like `D:\...` -> `/mnt/d/...`.

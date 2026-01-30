@@ -1,12 +1,12 @@
 import type http from 'http'
 import WebSocket, { WebSocketServer } from 'ws'
 import { z } from 'zod'
-import { logger } from './logger'
-import { getRequiredAuthToken, isLoopbackAddress, isOriginAllowed } from './auth'
-import type { TerminalRegistry, TerminalMode } from './terminal-registry'
-import { configStore } from './config-store'
-import type { ClaudeSessionManager } from './claude-session'
-import type { ClaudeEvent } from './claude-stream-types'
+import { logger } from './logger.js'
+import { getRequiredAuthToken, isLoopbackAddress, isOriginAllowed } from './auth.js'
+import type { TerminalRegistry, TerminalMode } from './terminal-registry.js'
+import { configStore } from './config-store.js'
+import type { ClaudeSessionManager } from './claude-session.js'
+import type { ClaudeEvent } from './claude-stream-types.js'
 
 const MAX_CONNECTIONS = Number(process.env.MAX_CONNECTIONS || 10)
 const HELLO_TIMEOUT_MS = Number(process.env.HELLO_TIMEOUT_MS || 5_000)

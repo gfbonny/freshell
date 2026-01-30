@@ -1,8 +1,8 @@
 import { spawn as nodeSpawn, ChildProcess, SpawnOptionsWithoutStdio } from 'child_process'
 import { EventEmitter } from 'events'
 import { nanoid as defaultNanoid } from 'nanoid'
-import { ClaudeEvent, parseClaudeEvent } from './claude-stream-types'
-import { logger } from './logger'
+import { ClaudeEvent, parseClaudeEvent } from './claude-stream-types.js'
+import { logger } from './logger.js'
 
 // Allow dependency injection for testing
 export type SpawnFn = (
