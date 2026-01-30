@@ -111,6 +111,11 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       const tid = terminalIdRef.current
       if (!tid) return
       ws.send({ type: 'terminal.input', terminalId: tid, data })
+
+      const currentTab = tabRef.current
+      if (currentTab) {
+        dispatch(updateTab({ id: currentTab.id, updates: { lastInputAt: Date.now() } }))
+      }
     })
 
     term.attachCustomKeyEventHandler((event) => {
