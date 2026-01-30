@@ -1,6 +1,7 @@
 import fsp from 'fs/promises'
 import path from 'path'
 import os from 'os'
+import { randomUUID } from 'crypto'
 import { logger } from './logger'
 
 /**
@@ -90,7 +91,7 @@ async function ensureDir() {
 }
 
 async function atomicWriteFile(filePath: string, data: string) {
-  const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}`
+  const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${randomUUID()}`
   await fsp.writeFile(tmp, data, 'utf-8')
   await fsp.rename(tmp, filePath)
 }
