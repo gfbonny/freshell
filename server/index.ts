@@ -283,6 +283,32 @@ async function main() {
     }
   })
 
+  // One-time session association for new Claude sessions
+  // When Claude creates a session file, associate it with the oldest unassociated
+  // claude-mode terminal matching the session's cwd. This allows the terminal to
+  // resume the session after server restart.
+  claudeIndexer.onNewSession((session) => {
+    if (!session.cwd) return
+
+    const unassociated = registry.findUnassociatedClaudeTerminals(session.cwd)
+    if (unassociated.length === 0) return
+
+    // Only associate the oldest terminal (first in sorted list)
+    // This prevents incorrect associations when multiple terminals share the same cwd
+    const term = unassociated[0]
+    logger.info({ terminalId: term.terminalId, sessionId: session.sessionId }, 'Associating terminal with new Claude session')
+    registry.setResumeSessionId(term.terminalId, session.sessionId)
+    try {
+      wsHandler.broadcast({
+        type: 'terminal.session.associated',
+        terminalId: term.terminalId,
+        sessionId: session.sessionId,
+      })
+    } catch (err) {
+      logger.warn({ err, terminalId: term.terminalId }, 'Failed to broadcast session association')
+    }
+  })
+
   const port = Number(process.env.PORT || 3001)
   server.listen(port, '0.0.0.0', () => {
     logger.info({ port }, 'Server listening')
