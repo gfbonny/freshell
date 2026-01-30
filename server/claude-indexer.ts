@@ -7,6 +7,9 @@ import { logger } from './logger'
 import { configStore, SessionOverride } from './config-store'
 import { extractTitleFromMessage } from './title-utils'
 
+const SEEN_SESSION_RETENTION_MS = Number(process.env.CLAUDE_SEEN_SESSION_RETENTION_MS || 7 * 24 * 60 * 60 * 1000)
+const MAX_SEEN_SESSION_IDS = Number(process.env.CLAUDE_SEEN_SESSION_MAX || 10_000)
+
 export type ClaudeSession = {
   sessionId: string
   projectPath: string
@@ -184,10 +187,16 @@ export class ClaudeSessionIndexer {
   private projects: ProjectGroup[] = []
   private onUpdateHandlers = new Set<(projects: ProjectGroup[]) => void>()
   private refreshTimer: NodeJS.Timeout | null = null
+  private knownSessionIds = new Set<string>()
+  private seenSessionIds = new Map<string, number>()
+  private onNewSessionHandlers = new Set<(session: ClaudeSession) => void>()
+  private initialized = false
 
   async start() {
-    // Initial scan
+    // Initial scan (populates knownSessionIds with existing sessions)
     await this.refresh()
+    // Now enable onNewSession handlers for new sessions detected after startup
+    this.initialized = true
 
     const projectsDir = path.join(this.claudeHome, 'projects')
     const sessionsGlob = path.join(projectsDir, '**', '*.jsonl')
@@ -203,6 +212,7 @@ export class ClaudeSessionIndexer {
     this.watcher.on('add', schedule)
     this.watcher.on('change', schedule)
     this.watcher.on('unlink', schedule)
+    this.watcher.on('ready', schedule)
     this.watcher.on('error', (err) => logger.warn({ err }, 'Claude watcher error'))
   }
 
@@ -216,6 +226,74 @@ export class ClaudeSessionIndexer {
   onUpdate(handler: (projects: ProjectGroup[]) => void): () => void {
     this.onUpdateHandlers.add(handler)
     return () => this.onUpdateHandlers.delete(handler)
+  }
+
+  onNewSession(handler: (session: ClaudeSession) => void): () => void {
+    this.onNewSessionHandlers.add(handler)
+    return () => this.onNewSessionHandlers.delete(handler)
+  }
+
+  private pruneSeenSessions(now: number) {
+    const cutoff = now - SEEN_SESSION_RETENTION_MS
+    for (const [id, lastSeen] of this.seenSessionIds) {
+      if (lastSeen < cutoff) {
+        this.seenSessionIds.delete(id)
+      }
+    }
+
+    if (this.seenSessionIds.size <= MAX_SEEN_SESSION_IDS) return
+    const ordered = Array.from(this.seenSessionIds.entries()).sort((a, b) => a[1] - b[1])
+    const overflow = this.seenSessionIds.size - MAX_SEEN_SESSION_IDS
+    for (let i = 0; i < overflow; i++) {
+      this.seenSessionIds.delete(ordered[i][0])
+    }
+  }
+
+  private detectNewSessions(sessions: ClaudeSession[]) {
+    // Build set of current session IDs to prune stale entries (prevents memory leak)
+    const currentIds = new Set(sessions.map(s => s.sessionId))
+
+    // Prune knownSessionIds to only contain IDs that still exist
+    for (const id of this.knownSessionIds) {
+      if (!currentIds.has(id)) {
+        this.knownSessionIds.delete(id)
+      }
+    }
+
+    const now = Date.now()
+    this.pruneSeenSessions(now)
+
+    const newSessions: ClaudeSession[] = []
+    for (const session of sessions) {
+      // Skip sessions without cwd - can't associate them
+      if (!session.cwd) continue
+
+      const wasKnown = this.knownSessionIds.has(session.sessionId)
+      if (!wasKnown) this.knownSessionIds.add(session.sessionId)
+
+      const seenBefore = this.seenSessionIds.has(session.sessionId)
+      this.seenSessionIds.set(session.sessionId, now)
+
+      if (this.initialized && !wasKnown && !seenBefore) {
+        newSessions.push(session)
+      }
+    }
+
+    if (this.initialized && newSessions.length > 0) {
+      newSessions.sort((a, b) => {
+        const diff = a.updatedAt - b.updatedAt
+        return diff !== 0 ? diff : a.sessionId.localeCompare(b.sessionId)
+      })
+      for (const session of newSessions) {
+        for (const h of this.onNewSessionHandlers) {
+          try {
+            h(session)
+          } catch (err) {
+            logger.warn({ err }, 'onNewSession handler failed')
+          }
+        }
+      }
+    }
   }
 
   getProjects(): ProjectGroup[] {
@@ -306,6 +384,10 @@ export class ClaudeSessionIndexer {
 
     // Sort projects by most recent session activity.
     groups.sort((a, b) => (b.sessions[0]?.updatedAt || 0) - (a.sessions[0]?.updatedAt || 0))
+
+    // Detect newly discovered sessions
+    const allSessions = groups.flatMap(g => g.sessions)
+    this.detectNewSessions(allSessions)
 
     this.projects = groups
     this.emitUpdate()

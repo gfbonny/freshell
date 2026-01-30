@@ -230,7 +230,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
 
     // NOTE: We intentionally don't destructure terminalId here.
     // We read it from terminalIdRef.current to avoid stale closures.
-    const { createRequestId, mode, shell, initialCwd, resumeSessionId } = terminalContent
+    const { createRequestId, mode, shell, initialCwd } = terminalContent
 
     let unsub = () => {}
     let unsubReconnect = () => {}
@@ -306,6 +306,18 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           }
         }
 
+        // Handle one-time session association (when Claude creates a new session)
+        // Message type: { type: 'terminal.session.associated', terminalId: string, sessionId: string }
+        if (msg.type === 'terminal.session.associated' && msg.terminalId === tid) {
+          const sessionId = msg.sessionId as string
+          updateContent({ resumeSessionId: sessionId })
+          // Also update the tab for sidebar session matching
+          const currentTab = tabRef.current
+          if (currentTab) {
+            dispatch(updateTab({ id: currentTab.id, updates: { resumeSessionId: sessionId } }))
+          }
+        }
+
         if (msg.type === 'error' && msg.requestId === reqId) {
           setIsAttaching(false)
           updateContent({ status: 'error' })
@@ -325,7 +337,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
               mode,
               shell: shell || 'system',
               cwd: initialCwd,
-              resumeSessionId,
+              resumeSessionId: getResumeSessionIdFromRef(contentRef),
             })
           }
         }
@@ -351,7 +363,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           mode,
           shell: shell || 'system',
           cwd: initialCwd,
-          resumeSessionId,
+          resumeSessionId: getResumeSessionIdFromRef(contentRef),
         })
       }
     }

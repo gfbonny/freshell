@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import path from 'path'
 import os from 'os'
 
@@ -7,6 +7,8 @@ import {
   looksLikePath,
   defaultClaudeHome,
   parseSessionContent,
+  ClaudeSessionIndexer,
+  ClaudeSession,
 } from '../../../server/claude-indexer'
 
 describe('claude-indexer cross-platform tests', () => {
@@ -454,5 +456,147 @@ describe('claude-indexer cross-platform tests', () => {
       expect(meta.cwd).toBe('/home/user/project')
       expect(meta.title).toBe('Fix the login bug')
     })
+  })
+})
+
+describe('ClaudeSessionIndexer new session detection', () => {
+  it('should call onNewSession handler only for newly discovered sessions after initialization', async () => {
+    const indexer = new ClaudeSessionIndexer()
+    const newSessionHandler = vi.fn()
+
+    indexer.onNewSession(newSessionHandler)
+
+    // Simulate indexer has been initialized (start() completed)
+    indexer['initialized'] = true
+
+    // Add session A to known set (simulating it was seen before)
+    indexer['knownSessionIds'].add('session-a')
+
+    // Simulate detecting sessions A and B
+    const sessions: ClaudeSession[] = [
+      { sessionId: 'session-a', projectPath: '/proj', updatedAt: Date.now(), cwd: '/proj' },
+      { sessionId: 'session-b', projectPath: '/proj', updatedAt: Date.now(), cwd: '/proj' },
+    ]
+
+    indexer['detectNewSessions'](sessions)
+
+    expect(newSessionHandler).toHaveBeenCalledTimes(1)
+    expect(newSessionHandler).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'session-b' }))
+  })
+
+  it('should not call handlers before initialization (startup scenario)', () => {
+    const indexer = new ClaudeSessionIndexer()
+    const handler = vi.fn()
+
+    indexer.onNewSession(handler)
+
+    // initialized is false by default (before start() completes)
+    // Simulate first refresh detecting existing sessions
+    indexer['detectNewSessions']([
+      { sessionId: 'existing-session', projectPath: '/proj', updatedAt: Date.now(), cwd: '/proj' },
+    ])
+
+    // Handler should NOT fire - we're still initializing
+    expect(handler).not.toHaveBeenCalled()
+    // But session should be tracked
+    expect(indexer['knownSessionIds'].has('existing-session')).toBe(true)
+  })
+
+  it('should skip sessions without cwd', () => {
+    const indexer = new ClaudeSessionIndexer()
+    const handler = vi.fn()
+
+    indexer.onNewSession(handler)
+    indexer['initialized'] = true
+
+    indexer['detectNewSessions']([
+      { sessionId: 'no-cwd-session', projectPath: '/proj', updatedAt: Date.now(), cwd: undefined },
+    ])
+
+    expect(handler).not.toHaveBeenCalled()
+  })
+
+  it('should unsubscribe handler when returned function is called', () => {
+    const indexer = new ClaudeSessionIndexer()
+    const handler = vi.fn()
+
+    const unsubscribe = indexer.onNewSession(handler)
+    unsubscribe()
+    indexer['initialized'] = true
+
+    indexer['detectNewSessions']([
+      { sessionId: 'new-session', projectPath: '/proj', updatedAt: Date.now(), cwd: '/proj' },
+    ])
+
+    expect(handler).not.toHaveBeenCalled()
+  })
+
+  it('should prune stale session IDs from knownSessionIds (memory leak prevention)', () => {
+    const indexer = new ClaudeSessionIndexer()
+    indexer['initialized'] = true
+
+    // First detection adds sessions A, B, C
+    indexer['detectNewSessions']([
+      { sessionId: 'session-a', projectPath: '/proj', updatedAt: Date.now(), cwd: '/proj' },
+      { sessionId: 'session-b', projectPath: '/proj', updatedAt: Date.now(), cwd: '/proj' },
+      { sessionId: 'session-c', projectPath: '/proj', updatedAt: Date.now(), cwd: '/proj' },
+    ])
+
+    expect(indexer['knownSessionIds'].size).toBe(3)
+    expect(indexer['knownSessionIds'].has('session-a')).toBe(true)
+    expect(indexer['knownSessionIds'].has('session-b')).toBe(true)
+    expect(indexer['knownSessionIds'].has('session-c')).toBe(true)
+
+    // Second detection: B was deleted, D was added
+    indexer['detectNewSessions']([
+      { sessionId: 'session-a', projectPath: '/proj', updatedAt: Date.now(), cwd: '/proj' },
+      { sessionId: 'session-c', projectPath: '/proj', updatedAt: Date.now(), cwd: '/proj' },
+      { sessionId: 'session-d', projectPath: '/proj', updatedAt: Date.now(), cwd: '/proj' },
+    ])
+
+    // B should be pruned, D should be added
+    expect(indexer['knownSessionIds'].size).toBe(3)
+    expect(indexer['knownSessionIds'].has('session-a')).toBe(true)
+    expect(indexer['knownSessionIds'].has('session-b')).toBe(false) // Pruned
+    expect(indexer['knownSessionIds'].has('session-c')).toBe(true)
+    expect(indexer['knownSessionIds'].has('session-d')).toBe(true) // Added
+  })
+
+  it('should call handlers in oldest-first order when multiple new sessions are detected', () => {
+    const indexer = new ClaudeSessionIndexer()
+    const calls: string[] = []
+    indexer.onNewSession((session) => calls.push(session.sessionId))
+    indexer['initialized'] = true
+
+    indexer['detectNewSessions']([
+      { sessionId: 'newest', projectPath: '/proj', updatedAt: 200, cwd: '/proj' },
+      { sessionId: 'oldest', projectPath: '/proj', updatedAt: 100, cwd: '/proj' },
+      { sessionId: 'middle', projectPath: '/proj', updatedAt: 150, cwd: '/proj' },
+    ])
+
+    expect(calls).toEqual(['oldest', 'middle', 'newest'])
+  })
+
+  it('should not fire handlers for sessions that reappear after being seen', () => {
+    const indexer = new ClaudeSessionIndexer()
+    const handler = vi.fn()
+    indexer.onNewSession(handler)
+    indexer['initialized'] = true
+
+    // First appearance - should fire
+    indexer['detectNewSessions']([
+      { sessionId: 'session-a', projectPath: '/proj', updatedAt: 100, cwd: '/proj' },
+    ])
+    expect(handler).toHaveBeenCalledTimes(1)
+
+    // Simulate session removed (known list pruned)
+    indexer['detectNewSessions']([])
+
+    // Reappearance with same sessionId should NOT fire again
+    indexer['detectNewSessions']([
+      { sessionId: 'session-a', projectPath: '/proj', updatedAt: 200, cwd: '/proj' },
+    ])
+
+    expect(handler).toHaveBeenCalledTimes(1)
   })
 })
