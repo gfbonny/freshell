@@ -287,6 +287,8 @@ async function main() {
   // When Claude creates a session file, associate it with the oldest unassociated
   // claude-mode terminal matching the session's cwd. This allows the terminal to
   // resume the session after server restart.
+  //
+  // Broadcast message type: { type: 'terminal.session.associated', terminalId: string, sessionId: string }
   claudeIndexer.onNewSession((session) => {
     if (!session.cwd) return
 
@@ -300,7 +302,7 @@ async function main() {
     registry.setResumeSessionId(term.terminalId, session.sessionId)
     try {
       wsHandler.broadcast({
-        type: 'terminal.session.associated',
+        type: 'terminal.session.associated' as const,
         terminalId: term.terminalId,
         sessionId: session.sessionId,
       })

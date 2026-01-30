@@ -507,8 +507,8 @@ export class TerminalRegistry {
         results.push(term)
       }
     }
-    // Sort by createdAt ascending (oldest first)
-    return results.sort((a, b) => a.createdAt - b.createdAt)
+    // Sort by createdAt ascending (oldest first), with fallback for safety
+    return results.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))
   }
 
   /**

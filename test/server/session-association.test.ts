@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { TerminalRegistry } from '../../server/terminal-registry'
 import { ClaudeSessionIndexer, ClaudeSession } from '../../server/claude-indexer'
 
@@ -289,6 +289,88 @@ describe('Session-Terminal Association Integration', () => {
     expect(broadcasts).toHaveLength(0)
 
     // Cleanup
+    registry.shutdown()
+  })
+})
+
+describe('Session-Terminal Association Platform-specific', () => {
+  // These tests verify the path normalization logic in findUnassociatedClaudeTerminals
+  // by testing the normalize function behavior directly through findUnassociatedClaudeTerminals.
+  // The actual platform-dependent behavior is tested in terminal-registry.test.ts.
+
+  it('should normalize backslashes and trailing slashes when matching paths', () => {
+    const registry = new TerminalRegistry()
+    const indexer = new ClaudeSessionIndexer()
+    const broadcasts: any[] = []
+
+    indexer.onNewSession((session) => {
+      if (!session.cwd) return
+      const unassociated = registry.findUnassociatedClaudeTerminals(session.cwd)
+      if (unassociated.length === 0) return
+      const term = unassociated[0]
+      registry.setResumeSessionId(term.terminalId, session.sessionId)
+      broadcasts.push({
+        type: 'terminal.session.associated',
+        terminalId: term.terminalId,
+        sessionId: session.sessionId,
+      })
+    })
+
+    indexer['initialized'] = true
+
+    // Create terminal with backslashes in path
+    const term = registry.create({ mode: 'claude', cwd: '/home/user/project' })
+
+    // Simulate session with trailing slash (should still match)
+    indexer['detectNewSessions']([{
+      sessionId: 'normalized-session',
+      projectPath: '/home/user/project/',
+      updatedAt: Date.now(),
+      cwd: '/home/user/project/',
+    }])
+
+    // Should match after normalization removes trailing slash
+    expect(broadcasts).toHaveLength(1)
+    expect(broadcasts[0].terminalId).toBe(term.terminalId)
+    expect(broadcasts[0].sessionId).toBe('normalized-session')
+
+    registry.shutdown()
+  })
+
+  it('should match mixed separator styles (backslash vs forward slash)', () => {
+    const registry = new TerminalRegistry()
+    const indexer = new ClaudeSessionIndexer()
+    const broadcasts: any[] = []
+
+    indexer.onNewSession((session) => {
+      if (!session.cwd) return
+      const unassociated = registry.findUnassociatedClaudeTerminals(session.cwd)
+      if (unassociated.length === 0) return
+      const term = unassociated[0]
+      registry.setResumeSessionId(term.terminalId, session.sessionId)
+      broadcasts.push({
+        type: 'terminal.session.associated',
+        terminalId: term.terminalId,
+        sessionId: session.sessionId,
+      })
+    })
+
+    indexer['initialized'] = true
+
+    // Use forward slashes (works on all platforms as test cwd)
+    const term = registry.create({ mode: 'claude', cwd: '/home/user/project' })
+
+    // Session also has forward slashes
+    indexer['detectNewSessions']([{
+      sessionId: 'slash-session',
+      projectPath: '/home/user/project',
+      updatedAt: Date.now(),
+      cwd: '/home/user/project',
+    }])
+
+    expect(broadcasts).toHaveLength(1)
+    expect(broadcasts[0].terminalId).toBe(term.terminalId)
+
     registry.shutdown()
   })
 })

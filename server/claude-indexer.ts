@@ -195,7 +195,6 @@ export class ClaudeSessionIndexer {
   async start() {
     // Initial scan (populates knownSessionIds with existing sessions)
     await this.refresh()
-<<<<<<< HEAD
     // Now enable onNewSession handlers for subsequently detected sessions
     this.initialized = true
 
@@ -291,6 +290,7 @@ export class ClaudeSessionIndexer {
             h(session)
           } catch (err) {
             logger.warn({ err }, 'onNewSession handler failed')
+          }
         }
       }
     }
