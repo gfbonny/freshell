@@ -149,6 +149,28 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isTerminal])
 
+  // Ref for tab to avoid re-running effects when tab changes
+  const tabRef = useRef(tab)
+  useEffect(() => {
+    tabRef.current = tab
+  }, [tab])
+
+  // Handle xterm title changes (from terminal escape sequences)
+  useEffect(() => {
+    if (!isTerminal) return
+    const term = termRef.current
+    if (!term) return
+
+    const disposable = term.onTitleChange((newTitle: string) => {
+      const currentTab = tabRef.current
+      if (currentTab && !currentTab.titleSetByUser && newTitle) {
+        dispatch(updateTab({ id: currentTab.id, updates: { title: newTitle } }))
+      }
+    })
+
+    return () => disposable.dispose()
+  }, [isTerminal, dispatch])
+
   // Apply settings changes
   useEffect(() => {
     if (!isTerminal) return
