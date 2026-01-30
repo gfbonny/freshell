@@ -14,6 +14,7 @@ import { WsHandler } from './ws-handler'
 import { claudeIndexer } from './claude-indexer'
 import { claudeSessionManager } from './claude-session'
 import { AI_CONFIG, PROMPTS, stripAnsi } from './ai-prompts'
+import { filesRouter } from './files-router'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -245,6 +246,9 @@ async function main() {
       res.json({ description: heuristic(), source: 'heuristic' })
     }
   })
+
+  // --- API: files (for editor pane) ---
+  app.use('/api/files', filesRouter)
 
   // --- Static client in production ---
   const distRoot = path.resolve(__dirname, '..')
