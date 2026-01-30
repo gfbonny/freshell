@@ -13,6 +13,15 @@ Freshell is a self-hosted, browser-accessible terminal multiplexer and session o
 ## Repo Rules
 - Always check for an use applicable skills
 - Always work in a worktree (in \.worktrees\)
+- Specific user instructions override ALL other instructions, including the above, and including superpowers or skills
+
+## Codex Agent in CMD Instructions (Codex agents only; only when running in CMD on windows; all other agents must ignore)
+- Prefer bash/WSL over PowerShell; Windows paths map like `D:\...` -> `/mnt/d/...`.
+- Use `bash -lc "<cmd>"` for non-interactive commands; avoid interactive shells so commands return control.
+- Apply_patch expects Windows-style paths.
+- If a bash command produces no visible output, rerun with `tty: true` to force output.
+- PowerShell may hang for dozens of seconds before starting in this tool; stick to bash unless explicitly required.
+- Don't make silly mistakes like installing Linux binaries in node_modules when we're on windows
 
 ## Commands
 
