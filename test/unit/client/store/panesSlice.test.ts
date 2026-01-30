@@ -1364,4 +1364,51 @@ describe('panesSlice', () => {
       }
     })
   })
+
+  describe('editor content normalization', () => {
+    it('passes editor content through unchanged', () => {
+      const editorContent: EditorPaneContent = {
+        kind: 'editor',
+        filePath: '/test.ts',
+        language: 'typescript',
+        readOnly: false,
+        content: 'code',
+        viewMode: 'source',
+      }
+
+      const state = panesReducer(
+        initialState,
+        initLayout({ tabId: 'tab-1', content: editorContent })
+      )
+
+      const leaf = state.layouts['tab-1'] as Extract<PaneNode, { type: 'leaf' }>
+      expect(leaf.content).toEqual(editorContent)
+    })
+
+    it('creates editor pane via addPane', () => {
+      let state = panesReducer(
+        initialState,
+        initLayout({ tabId: 'tab-1', content: { kind: 'terminal', mode: 'shell' } })
+      )
+
+      state = panesReducer(
+        state,
+        addPane({
+          tabId: 'tab-1',
+          newContent: {
+            kind: 'editor',
+            filePath: null,
+            language: null,
+            readOnly: false,
+            content: '',
+            viewMode: 'source',
+          },
+        })
+      )
+
+      const root = state.layouts['tab-1'] as Extract<PaneNode, { type: 'split' }>
+      const editorPane = root.children[1] as Extract<PaneNode, { type: 'leaf' }>
+      expect(editorPane.content.kind).toBe('editor')
+    })
+  })
 })
