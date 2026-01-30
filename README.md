@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
 </p>
 
-<h1 align="center">🐚freshell</h1>
+<h1 align="center">🐚🔥freshell</h1>
 
 <p align="center">
   Claudes Code, terminals, and other CLI friends in your browser. Speak with the dead, jump to your phone, and lots more
@@ -43,11 +43,11 @@ npm install
 cp .env.example .env
 # Edit .env and set AUTH_TOKEN to a secure random value
 
-# Start development servers
-npm run dev
+# Build and run
+npm run serve
 ```
 
-Open http://localhost:5173/?token=YOUR_AUTH_TOKEN
+Open http://localhost:3001/?token=YOUR_AUTH_TOKEN
 
 ## Prerequisites
 
@@ -164,10 +164,14 @@ npm run dev:client
 ### Production
 
 ```bash
-# Build both client and server
-npm run build
+# Build and run (recommended)
+npm run serve
+```
 
-# Start production server
+Or build and run separately:
+
+```bash
+npm run build
 npm start
 ```
 
