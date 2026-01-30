@@ -285,6 +285,11 @@ export const panesSlice = createSlice({
         // Set active to the last remaining leaf (similar to where the new pane would be)
         state.activePane[tabId] = remainingLeaves[remainingLeaves.length - 1].id
       }
+
+      // Clean up pane title
+      if (state.paneTitles[tabId]?.[paneId]) {
+        delete state.paneTitles[tabId][paneId]
+      }
     },
 
     setActivePane: (

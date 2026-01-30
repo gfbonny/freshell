@@ -610,6 +610,29 @@ describe('panesSlice', () => {
 
       expect(state.layouts['tab-1']).toEqual(originalLayout)
     })
+
+    it('removes pane title when pane is closed', () => {
+      const layout: PaneNode = {
+        type: 'split',
+        id: 'split-1',
+        direction: 'horizontal',
+        sizes: [50, 50],
+        children: [
+          { type: 'leaf', id: 'pane-1', content: { kind: 'terminal', createRequestId: 'req-1', status: 'running', mode: 'shell' } },
+          { type: 'leaf', id: 'pane-2', content: { kind: 'terminal', createRequestId: 'req-2', status: 'running', mode: 'shell' } },
+        ],
+      }
+      const state: PanesState = {
+        layouts: { 'tab-1': layout },
+        activePane: { 'tab-1': 'pane-1' },
+        paneTitles: { 'tab-1': { 'pane-1': 'First', 'pane-2': 'Second' } },
+      }
+
+      const result = panesReducer(state, closePane({ tabId: 'tab-1', paneId: 'pane-1' }))
+
+      expect(result.paneTitles['tab-1']['pane-1']).toBeUndefined()
+      expect(result.paneTitles['tab-1']['pane-2']).toBe('Second')
+    })
   })
 
   describe('setActivePane', () => {
