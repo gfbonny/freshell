@@ -69,4 +69,58 @@ describe('EditorPane', () => {
 
     expect(screen.getByTestId('monaco-mock')).toBeInTheDocument()
   })
+
+  it('renders toolbar with path input', () => {
+    render(
+      <Provider store={store}>
+        <EditorPane
+          paneId="pane-1"
+          tabId="tab-1"
+          filePath="/test.ts"
+          language="typescript"
+          readOnly={false}
+          content="const x = 1"
+          viewMode="source"
+        />
+      </Provider>
+    )
+
+    expect(screen.getByPlaceholderText(/enter file path/i)).toBeInTheDocument()
+  })
+
+  it('shows view toggle for markdown files', () => {
+    render(
+      <Provider store={store}>
+        <EditorPane
+          paneId="pane-1"
+          tabId="tab-1"
+          filePath="/readme.md"
+          language="markdown"
+          readOnly={false}
+          content="# Hello"
+          viewMode="source"
+        />
+      </Provider>
+    )
+
+    expect(screen.getByRole('button', { name: /preview/i })).toBeInTheDocument()
+  })
+
+  it('hides view toggle for non-markdown/html files', () => {
+    render(
+      <Provider store={store}>
+        <EditorPane
+          paneId="pane-1"
+          tabId="tab-1"
+          filePath="/code.ts"
+          language="typescript"
+          readOnly={false}
+          content="const x = 1"
+          viewMode="source"
+        />
+      </Provider>
+    )
+
+    expect(screen.queryByRole('button', { name: /preview/i })).not.toBeInTheDocument()
+  })
 })
