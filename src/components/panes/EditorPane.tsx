@@ -70,7 +70,7 @@ export default function EditorPane({
 
     autoSaveTimer.current = setTimeout(async () => {
       try {
-        const token = localStorage.getItem('authToken') || ''
+        const token = sessionStorage.getItem('auth-token') || ''
         await fetch('/api/files/write', {
           method: 'POST',
           headers: {
@@ -123,12 +123,59 @@ export default function EditorPane({
     [updateContent, scheduleAutoSave]
   )
 
-  const handlePathChange = useCallback(
-    (path: string) => {
-      // TODO: Load file from server
-      updateContent({ filePath: path || null })
+  const loadFile = useCallback(
+    async (path: string) => {
+      try {
+        const token = sessionStorage.getItem('auth-token') || ''
+        const res = await fetch(`/api/files/read?path=${encodeURIComponent(path)}`, {
+          headers: { 'x-auth-token': token },
+        })
+        if (!res.ok) {
+          console.error('Failed to load file:', res.statusText)
+          return
+        }
+        const data = await res.json()
+
+        // Determine language from extension
+        const ext = path.split('.').pop()?.toLowerCase()
+        const langMap: Record<string, string> = {
+          ts: 'typescript',
+          tsx: 'typescriptreact',
+          js: 'javascript',
+          jsx: 'javascriptreact',
+          md: 'markdown',
+          json: 'json',
+          html: 'html',
+          htm: 'html',
+          css: 'css',
+          py: 'python',
+        }
+
+        // Determine default viewMode for previewable files
+        const defaultViewMode = isMarkdown(path) || isHtml(path) ? 'preview' : 'source'
+
+        updateContent({
+          filePath: path,
+          language: langMap[ext || ''] || null,
+          content: data.content,
+          viewMode: defaultViewMode,
+        })
+      } catch (err) {
+        console.error('Failed to load file:', err)
+      }
     },
     [updateContent]
+  )
+
+  const handlePathChange = useCallback(
+    (path: string) => {
+      if (path) {
+        loadFile(path)
+      } else {
+        updateContent({ filePath: null })
+      }
+    },
+    [loadFile, updateContent]
   )
 
   const handleOpenFile = useCallback(() => {

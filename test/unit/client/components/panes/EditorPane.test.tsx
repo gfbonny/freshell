@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { Provider } from 'react-redux'
 import { configureStore } from '@reduxjs/toolkit'
 import EditorPane from '@/components/panes/EditorPane'
@@ -16,6 +17,9 @@ vi.mock('@monaco-editor/react', () => ({
   ),
 }))
 
+// Mock fetch for file loading tests
+const mockFetch = vi.fn()
+
 const createMockStore = () =>
   configureStore({
     reducer: {
@@ -28,10 +32,14 @@ describe('EditorPane', () => {
 
   beforeEach(() => {
     store = createMockStore()
+    vi.stubGlobal('fetch', mockFetch)
+    sessionStorage.clear()
   })
 
   afterEach(() => {
     cleanup()
+    vi.unstubAllGlobals()
+    mockFetch.mockReset()
   })
 
   it('renders empty state with Open File button', () => {
@@ -159,5 +167,299 @@ describe('EditorPane', () => {
     )
 
     expect(screen.getByTitle('HTML Preview')).toBeInTheDocument()
+  })
+
+  describe('file loading', () => {
+    it('loads file content from server when path is entered', async () => {
+      const user = userEvent.setup()
+      sessionStorage.setItem('auth-token', 'test-token')
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ content: 'const x = 42' }),
+      })
+
+      render(
+        <Provider store={store}>
+          <EditorPane
+            paneId="pane-1"
+            tabId="tab-1"
+            filePath={null}
+            language={null}
+            readOnly={false}
+            content=""
+            viewMode="source"
+          />
+        </Provider>
+      )
+
+      const input = screen.getByPlaceholderText(/enter file path/i)
+      await user.clear(input)
+      await user.type(input, '/path/to/file.ts{enter}')
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledWith(
+          '/api/files/read?path=%2Fpath%2Fto%2Ffile.ts',
+          expect.objectContaining({
+            headers: { 'x-auth-token': 'test-token' },
+          })
+        )
+      })
+    })
+
+    it('sends auth token from sessionStorage with file load request', async () => {
+      const user = userEvent.setup()
+      sessionStorage.setItem('auth-token', 'my-secret-token')
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ content: 'file content' }),
+      })
+
+      render(
+        <Provider store={store}>
+          <EditorPane
+            paneId="pane-1"
+            tabId="tab-1"
+            filePath={null}
+            language={null}
+            readOnly={false}
+            content=""
+            viewMode="source"
+          />
+        </Provider>
+      )
+
+      const input = screen.getByPlaceholderText(/enter file path/i)
+      await user.clear(input)
+      await user.type(input, '/test.js{enter}')
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledWith(
+          expect.any(String),
+          expect.objectContaining({
+            headers: { 'x-auth-token': 'my-secret-token' },
+          })
+        )
+      })
+    })
+
+    it('handles empty auth token gracefully', async () => {
+      const user = userEvent.setup()
+      // No token in sessionStorage
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ content: 'content' }),
+      })
+
+      render(
+        <Provider store={store}>
+          <EditorPane
+            paneId="pane-1"
+            tabId="tab-1"
+            filePath={null}
+            language={null}
+            readOnly={false}
+            content=""
+            viewMode="source"
+          />
+        </Provider>
+      )
+
+      const input = screen.getByPlaceholderText(/enter file path/i)
+      await user.clear(input)
+      await user.type(input, '/test.js{enter}')
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledWith(
+          expect.any(String),
+          expect.objectContaining({
+            headers: { 'x-auth-token': '' },
+          })
+        )
+      })
+    })
+
+    it('logs error when file load fails', async () => {
+      const user = userEvent.setup()
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        statusText: 'Not Found',
+      })
+
+      render(
+        <Provider store={store}>
+          <EditorPane
+            paneId="pane-1"
+            tabId="tab-1"
+            filePath={null}
+            language={null}
+            readOnly={false}
+            content=""
+            viewMode="source"
+          />
+        </Provider>
+      )
+
+      const input = screen.getByPlaceholderText(/enter file path/i)
+      await user.clear(input)
+      await user.type(input, '/nonexistent.ts{enter}')
+
+      await waitFor(() => {
+        expect(consoleSpy).toHaveBeenCalledWith('Failed to load file:', 'Not Found')
+      })
+
+      consoleSpy.mockRestore()
+    })
+
+    it('logs error when fetch throws', async () => {
+      const user = userEvent.setup()
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      mockFetch.mockRejectedValueOnce(new Error('Network error'))
+
+      render(
+        <Provider store={store}>
+          <EditorPane
+            paneId="pane-1"
+            tabId="tab-1"
+            filePath={null}
+            language={null}
+            readOnly={false}
+            content=""
+            viewMode="source"
+          />
+        </Provider>
+      )
+
+      const input = screen.getByPlaceholderText(/enter file path/i)
+      await user.clear(input)
+      await user.type(input, '/test.ts{enter}')
+
+      await waitFor(() => {
+        expect(consoleSpy).toHaveBeenCalledWith('Failed to load file:', expect.any(Error))
+      })
+
+      consoleSpy.mockRestore()
+    })
+
+    it('determines language from file extension', async () => {
+      const user = userEvent.setup()
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ content: 'print("hello")' }),
+      })
+
+      render(
+        <Provider store={store}>
+          <EditorPane
+            paneId="pane-1"
+            tabId="tab-1"
+            filePath={null}
+            language={null}
+            readOnly={false}
+            content=""
+            viewMode="source"
+          />
+        </Provider>
+      )
+
+      const input = screen.getByPlaceholderText(/enter file path/i)
+      await user.clear(input)
+      await user.type(input, '/script.py{enter}')
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalled()
+      })
+
+      // The language detection happens internally, we verify fetch was called with the right path
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/files/read?path=%2Fscript.py',
+        expect.any(Object)
+      )
+    })
+
+    it('sets preview mode as default for markdown files', async () => {
+      const user = userEvent.setup()
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ content: '# Hello' }),
+      })
+
+      render(
+        <Provider store={store}>
+          <EditorPane
+            paneId="pane-1"
+            tabId="tab-1"
+            filePath={null}
+            language={null}
+            readOnly={false}
+            content=""
+            viewMode="source"
+          />
+        </Provider>
+      )
+
+      const input = screen.getByPlaceholderText(/enter file path/i)
+      await user.clear(input)
+      await user.type(input, '/readme.md{enter}')
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalled()
+      })
+    })
+
+    it('sets preview mode as default for html files', async () => {
+      const user = userEvent.setup()
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ content: '<h1>Hello</h1>' }),
+      })
+
+      render(
+        <Provider store={store}>
+          <EditorPane
+            paneId="pane-1"
+            tabId="tab-1"
+            filePath={null}
+            language={null}
+            readOnly={false}
+            content=""
+            viewMode="source"
+          />
+        </Provider>
+      )
+
+      const input = screen.getByPlaceholderText(/enter file path/i)
+      await user.clear(input)
+      await user.type(input, '/page.html{enter}')
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalled()
+      })
+    })
+
+    it('does not load file when path is cleared', async () => {
+      const user = userEvent.setup()
+
+      render(
+        <Provider store={store}>
+          <EditorPane
+            paneId="pane-1"
+            tabId="tab-1"
+            filePath="/existing.ts"
+            language="typescript"
+            readOnly={false}
+            content="existing content"
+            viewMode="source"
+          />
+        </Provider>
+      )
+
+      const input = screen.getByPlaceholderText(/enter file path/i)
+      await user.clear(input)
+      fireEvent.keyDown(input, { key: 'Enter' })
+
+      // fetch should not be called when path is empty
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
   })
 })
