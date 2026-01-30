@@ -1252,6 +1252,87 @@ describe('TerminalRegistry', () => {
       expect(found[0].mode).toBe('claude')
     })
   })
+
+  describe('findUnassociatedClaudeTerminals', () => {
+    it('should find claude terminals without resumeSessionId matching cwd', () => {
+      // Create a claude terminal without resumeSessionId
+      const term1 = registry.create({ mode: 'claude', cwd: '/home/user/project' })
+      // Create a claude terminal WITH resumeSessionId (should not match)
+      registry.create({ mode: 'claude', cwd: '/home/user/project', resumeSessionId: 'existing-session' })
+      // Create a shell terminal (should not match)
+      registry.create({ mode: 'shell', cwd: '/home/user/project' })
+
+      const results = registry.findUnassociatedClaudeTerminals('/home/user/project')
+
+      expect(results).toHaveLength(1)
+      expect(results[0].terminalId).toBe(term1.terminalId)
+    })
+
+    it('should return empty array when no matching terminals', () => {
+      registry.create({ mode: 'claude', cwd: '/other/path' })
+
+      const results = registry.findUnassociatedClaudeTerminals('/home/user/project')
+
+      expect(results).toHaveLength(0)
+    })
+
+    it('should match cwd case-insensitively on Windows', () => {
+      const term = registry.create({ mode: 'claude', cwd: 'C:\\Users\\Dan\\project' })
+
+      const results = registry.findUnassociatedClaudeTerminals('c:/users/dan/project')
+
+      // On Windows, paths are case-insensitive
+      // On Unix, this test would fail (which is correct behavior)
+      if (process.platform === 'win32') {
+        expect(results).toHaveLength(1)
+        expect(results[0].terminalId).toBe(term.terminalId)
+      } else {
+        // Unix: different case = different path
+        expect(results).toHaveLength(0)
+      }
+    })
+
+    it('should normalize backslashes to forward slashes', () => {
+      const term = registry.create({ mode: 'claude', cwd: 'C:\\Users\\Dan\\project' })
+
+      const results = registry.findUnassociatedClaudeTerminals('C:/Users/Dan/project')
+
+      expect(results).toHaveLength(1)
+      expect(results[0].terminalId).toBe(term.terminalId)
+    })
+
+    it('should return results sorted by createdAt (oldest first)', () => {
+      // Create terminals with slight delays to ensure different createdAt
+      const term1 = registry.create({ mode: 'claude', cwd: '/home/user/project' })
+      const term2 = registry.create({ mode: 'claude', cwd: '/home/user/project' })
+      const term3 = registry.create({ mode: 'claude', cwd: '/home/user/project' })
+
+      const results = registry.findUnassociatedClaudeTerminals('/home/user/project')
+
+      expect(results).toHaveLength(3)
+      // Oldest first (by createdAt)
+      expect(results[0].terminalId).toBe(term1.terminalId)
+      expect(results[1].terminalId).toBe(term2.terminalId)
+      expect(results[2].terminalId).toBe(term3.terminalId)
+    })
+  })
+
+  describe('setResumeSessionId', () => {
+    it('should set resumeSessionId on existing terminal', () => {
+      const term = registry.create({ mode: 'claude', cwd: '/home/user/project' })
+
+      const result = registry.setResumeSessionId(term.terminalId, 'new-session-id')
+
+      expect(result).toBe(true)
+      expect(registry.get(term.terminalId)?.resumeSessionId).toBe('new-session-id')
+    })
+
+    it('should return false for non-existent terminal', () => {
+      const result = registry.setResumeSessionId('nonexistent', 'session-id')
+
+      expect(result).toBe(false)
+    })
+  })
 })
 
 describe('buildSpawnSpec Unix paths', () => {

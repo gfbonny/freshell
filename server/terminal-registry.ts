@@ -487,6 +487,42 @@ export class TerminalRegistry {
   }
 
   /**
+   * Find claude-mode terminals that have no resumeSessionId (waiting to be associated)
+   * and whose cwd matches the given path. Results sorted by createdAt (oldest first).
+   */
+  findUnassociatedClaudeTerminals(cwd: string): TerminalRecord[] {
+    const results: TerminalRecord[] = []
+    // Platform-aware normalization: case-insensitive on Windows, case-sensitive on Unix
+    const normalize = (p: string) => {
+      const normalized = p.replace(/\\/g, '/').replace(/\/+$/, '')
+      return process.platform === 'win32' ? normalized.toLowerCase() : normalized
+    }
+    const targetCwd = normalize(cwd)
+
+    for (const term of this.terminals.values()) {
+      if (term.mode !== 'claude') continue
+      if (term.resumeSessionId) continue // Already associated
+      if (!term.cwd) continue
+      if (normalize(term.cwd) === targetCwd) {
+        results.push(term)
+      }
+    }
+    // Sort by createdAt ascending (oldest first)
+    return results.sort((a, b) => a.createdAt - b.createdAt)
+  }
+
+  /**
+   * Set the resumeSessionId on a terminal (one-time association).
+   * Returns false if terminal not found.
+   */
+  setResumeSessionId(terminalId: string, sessionId: string): boolean {
+    const term = this.terminals.get(terminalId)
+    if (!term) return false
+    term.resumeSessionId = sessionId
+    return true
+  }
+
+  /**
    * Gracefully shutdown all terminals. Kills all running PTY processes
    * and clears the idle monitor timer.
    */
