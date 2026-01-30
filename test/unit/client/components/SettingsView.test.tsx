@@ -638,11 +638,16 @@ describe('SettingsView Component', () => {
       const store = createTestStore()
       renderWithStore(store)
 
-      // Find the sidebar sort mode select (has 'hybrid' option)
+      // Find the sidebar sort mode select (contains activity/recency/project options)
       const selects = screen.getAllByRole('combobox')
       const sortModeSelect = selects.find((select) => {
-        return select.querySelector('option[value="hybrid"]') !== null
+        return select.querySelector('option[value="activity"]') !== null
+          && select.querySelector('option[value="recency"]') !== null
+          && select.querySelector('option[value="project"]') !== null
       })!
+      expect(sortModeSelect.querySelector('option[value="hybrid"]')).toBeNull()
+      const activityOption = sortModeSelect.querySelector('option[value="activity"]')
+      expect(activityOption?.textContent).toBe('Activity (tabs first)')
       fireEvent.change(sortModeSelect, { target: { value: 'activity' } })
 
       expect(store.getState().settings.settings.sidebar.sortMode).toBe('activity')

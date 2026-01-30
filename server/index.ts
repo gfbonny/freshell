@@ -14,6 +14,7 @@ import { WsHandler } from './ws-handler.js'
 import { claudeIndexer } from './claude-indexer.js'
 import { claudeSessionManager } from './claude-session.js'
 import { AI_CONFIG, PROMPTS, stripAnsi } from './ai-prompts.js'
+import { migrateSettingsSortMode } from './settings-migrate.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -81,7 +82,7 @@ async function main() {
     })
   })
 
-  const settings = await configStore.getSettings()
+  const settings = migrateSettingsSortMode(await configStore.getSettings())
   const registry = new TerminalRegistry(settings)
 
   const server = http.createServer(app)
@@ -107,7 +108,7 @@ async function main() {
   //
   app.get('/api/settings', async (_req, res) => {
     const s = await configStore.getSettings()
-    res.json(s)
+    res.json(migrateSettingsSortMode(s))
   })
 
   app.get('/api/lan-info', (_req, res) => {
@@ -115,18 +116,22 @@ async function main() {
   })
 
   app.patch('/api/settings', async (req, res) => {
-    const updated = await configStore.patchSettings(req.body || {})
-    registry.setSettings(updated)
-    wsHandler.broadcast({ type: 'settings.updated', settings: updated })
-    res.json(updated)
+    const patch = migrateSettingsSortMode(req.body || {}) as any
+    const updated = await configStore.patchSettings(patch)
+    const migrated = migrateSettingsSortMode(updated)
+    registry.setSettings(migrated)
+    wsHandler.broadcast({ type: 'settings.updated', settings: migrated })
+    res.json(migrated)
   })
 
   // Alias (matches implementation plan)
   app.put('/api/settings', async (req, res) => {
-    const updated = await configStore.patchSettings(req.body || {})
-    registry.setSettings(updated)
-    wsHandler.broadcast({ type: 'settings.updated', settings: updated })
-    res.json(updated)
+    const patch = migrateSettingsSortMode(req.body || {}) as any
+    const updated = await configStore.patchSettings(patch)
+    const migrated = migrateSettingsSortMode(updated)
+    registry.setSettings(migrated)
+    wsHandler.broadcast({ type: 'settings.updated', settings: migrated })
+    res.json(migrated)
   })
 
   // --- API: sessions ---
