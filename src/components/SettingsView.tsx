@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { updateSettingsLocal, markSaved } from '@/store/settingsSlice'
 import { api } from '@/lib/api'
@@ -10,7 +10,9 @@ import type { SidebarSortMode, TerminalTheme } from '@/store/types'
 const terminalFonts = [
   { value: 'JetBrains Mono', label: 'JetBrains Mono' },
   { value: 'Cascadia Code', label: 'Cascadia Code' },
+  { value: 'Cascadia Mono', label: 'Cascadia Mono' },
   { value: 'Fira Code', label: 'Fira Code' },
+  { value: 'Meslo LG S', label: 'Meslo LG S' },
   { value: 'Source Code Pro', label: 'Source Code Pro' },
   { value: 'IBM Plex Mono', label: 'IBM Plex Mono' },
   { value: 'Consolas', label: 'Consolas' },
@@ -130,6 +132,9 @@ export default function SettingsView() {
   const settings = useAppSelector((s) => s.settings.settings)
   const lastSavedAt = useAppSelector((s) => s.settings.lastSavedAt)
 
+  const [availableTerminalFonts, setAvailableTerminalFonts] = useState(terminalFonts)
+  const [fontsReady, setFontsReady] = useState(false)
+
   const pendingRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const previewTheme = useMemo(
     () => getTerminalTheme(settings.terminal.theme, settings.theme),
@@ -167,13 +172,108 @@ export default function SettingsView() {
     }
   }, [])
 
-  function scheduleSave(updates: any) {
+  const scheduleSave = useCallback((updates: any) => {
     if (pendingRef.current) clearTimeout(pendingRef.current)
     pendingRef.current = setTimeout(() => {
       patch(updates).catch((err) => console.warn('Failed to save settings', err))
       pendingRef.current = null
     }, 500)
-  }
+  }, [patch])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const detectFonts = async () => {
+      if (typeof document === 'undefined' || !document.fonts || !document.fonts.check) {
+        if (!cancelled) {
+          setAvailableTerminalFonts(terminalFonts.filter((font) => font.value === 'monospace'))
+          setFontsReady(true)
+        }
+        return
+      }
+
+      try {
+        await document.fonts.ready
+      } catch {
+        // Ignore font readiness errors and attempt checks anyway.
+      }
+
+      if (cancelled) return
+
+      let ctx: CanvasRenderingContext2D | null = null
+      if (typeof CanvasRenderingContext2D !== 'undefined') {
+        const canvas = document.createElement('canvas')
+        try {
+          ctx = canvas.getContext('2d')
+        } catch {
+          ctx = null
+        }
+      }
+      const testText = 'mmmmmmmmmmlilliiWWWWWW'
+      const testSize = 72
+      const baseFonts = ['monospace', 'serif', 'sans-serif']
+      const baseWidths = ctx
+        ? baseFonts.map((base) => {
+          ctx.font = `${testSize}px ${base}`
+          return ctx.measureText(testText).width
+        })
+        : []
+
+      const isFontAvailable = (fontFamily: string) => {
+        if (fontFamily === 'monospace') return true
+        if (document.fonts && !document.fonts.check(`12px "${fontFamily}"`)) return false
+        if (!ctx) return true
+        return baseFonts.some((base, index) => {
+          ctx.font = `${testSize}px "${fontFamily}", ${base}`
+          return ctx.measureText(testText).width !== baseWidths[index]
+        })
+      }
+
+      const available = terminalFonts.filter((font) => {
+        if (font.value === 'monospace') return true
+        return isFontAvailable(font.value)
+      })
+
+      setAvailableTerminalFonts(
+        available.length > 0
+          ? available
+          : terminalFonts.filter((font) => font.value === 'monospace')
+      )
+      setFontsReady(true)
+    }
+
+    void detectFonts()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const availableFontValues = useMemo(
+    () => new Set(availableTerminalFonts.map((font) => font.value)),
+    [availableTerminalFonts]
+  )
+  const isSelectedFontAvailable = availableFontValues.has(settings.terminal.fontFamily)
+  const fallbackFontFamily =
+    availableTerminalFonts.find((font) => font.value === 'monospace')?.value
+    ?? availableTerminalFonts[0]?.value
+    ?? 'monospace'
+
+  useEffect(() => {
+    if (!fontsReady) return
+    if (isSelectedFontAvailable) return
+    if (fallbackFontFamily === settings.terminal.fontFamily) return
+
+    dispatch(updateSettingsLocal({ terminal: { fontFamily: fallbackFontFamily } } as any))
+    scheduleSave({ terminal: { fontFamily: fallbackFontFamily } })
+  }, [
+    dispatch,
+    fallbackFontFamily,
+    fontsReady,
+    isSelectedFontAvailable,
+    scheduleSave,
+    settings.terminal.fontFamily,
+  ])
 
   return (
     <div className="h-full flex flex-col">
@@ -346,14 +446,14 @@ export default function SettingsView() {
 
             <SettingsRow label="Font family">
               <select
-                value={settings.terminal.fontFamily}
+                value={isSelectedFontAvailable ? settings.terminal.fontFamily : fallbackFontFamily}
                 onChange={(e) => {
                   dispatch(updateSettingsLocal({ terminal: { fontFamily: e.target.value } } as any))
                   scheduleSave({ terminal: { fontFamily: e.target.value } })
                 }}
                 className="h-8 px-3 text-sm bg-muted border-0 rounded-md focus:outline-none focus:ring-1 focus:ring-border"
               >
-                {terminalFonts.map((font) => (
+                {availableTerminalFonts.map((font) => (
                   <option key={font.value} value={font.value}>{font.label}</option>
                 ))}
               </select>
