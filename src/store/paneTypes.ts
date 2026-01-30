@@ -78,6 +78,6 @@ export interface PanesState {
  * NOTE: This type is only for documentation - not used in runtime code.
  */
 export interface PersistedPanesState extends PanesState {
-  /** Schema version for migrations. Current: 2 */
+  /** Schema version for migrations. Current: 3 */
   version: number
 }

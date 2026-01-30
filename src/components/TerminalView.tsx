@@ -198,7 +198,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     })
 
     return () => disposable.dispose()
-  }, [isTerminal, dispatch])
+  }, [isTerminal, dispatch, tabId])
 
   // Apply settings changes
   useEffect(() => {
