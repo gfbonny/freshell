@@ -31,3 +31,31 @@ filesRouter.get('/read', async (req, res) => {
     return res.status(500).json({ error: err.message })
   }
 })
+
+filesRouter.post('/write', async (req, res) => {
+  const { path: filePath, content } = req.body
+
+  if (!filePath) {
+    return res.status(400).json({ error: 'path is required' })
+  }
+  if (content === undefined) {
+    return res.status(400).json({ error: 'content is required' })
+  }
+
+  const resolved = path.resolve(filePath)
+
+  try {
+    // Create parent directories if needed
+    await fsp.mkdir(path.dirname(resolved), { recursive: true })
+
+    await fsp.writeFile(resolved, content, 'utf-8')
+    const stat = await fsp.stat(resolved)
+
+    res.json({
+      success: true,
+      modifiedAt: stat.mtime.toISOString(),
+    })
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message })
+  }
+})

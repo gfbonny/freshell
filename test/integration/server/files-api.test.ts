@@ -89,4 +89,70 @@ describe('Files API Integration', () => {
       expect(res.body.error).toContain('directory')
     })
   })
+
+  describe('POST /api/files/write', () => {
+    it('writes content to file', async () => {
+      const filePath = path.join(tempDir, 'new-file.txt')
+
+      const res = await request(app)
+        .post('/api/files/write')
+        .set('x-auth-token', TEST_AUTH_TOKEN)
+        .send({ path: filePath, content: 'New content!' })
+
+      expect(res.status).toBe(200)
+      expect(res.body.success).toBe(true)
+      expect(res.body.modifiedAt).toBeDefined()
+
+      // Verify file was written
+      const written = await fsp.readFile(filePath, 'utf-8')
+      expect(written).toBe('New content!')
+    })
+
+    it('overwrites existing file', async () => {
+      const filePath = path.join(tempDir, 'existing.txt')
+      await fsp.writeFile(filePath, 'Old content')
+
+      const res = await request(app)
+        .post('/api/files/write')
+        .set('x-auth-token', TEST_AUTH_TOKEN)
+        .send({ path: filePath, content: 'Updated!' })
+
+      expect(res.status).toBe(200)
+
+      const written = await fsp.readFile(filePath, 'utf-8')
+      expect(written).toBe('Updated!')
+    })
+
+    it('creates parent directories if needed', async () => {
+      const filePath = path.join(tempDir, 'nested', 'deep', 'file.txt')
+
+      const res = await request(app)
+        .post('/api/files/write')
+        .set('x-auth-token', TEST_AUTH_TOKEN)
+        .send({ path: filePath, content: 'Nested content' })
+
+      expect(res.status).toBe(200)
+
+      const written = await fsp.readFile(filePath, 'utf-8')
+      expect(written).toBe('Nested content')
+    })
+
+    it('returns 400 if path is missing', async () => {
+      const res = await request(app)
+        .post('/api/files/write')
+        .set('x-auth-token', TEST_AUTH_TOKEN)
+        .send({ content: 'No path' })
+
+      expect(res.status).toBe(400)
+    })
+
+    it('returns 400 if content is missing', async () => {
+      const res = await request(app)
+        .post('/api/files/write')
+        .set('x-auth-token', TEST_AUTH_TOKEN)
+        .send({ path: path.join(tempDir, 'file.txt') })
+
+      expect(res.status).toBe(400)
+    })
+  })
 })
