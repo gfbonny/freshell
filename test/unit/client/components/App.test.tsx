@@ -449,8 +449,6 @@ describe('App Component - Share Button', () => {
     })
 
     // Find and click the close button (the X button in the header)
-    const closeButton = screen.getByRole('button', { name: '' }) // X button has no text
-    // Alternative: find by looking for the button near the title
     const modalHeader = screen.getByText('Welcome to your freshell!').parentElement
     const xButton = modalHeader?.querySelector('button')
     if (xButton) {
