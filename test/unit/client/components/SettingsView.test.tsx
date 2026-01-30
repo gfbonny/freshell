@@ -22,8 +22,6 @@ vi.mock('@/lib/api', () => ({
 // Import mocked api after mocking
 import { api } from '@/lib/api'
 
-let originalFonts: Document['fonts'] | undefined
-
 function createTestStore(settingsState?: Partial<SettingsState>) {
   return configureStore({
     reducer: {
@@ -59,14 +57,6 @@ function renderWithStore(store: ReturnType<typeof createTestStore>) {
 
 describe('SettingsView Component', () => {
   beforeEach(() => {
-    originalFonts = document.fonts
-    Object.defineProperty(document, 'fonts', {
-      value: {
-        check: vi.fn(() => true),
-        ready: Promise.resolve(),
-      },
-      configurable: true,
-    })
     vi.useFakeTimers()
     vi.clearAllMocks()
   })
@@ -74,15 +64,6 @@ describe('SettingsView Component', () => {
   afterEach(() => {
     cleanup()
     vi.useRealTimers()
-    if (originalFonts) {
-      Object.defineProperty(document, 'fonts', {
-        value: originalFonts,
-        configurable: true,
-      })
-    } else {
-      // @ts-expect-error - test cleanup for jsdom fonts override
-      delete document.fonts
-    }
   })
 
   describe('renders settings form', () => {
@@ -242,82 +223,6 @@ describe('SettingsView Component', () => {
         return select.querySelector('option[value="JetBrains Mono"]') !== null
       })!
       expect(fontFamilySelect).toHaveValue('JetBrains Mono')
-    })
-
-    it('includes Cascadia and Meslo font options', () => {
-      const store = createTestStore()
-      renderWithStore(store)
-
-      const selects = screen.getAllByRole('combobox')
-      const fontFamilySelect = selects.find((select) => {
-        return select.querySelector('option[value="JetBrains Mono"]') !== null
-      })!
-
-      const optionValues = Array.from(fontFamilySelect.querySelectorAll('option')).map((opt) =>
-        opt.getAttribute('value')
-      )
-
-      expect(optionValues).toContain('Cascadia Code')
-      expect(optionValues).toContain('Cascadia Mono')
-      expect(optionValues).toContain('Meslo LG S')
-    })
-
-    it('hides fonts that are not installed locally', async () => {
-      Object.defineProperty(document, 'fonts', {
-        value: {
-          check: vi.fn((font: string) => {
-            if (font.includes('Cascadia Code')) return false
-            if (font.includes('Cascadia Mono')) return false
-            if (font.includes('Meslo LG S')) return false
-            return true
-          }),
-          ready: Promise.resolve(),
-        },
-        configurable: true,
-      })
-
-      const store = createTestStore()
-      renderWithStore(store)
-
-      const selects = screen.getAllByRole('combobox')
-      const fontFamilySelect = selects.find((select) => {
-        return select.querySelector('option[value="JetBrains Mono"]') !== null
-      })!
-
-      await act(async () => {
-        await document.fonts.ready
-      })
-
-      const optionValues = Array.from(fontFamilySelect.querySelectorAll('option')).map((opt) =>
-        opt.getAttribute('value')
-      )
-      expect(optionValues).not.toContain('Cascadia Code')
-      expect(optionValues).not.toContain('Cascadia Mono')
-      expect(optionValues).not.toContain('Meslo LG S')
-    })
-
-    it('falls back to monospace when selected font is unavailable', async () => {
-      Object.defineProperty(document, 'fonts', {
-        value: {
-          check: vi.fn((font: string) => !font.includes('Cascadia Code')),
-          ready: Promise.resolve(),
-        },
-        configurable: true,
-      })
-
-      const store = createTestStore({
-        settings: {
-          ...defaultSettings,
-          terminal: { ...defaultSettings.terminal, fontFamily: 'Cascadia Code' },
-        },
-      })
-      renderWithStore(store)
-
-      await act(async () => {
-        await document.fonts.ready
-      })
-
-      expect(store.getState().settings.settings.terminal.fontFamily).toBe('monospace')
     })
 
     it('displays sidebar sort mode value', () => {

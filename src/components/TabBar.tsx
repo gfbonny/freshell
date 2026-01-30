@@ -106,18 +106,17 @@ export default function TabBar() {
   // Compute display title for a single tab
   // Priority: user-set title > programmatically-set title (e.g., from Claude) > derived name
   const getDisplayTitle = useCallback((tab: Tab): string => {
-    const title = typeof tab.title === 'string' ? tab.title : ''
-    if (tab.titleSetByUser && title) {
-      return title
+    if (tab.titleSetByUser) {
+      return tab.title
     }
     const layout = paneLayouts[tab.id]
     const derivedName = layout ? deriveTabName(layout) : null
     // If tab has a non-default title (not "Tab N"), prefer it over derived name
     // This preserves titles set by Claude via terminal.title.updated
-    if (title && !/^Tab \d+$/.test(title) && title !== derivedName) {
-      return title
+    if (!tab.title.match(/^Tab \d+$/) && tab.title !== derivedName) {
+      return tab.title
     }
-    return derivedName ?? (title || 'Tab')
+    return derivedName ?? tab.title
   }, [paneLayouts])
 
   const [renamingId, setRenamingId] = useState<string | null>(null)
