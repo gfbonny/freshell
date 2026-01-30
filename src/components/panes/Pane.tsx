@@ -20,7 +20,7 @@ export default function Pane({
     <div
       className={cn(
         'relative h-full w-full overflow-hidden',
-        isActive && 'ring-2 ring-foreground/30 shadow-[0_0_20px_hsl(var(--foreground)/0.1)]'
+        !isActive && 'opacity-70'
       )}
       onClick={onFocus}
     >

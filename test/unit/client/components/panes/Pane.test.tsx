@@ -74,7 +74,7 @@ describe('Pane', () => {
   })
 
   describe('active state styling', () => {
-    it('applies ring and shadow styling when active', () => {
+    it('does not apply opacity when active', () => {
       const onClose = vi.fn()
       const onFocus = vi.fn()
 
@@ -90,11 +90,10 @@ describe('Pane', () => {
       )
 
       const paneDiv = container.firstChild as HTMLElement
-      expect(paneDiv.className).toContain('ring-2')
-      expect(paneDiv.className).toContain('shadow-')
+      expect(paneDiv.className).not.toContain('opacity-')
     })
 
-    it('does not apply ring or shadow styling when inactive', () => {
+    it('applies reduced opacity when inactive', () => {
       const onClose = vi.fn()
       const onFocus = vi.fn()
 
@@ -110,10 +109,8 @@ describe('Pane', () => {
       )
 
       const paneDiv = container.firstChild as HTMLElement
-      // Should have base classes but not the ring or shadow
       expect(paneDiv.className).toContain('relative')
-      expect(paneDiv.className).not.toContain('ring-2')
-      expect(paneDiv.className).not.toContain('shadow-[')
+      expect(paneDiv.className).toContain('opacity-70')
     })
   })
 
