@@ -51,6 +51,11 @@ async function main() {
     res.sendFile(resolved)
   })
 
+  // Health check endpoint (no auth required - used by precheck script)
+  app.get('/api/health', (_req, res) => {
+    res.json({ app: 'freshell', ok: true })
+  })
+
   // Basic rate limiting for /api
   app.use(
     '/api',
@@ -63,10 +68,6 @@ async function main() {
   )
 
   app.use('/api', httpAuthMiddleware)
-
-  app.get('/api/health', (_req, res) => {
-    res.json({ ok: true })
-  })
 
   app.get('/api/debug', async (_req, res) => {
     const cfg = await configStore.snapshot()
