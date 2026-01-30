@@ -7,6 +7,9 @@ vi.mock('lucide-react', () => ({
   X: ({ className }: { className?: string }) => (
     <svg data-testid="x-icon" className={className} />
   ),
+  Circle: ({ className }: { className?: string }) => (
+    <svg data-testid="circle-icon" className={className} />
+  ),
 }))
 
 describe('Pane', () => {
@@ -246,6 +249,76 @@ describe('Pane', () => {
       )
 
       expect(screen.getByTestId('browser-content')).toBeInTheDocument()
+    })
+  })
+
+  describe('header rendering', () => {
+    it('renders PaneHeader when not the only pane and title is provided', () => {
+      render(
+        <Pane
+          isActive={true}
+          isOnlyPane={false}
+          title="My Terminal"
+          status="running"
+          onClose={vi.fn()}
+          onFocus={vi.fn()}
+        >
+          <div>Content</div>
+        </Pane>
+      )
+
+      expect(screen.getByText('My Terminal')).toBeInTheDocument()
+    })
+
+    it('does not render PaneHeader when only pane', () => {
+      render(
+        <Pane
+          isActive={true}
+          isOnlyPane={true}
+          title="My Terminal"
+          status="running"
+          onClose={vi.fn()}
+          onFocus={vi.fn()}
+        >
+          <div>Content</div>
+        </Pane>
+      )
+
+      expect(screen.queryByText('My Terminal')).not.toBeInTheDocument()
+    })
+
+    it('renders fallback close button when no title provided but multiple panes', () => {
+      render(
+        <Pane
+          isActive={true}
+          isOnlyPane={false}
+          onClose={vi.fn()}
+          onFocus={vi.fn()}
+        >
+          <div>Content</div>
+        </Pane>
+      )
+
+      expect(screen.getByTitle('Close pane')).toBeInTheDocument()
+    })
+
+    it('header close button triggers onClose', () => {
+      const onClose = vi.fn()
+      render(
+        <Pane
+          isActive={true}
+          isOnlyPane={false}
+          title="My Terminal"
+          status="running"
+          onClose={onClose}
+          onFocus={vi.fn()}
+        >
+          <div>Content</div>
+        </Pane>
+      )
+
+      fireEvent.click(screen.getByTitle('Close pane'))
+      expect(onClose).toHaveBeenCalledTimes(1)
     })
   })
 })

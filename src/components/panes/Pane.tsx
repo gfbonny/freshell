@@ -1,9 +1,13 @@
 import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import type { TerminalStatus } from '@/store/types'
+import PaneHeader from './PaneHeader'
 
 interface PaneProps {
   isActive: boolean
   isOnlyPane: boolean
+  title?: string
+  status?: TerminalStatus
   onClose: () => void
   onFocus: () => void
   children: React.ReactNode
@@ -12,20 +16,34 @@ interface PaneProps {
 export default function Pane({
   isActive,
   isOnlyPane,
+  title,
+  status,
   onClose,
   onFocus,
   children,
 }: PaneProps) {
+  const showHeader = !isOnlyPane && title !== undefined
+
   return (
     <div
       className={cn(
-        'relative h-full w-full overflow-hidden',
+        'relative h-full w-full overflow-hidden flex flex-col',
         !isActive && 'opacity-70'
       )}
       onClick={onFocus}
     >
-      {/* Close button - hidden if only pane */}
-      {!isOnlyPane && (
+      {/* Pane header - shown when multiple panes and title available */}
+      {showHeader && (
+        <PaneHeader
+          title={title}
+          status={status || 'creating'}
+          isActive={isActive}
+          onClose={onClose}
+        />
+      )}
+
+      {/* Fallback close button - shown when no header but multiple panes */}
+      {!isOnlyPane && !showHeader && (
         <button
           onClick={(e) => {
             e.stopPropagation()
@@ -39,7 +57,7 @@ export default function Pane({
       )}
 
       {/* Content */}
-      <div className="h-full w-full">
+      <div className="flex-1 min-h-0 w-full">
         {children}
       </div>
     </div>
