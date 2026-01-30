@@ -14,3 +14,32 @@ export function shallowEqual(a: any, b: any): boolean {
   if (aKeys.length !== bKeys.length) return false
   return aKeys.every((k) => a[k] === b[k])
 }
+
+export interface BuildShareUrlOptions {
+  currentUrl: string
+  lanIp: string | null
+  token: string | null
+  isDev: boolean
+}
+
+export function buildShareUrl(options: BuildShareUrlOptions): string {
+  const { currentUrl, lanIp, token, isDev } = options
+  const url = new URL(currentUrl)
+
+  // In dev mode, always use port 5173 (Vite dev server) for remote access
+  if (isDev) {
+    url.port = '5173'
+  }
+
+  // Use LAN IP if provided, otherwise keep current hostname
+  if (lanIp) {
+    url.hostname = lanIp
+  }
+
+  // Add token if provided
+  if (token) {
+    url.searchParams.set('token', token)
+  }
+
+  return url.toString()
+}

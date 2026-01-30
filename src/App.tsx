@@ -5,6 +5,7 @@ import { setSettings } from '@/store/settingsSlice'
 import { setProjects } from '@/store/sessionsSlice'
 import { addTab, removeTab } from '@/store/tabsSlice'
 import { api } from '@/lib/api'
+import { buildShareUrl } from '@/lib/utils'
 import { getWsClient } from '@/lib/ws-client'
 import { useThemeEffect } from '@/hooks/useTheme'
 import Sidebar, { AppView } from '@/components/Sidebar'
@@ -51,16 +52,13 @@ export default function App() {
       // Fall back to current host if LAN info unavailable
     }
 
-    const url = new URL(window.location.href)
-    if (lanIp) {
-      url.hostname = lanIp
-    }
     const token = sessionStorage.getItem('auth-token')
-    if (token) {
-      url.searchParams.set('token', token)
-    }
-
-    const shareUrl = url.toString()
+    const shareUrl = buildShareUrl({
+      currentUrl: window.location.href,
+      lanIp,
+      token,
+      isDev: import.meta.env.DEV,
+    })
 
     // On Windows, show a modal instead of using system share
     const isWindows = navigator.platform.includes('Win')

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { cn, isMacLike, shallowEqual } from '../../../src/lib/utils'
+import { cn, isMacLike, shallowEqual, buildShareUrl } from '../../../src/lib/utils'
 
 describe('utils', () => {
   describe('cn (classNames)', () => {
@@ -304,6 +304,129 @@ describe('utils', () => {
         expect(shallowEqual({ arr }, { arr })).toBe(true)
         // Different array instances are not equal (shallow comparison)
         expect(shallowEqual({ arr: [1, 2] }, { arr: [1, 2] })).toBe(false)
+      })
+    })
+  })
+
+  describe('buildShareUrl', () => {
+    describe('development mode port handling', () => {
+      it('uses port 5173 when current port is 3001 in dev mode', () => {
+        const result = buildShareUrl({
+          currentUrl: 'http://localhost:3001/',
+          lanIp: '192.168.1.100',
+          token: 'test-token',
+          isDev: true,
+        })
+        expect(result).toBe('http://192.168.1.100:5173/?token=test-token')
+      })
+
+      it('preserves port 5173 in dev mode', () => {
+        const result = buildShareUrl({
+          currentUrl: 'http://localhost:5173/',
+          lanIp: '192.168.1.100',
+          token: 'test-token',
+          isDev: true,
+        })
+        expect(result).toBe('http://192.168.1.100:5173/?token=test-token')
+      })
+
+      it('uses port 5173 when on any non-5173 port in dev mode', () => {
+        const result = buildShareUrl({
+          currentUrl: 'http://localhost:8080/',
+          lanIp: '192.168.1.100',
+          token: 'test-token',
+          isDev: true,
+        })
+        expect(result).toBe('http://192.168.1.100:5173/?token=test-token')
+      })
+    })
+
+    describe('production mode port handling', () => {
+      it('preserves port 3001 in production mode', () => {
+        const result = buildShareUrl({
+          currentUrl: 'http://localhost:3001/',
+          lanIp: '192.168.1.100',
+          token: 'test-token',
+          isDev: false,
+        })
+        expect(result).toBe('http://192.168.1.100:3001/?token=test-token')
+      })
+
+      it('preserves any port in production mode', () => {
+        const result = buildShareUrl({
+          currentUrl: 'http://localhost:8080/',
+          lanIp: '192.168.1.100',
+          token: 'test-token',
+          isDev: false,
+        })
+        expect(result).toBe('http://192.168.1.100:8080/?token=test-token')
+      })
+    })
+
+    describe('LAN IP handling', () => {
+      it('uses LAN IP when provided', () => {
+        const result = buildShareUrl({
+          currentUrl: 'http://localhost:5173/',
+          lanIp: '10.0.0.50',
+          token: 'abc123',
+          isDev: true,
+        })
+        expect(result).toBe('http://10.0.0.50:5173/?token=abc123')
+      })
+
+      it('falls back to current hostname when lanIp is null', () => {
+        const result = buildShareUrl({
+          currentUrl: 'http://localhost:5173/',
+          lanIp: null,
+          token: 'abc123',
+          isDev: true,
+        })
+        expect(result).toBe('http://localhost:5173/?token=abc123')
+      })
+    })
+
+    describe('token handling', () => {
+      it('includes token when provided', () => {
+        const result = buildShareUrl({
+          currentUrl: 'http://localhost:5173/',
+          lanIp: '192.168.1.1',
+          token: 'my-secret-token',
+          isDev: true,
+        })
+        expect(result).toContain('token=my-secret-token')
+      })
+
+      it('omits token when null', () => {
+        const result = buildShareUrl({
+          currentUrl: 'http://localhost:5173/',
+          lanIp: '192.168.1.1',
+          token: null,
+          isDev: true,
+        })
+        expect(result).toBe('http://192.168.1.1:5173/')
+      })
+    })
+
+    describe('path preservation', () => {
+      it('preserves existing path', () => {
+        const result = buildShareUrl({
+          currentUrl: 'http://localhost:5173/sessions/123',
+          lanIp: '192.168.1.100',
+          token: 'test',
+          isDev: true,
+        })
+        expect(result).toBe('http://192.168.1.100:5173/sessions/123?token=test')
+      })
+
+      it('preserves existing query params alongside token', () => {
+        const result = buildShareUrl({
+          currentUrl: 'http://localhost:5173/?view=terminal',
+          lanIp: '192.168.1.100',
+          token: 'test',
+          isDev: true,
+        })
+        expect(result).toContain('view=terminal')
+        expect(result).toContain('token=test')
       })
     })
   })
