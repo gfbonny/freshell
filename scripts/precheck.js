@@ -2,7 +2,7 @@
 
 /**
  * Pre-flight check before starting dev server.
- * Detects if another freshell instance is already running on ports 5173 (Vite) or 3001 (server).
+ * Detects if another freshell instance is already running on the configured ports.
  *
  * This prevents confusing scenarios where:
  * - A ghost process from a crashed dev server is still holding the port
@@ -10,15 +10,42 @@
  * - A freshell instance is running in WSL (which appears as Windows IP Helper service)
  *
  * Detection approach:
- * - Server (3001): Check /api/health for {"app": "freshell"} response
- * - Vite (5173): Check index page for "freshell" or "@vite/client" markers
+ * - Server: Check /api/health for {"app": "freshell"} response
+ * - Vite: Check index page for "freshell" or "@vite/client" markers
  *
  * Timeouts and connection resets are treated as "free" since they usually indicate
  * Windows networking services (like IP Helper for WSL) that won't block Vite from binding.
  */
 
-const VITE_PORT = 5173
-const SERVER_PORT = 3001
+import { readFileSync } from 'fs'
+import { resolve, dirname } from 'path'
+import { fileURLToPath } from 'url'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+
+// Load .env file manually (dotenv not available at this stage)
+function loadEnv() {
+  try {
+    const envPath = resolve(__dirname, '..', '.env')
+    const content = readFileSync(envPath, 'utf-8')
+    const env = {}
+    for (const line of content.split('\n')) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('#')) continue
+      const match = trimmed.match(/^([^=]+)=(.*)$/)
+      if (match) {
+        env[match[1]] = match[2]
+      }
+    }
+    return env
+  } catch {
+    return {}
+  }
+}
+
+const env = loadEnv()
+const VITE_PORT = parseInt(env.VITE_PORT || '5173', 10)
+const SERVER_PORT = parseInt(env.PORT || '3001', 10)
 
 /**
  * Check if freshell server is running on a port via /api/health endpoint.
