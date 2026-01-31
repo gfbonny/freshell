@@ -1,38 +1,115 @@
-import { useMemo, useCallback, useRef, useEffect } from 'react'
-import Editor from '@monaco-editor/react'
-import { FileText } from 'lucide-react'
-import { useAppDispatch } from '@/store/hooks'
+import { useRef, useState, useCallback, useEffect, useMemo, type ChangeEvent } from 'react'
+import { Editor } from '@monaco-editor/react'
+import type * as Monaco from 'monaco-editor'
+import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { updatePaneContent } from '@/store/panesSlice'
+import type { EditorPaneContent } from '@/store/paneTypes'
 import EditorToolbar from './EditorToolbar'
 import MarkdownPreview from './MarkdownPreview'
-
-function isPreviewable(filePath: string | null): boolean {
-  if (!filePath) return false
-  const lower = filePath.toLowerCase()
-  return lower.endsWith('.md') || lower.endsWith('.htm') || lower.endsWith('.html')
-}
-
-function isMarkdown(filePath: string | null): boolean {
-  if (!filePath) return false
-  return filePath.toLowerCase().endsWith('.md')
-}
-
-function isHtml(filePath: string | null): boolean {
-  if (!filePath) return false
-  const lower = filePath.toLowerCase()
-  return lower.endsWith('.htm') || lower.endsWith('.html')
-}
+import { api } from '@/lib/api'
+import { getFirstTerminalCwd } from '@/lib/pane-utils'
+import { isAbsolutePath, joinPath } from '@/lib/path-utils'
 
 const AUTO_SAVE_DELAY = 5000
+
+type TerminalInfo = {
+  terminalId: string
+  cwd?: string
+}
+
+type FileSuggestion = {
+  path: string
+  isDirectory: boolean
+}
+
+type FileSystemWritableFileStream = {
+  write: (data: string | Blob) => Promise<void>
+  close: () => Promise<void>
+}
+
+type FileSystemFileHandle = {
+  name?: string
+  getFile: () => Promise<File>
+  createWritable?: () => Promise<FileSystemWritableFileStream>
+}
+
+function debounce<T extends (...args: any[]) => any>(
+  func: T,
+  wait: number
+): (...args: Parameters<T>) => void {
+  let timeout: NodeJS.Timeout | null = null
+  return (...args: Parameters<T>) => {
+    if (timeout) clearTimeout(timeout)
+    timeout = setTimeout(() => func(...args), wait)
+  }
+}
+
+const LANGUAGE_MAP: Record<string, string> = {
+  js: 'javascript',
+  jsx: 'javascript',
+  ts: 'typescript',
+  tsx: 'typescript',
+  json: 'json',
+  html: 'html',
+  htm: 'html',
+  css: 'css',
+  scss: 'scss',
+  py: 'python',
+  java: 'java',
+  cpp: 'cpp',
+  c: 'c',
+  cs: 'csharp',
+  go: 'go',
+  rs: 'rust',
+  rb: 'ruby',
+  php: 'php',
+  sh: 'shell',
+  bash: 'shell',
+  md: 'markdown',
+  xml: 'xml',
+  yaml: 'yaml',
+  yml: 'yaml',
+  sql: 'sql',
+}
+
+function detectLanguageFromPath(filePath: string | null): string {
+  if (!filePath) return 'plaintext'
+  const ext = filePath.split('.').pop()?.toLowerCase() || ''
+  return LANGUAGE_MAP[ext] || 'plaintext'
+}
+
+function isMarkdown(filePath: string | null, language: string | null): boolean {
+  if (filePath) return filePath.toLowerCase().endsWith('.md')
+  return (language || '').toLowerCase() === 'markdown'
+}
+
+function isHtml(filePath: string | null, language: string | null): boolean {
+  if (filePath) {
+    const lower = filePath.toLowerCase()
+    return lower.endsWith('.htm') || lower.endsWith('.html')
+  }
+  return (language || '').toLowerCase() === 'html'
+}
+
+function isPreviewable(filePath: string | null, language: string | null): boolean {
+  return isMarkdown(filePath, language) || isHtml(filePath, language)
+}
+
+function resolveViewMode(
+  filePath: string | null,
+  language: string | null
+): 'source' | 'preview' {
+  return isPreviewable(filePath, language) ? 'preview' : 'source'
+}
 
 interface EditorPaneProps {
   paneId: string
   tabId: string
   filePath: string | null
   language: string | null
-  readOnly: boolean
+  readOnly?: boolean
   content: string
-  viewMode: 'source' | 'preview'
+  viewMode?: 'source' | 'preview'
 }
 
 export default function EditorPane({
@@ -40,18 +117,54 @@ export default function EditorPane({
   tabId,
   filePath,
   language,
-  readOnly,
+  readOnly = false,
   content,
-  viewMode,
+  viewMode = 'source',
 }: EditorPaneProps) {
   const dispatch = useAppDispatch()
-  const showViewToggle = useMemo(() => isPreviewable(filePath), [filePath])
-
-  // Auto-save refs
+  const layout = useAppSelector((s) => s.panes.layouts[tabId])
+  const defaultCwd = useAppSelector((s) => s.settings.settings.defaultCwd)
+  const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const pathInputRef = useRef<HTMLInputElement>(null)
+  const fileHandleRef = useRef<FileSystemFileHandle | null>(null)
   const autoSaveTimer = useRef<NodeJS.Timeout | null>(null)
   const pendingContent = useRef<string>(content)
 
-  // Cleanup auto-save timer on unmount
+  const [suggestions, setSuggestions] = useState<FileSuggestion[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+  const [editorValue, setEditorValue] = useState(content)
+  const [currentLanguage, setCurrentLanguage] = useState<string | null>(language)
+  const [currentViewMode, setCurrentViewMode] = useState<'source' | 'preview'>(viewMode)
+  const [terminalCwds, setTerminalCwds] = useState<Record<string, string>>({})
+  const [filePickerMessage, setFilePickerMessage] = useState<string | null>(null)
+
+  const firstTerminalCwd = useMemo(
+    () => (layout ? getFirstTerminalCwd(layout, terminalCwds) : null),
+    [layout, terminalCwds]
+  )
+  const showPreviewToggle = useMemo(
+    () => isPreviewable(filePath, currentLanguage),
+    [filePath, currentLanguage]
+  )
+  const editorLanguage = currentLanguage || 'plaintext'
+  const defaultBrowseRoot = firstTerminalCwd || defaultCwd || null
+  const isHtmlPreview = isHtml(filePath, currentLanguage)
+  const showEmptyState = !filePath && !editorValue
+
+  useEffect(() => {
+    setEditorValue(content)
+    pendingContent.current = content
+  }, [content])
+
+  useEffect(() => {
+    setCurrentLanguage(language)
+  }, [language])
+
+  useEffect(() => {
+    setCurrentViewMode(viewMode)
+  }, [viewMode])
+
   useEffect(() => {
     return () => {
       if (autoSaveTimer.current) {
@@ -60,203 +173,465 @@ export default function EditorPane({
     }
   }, [])
 
-  const scheduleAutoSave = useCallback(() => {
-    // Don't auto-save scratch pads (no filePath) or read-only files
-    if (!filePath || readOnly) return
-
-    if (autoSaveTimer.current) {
-      clearTimeout(autoSaveTimer.current)
+  useEffect(() => {
+    if (!layout) {
+      setTerminalCwds({})
+      return
     }
 
-    autoSaveTimer.current = setTimeout(async () => {
+    let cancelled = false
+
+    const fetchTerminalCwds = async () => {
       try {
-        const token = sessionStorage.getItem('auth-token') || ''
-        await fetch('/api/files/write', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-auth-token': token,
-          },
-          body: JSON.stringify({
-            path: filePath,
-            content: pendingContent.current,
-          }),
-        })
+        const terminals = await api.get<TerminalInfo[]>('/api/terminals')
+        if (cancelled) return
+        const nextMap: Record<string, string> = {}
+        if (Array.isArray(terminals)) {
+          for (const terminal of terminals) {
+            if (terminal.terminalId && terminal.cwd) {
+              nextMap[terminal.terminalId] = terminal.cwd
+            }
+          }
+        }
+        setTerminalCwds(nextMap)
       } catch (err) {
-        console.error('Auto-save failed:', err)
+        if (cancelled) return
+        const message = err instanceof Error ? err.message : String(err)
+        console.error(
+          JSON.stringify({
+            severity: 'error',
+            event: 'editor_terminal_list_fetch_failed',
+            error: message,
+          })
+        )
+        setTerminalCwds({})
       }
-    }, AUTO_SAVE_DELAY)
-  }, [filePath, readOnly])
+    }
+
+    fetchTerminalCwds()
+
+    return () => {
+      cancelled = true
+    }
+  }, [layout])
+
+  useEffect(() => {
+    if (!filePickerMessage) return
+    const timer = setTimeout(() => setFilePickerMessage(null), 4000)
+    return () => clearTimeout(timer)
+  }, [filePickerMessage])
+
+  function handleEditorMount(editor: Monaco.editor.IStandaloneCodeEditor) {
+    editorRef.current = editor
+    editor.focus()
+  }
+
+  const debouncedPathChange = useCallback(
+    debounce(async (path: string) => {
+      if (!path.trim()) {
+        setSuggestions([])
+        return
+      }
+
+      try {
+        let url = `/api/files/complete?prefix=${encodeURIComponent(path)}`
+        if (!isAbsolutePath(path) && defaultBrowseRoot) {
+          url += `&root=${encodeURIComponent(defaultBrowseRoot)}`
+        }
+        const response = await api.get<{ suggestions?: FileSuggestion[] }>(url)
+        setSuggestions(response?.suggestions || [])
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        console.error(
+          JSON.stringify({
+            severity: 'error',
+            event: 'editor_autocomplete_failed',
+            error: message,
+          })
+        )
+        setSuggestions([])
+      }
+    }, 300),
+    [defaultBrowseRoot]
+  )
+
+  const handlePathChange = useCallback(
+    (path: string) => {
+      debouncedPathChange(path)
+    },
+    [debouncedPathChange]
+  )
 
   const updateContent = useCallback(
     (updates: Partial<{
       filePath: string | null
       language: string | null
       content: string
+      readOnly: boolean
       viewMode: 'source' | 'preview'
     }>) => {
+      const nextContent: EditorPaneContent = {
+        kind: 'editor',
+        filePath: updates.filePath !== undefined ? updates.filePath : filePath,
+        language: updates.language !== undefined ? updates.language : currentLanguage,
+        readOnly: updates.readOnly !== undefined ? updates.readOnly : readOnly,
+        content: updates.content !== undefined ? updates.content : editorValue,
+        viewMode: updates.viewMode !== undefined ? updates.viewMode : currentViewMode,
+      }
+
       dispatch(
         updatePaneContent({
           tabId,
           paneId,
-          content: {
-            kind: 'editor',
-            filePath: updates.filePath !== undefined ? updates.filePath : filePath,
-            language: updates.language !== undefined ? updates.language : language,
-            readOnly,
-            content: updates.content !== undefined ? updates.content : content,
-            viewMode: updates.viewMode !== undefined ? updates.viewMode : viewMode,
-          },
+          content: nextContent,
         })
       )
     },
-    [dispatch, tabId, paneId, filePath, language, readOnly, content, viewMode]
+    [dispatch, tabId, paneId, filePath, currentLanguage, readOnly, editorValue, currentViewMode]
   )
 
-  const handleContentChange = useCallback(
-    (value: string | undefined) => {
-      if (value === undefined) return
-      pendingContent.current = value
-      updateContent({ content: value })
-      scheduleAutoSave()
-    },
-    [updateContent, scheduleAutoSave]
-  )
-
-  const loadFile = useCallback(
+  const handlePathSelect = useCallback(
     async (path: string) => {
+      if (!path.trim()) return
+
+      fileHandleRef.current = null
+      const resolvedPath =
+        defaultBrowseRoot && !isAbsolutePath(path) ? joinPath(defaultBrowseRoot, path) : path
+
+      setIsLoading(true)
       try {
-        const token = sessionStorage.getItem('auth-token') || ''
-        const res = await fetch(`/api/files/read?path=${encodeURIComponent(path)}`, {
-          headers: { 'x-auth-token': token },
-        })
-        if (!res.ok) {
-          console.error('Failed to load file:', res.statusText)
-          return
-        }
-        const data = await res.json()
+        const response = await api.get<{
+          content: string
+          language?: string
+          filePath?: string
+        }>(`/api/files/read?path=${encodeURIComponent(resolvedPath)}`)
 
-        // Determine language from extension
-        const ext = path.split('.').pop()?.toLowerCase()
-        const langMap: Record<string, string> = {
-          ts: 'typescript',
-          tsx: 'typescriptreact',
-          js: 'javascript',
-          jsx: 'javascriptreact',
-          md: 'markdown',
-          json: 'json',
-          html: 'html',
-          htm: 'html',
-          css: 'css',
-          py: 'python',
-        }
-
-        // Determine default viewMode for previewable files
-        const defaultViewMode = isMarkdown(path) || isHtml(path) ? 'preview' : 'source'
+        const resolvedFilePath = response.filePath || resolvedPath
+        const resolvedLanguage = response.language || detectLanguageFromPath(resolvedFilePath)
+        const nextViewMode = resolveViewMode(resolvedFilePath, resolvedLanguage)
 
         updateContent({
-          filePath: path,
-          language: langMap[ext || ''] || null,
-          content: data.content,
-          viewMode: defaultViewMode,
+          filePath: resolvedFilePath,
+          language: resolvedLanguage,
+          content: response.content,
+          viewMode: nextViewMode,
         })
+
+        setEditorValue(response.content)
+        setCurrentLanguage(resolvedLanguage)
+        setCurrentViewMode(nextViewMode)
+        pendingContent.current = response.content
+
+        if (editorRef.current) {
+          const model = editorRef.current.getModel()
+          if (model) {
+            const monaco = (window as any).monaco
+            if (monaco?.editor?.setModelLanguage) {
+              monaco.editor.setModelLanguage(model, resolvedLanguage)
+            }
+          }
+        }
+
+        setSuggestions([])
       } catch (err) {
-        console.error('Failed to load file:', err)
+        const message = err instanceof Error ? err.message : String(err)
+        console.error(
+          JSON.stringify({
+            severity: 'error',
+            event: 'editor_file_load_failed',
+            error: message,
+          })
+        )
+      } finally {
+        setIsLoading(false)
+      }
+    },
+    [defaultBrowseRoot, updateContent]
+  )
+
+  const handleFileInputChange = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0]
+      if (!file) return
+
+      fileHandleRef.current = null
+      setIsLoading(true)
+      try {
+        let fileContent: string
+        if (typeof file.text === 'function') {
+          fileContent = await file.text()
+        } else {
+          fileContent = await new Promise((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onerror = () => reject(new Error('Failed to read file'))
+            reader.onload = () => resolve(String(reader.result || ''))
+            reader.readAsText(file)
+          })
+        }
+
+        const detectedLanguage = detectLanguageFromPath(file.name)
+        const nextViewMode = resolveViewMode(null, detectedLanguage)
+
+        updateContent({
+          filePath: null,
+          language: detectedLanguage,
+          readOnly: false,
+          content: fileContent,
+          viewMode: nextViewMode,
+        })
+
+        setEditorValue(fileContent)
+        setCurrentLanguage(detectedLanguage)
+        setCurrentViewMode(nextViewMode)
+        pendingContent.current = fileContent
+
+        if (editorRef.current) {
+          const model = editorRef.current.getModel()
+          if (model) {
+            const monaco = (window as any).monaco
+            if (monaco?.editor?.setModelLanguage) {
+              monaco.editor.setModelLanguage(model, detectedLanguage)
+            }
+          }
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        console.error(
+          JSON.stringify({
+            severity: 'error',
+            event: 'editor_file_picker_failed',
+            error: message,
+          })
+        )
+      } finally {
+        setIsLoading(false)
       }
     },
     [updateContent]
   )
 
-  const handlePathChange = useCallback(
-    (path: string) => {
-      if (path) {
-        loadFile(path)
-      } else {
-        updateContent({ filePath: null })
+  const handleOpenFilePicker = useCallback(async () => {
+    const picker = (window as Window & {
+      showOpenFilePicker?: (options?: { multiple?: boolean }) => Promise<FileSystemFileHandle[]>
+    }).showOpenFilePicker
+
+    if (!picker) {
+      setFilePickerMessage('Native file picker is unavailable. Use the path field instead.')
+      console.warn(
+        JSON.stringify({
+          severity: 'warn',
+          event: 'editor_file_picker_unavailable',
+        })
+      )
+      const input = fileInputRef.current
+      if (input) {
+        input.value = ''
+        input.click()
       }
+      return
+    }
+
+    setIsLoading(true)
+    try {
+      const handles = await picker({ multiple: false })
+      const handle = handles?.[0]
+      if (!handle) return
+
+      fileHandleRef.current = handle
+      const file = await handle.getFile()
+      const resolvedName = handle.name || file.name
+
+      let fileContent: string
+      if (typeof file.text === 'function') {
+        fileContent = await file.text()
+      } else {
+        fileContent = await new Promise((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onerror = () => reject(new Error('Failed to read file'))
+          reader.onload = () => resolve(String(reader.result || ''))
+          reader.readAsText(file)
+        })
+      }
+
+      const detectedLanguage = detectLanguageFromPath(resolvedName)
+      const nextViewMode = resolveViewMode(resolvedName, detectedLanguage)
+
+      updateContent({
+        filePath: resolvedName || null,
+        language: detectedLanguage,
+        readOnly: false,
+        content: fileContent,
+        viewMode: nextViewMode,
+      })
+
+      setEditorValue(fileContent)
+      setCurrentLanguage(detectedLanguage)
+      setCurrentViewMode(nextViewMode)
+      pendingContent.current = fileContent
+
+      if (editorRef.current) {
+        const model = editorRef.current.getModel()
+        if (model) {
+          const monaco = (window as any).monaco
+          if (monaco?.editor?.setModelLanguage) {
+            monaco.editor.setModelLanguage(model, detectedLanguage)
+          }
+        }
+      }
+
+      setSuggestions([])
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return
+      }
+      const message = err instanceof Error ? err.message : String(err)
+      console.error(
+        JSON.stringify({
+          severity: 'error',
+          event: 'editor_file_picker_failed',
+          error: message,
+        })
+      )
+      setFilePickerMessage('Unable to open the native file picker.')
+    } finally {
+      setIsLoading(false)
+    }
+  }, [updateContent])
+
+  const scheduleAutoSave = useCallback(
+    (value: string) => {
+      if (readOnly) return
+      if (!filePath && !fileHandleRef.current) return
+
+      if (autoSaveTimer.current) {
+        clearTimeout(autoSaveTimer.current)
+      }
+
+      autoSaveTimer.current = setTimeout(async () => {
+        try {
+          const handle = fileHandleRef.current
+          if (handle?.createWritable) {
+            const writable = await handle.createWritable()
+            await writable.write(value)
+            await writable.close()
+            return
+          }
+
+          if (filePath) {
+            await api.post('/api/files/write', {
+              path: filePath,
+              content: value,
+            })
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          console.error(
+            JSON.stringify({
+              severity: 'error',
+              event: 'editor_autosave_failed',
+              error: message,
+            })
+          )
+        }
+      }, AUTO_SAVE_DELAY)
     },
-    [loadFile, updateContent]
+    [filePath, readOnly]
   )
 
-  const handleOpenFile = useCallback(() => {
-    // TODO: Native file picker
-  }, [])
+  const handleEditorChange = useCallback(
+    (value: string | undefined) => {
+      const newValue = value ?? ''
+      setEditorValue(newValue)
+      pendingContent.current = newValue
+      updateContent({ content: newValue })
+      scheduleAutoSave(newValue)
+    },
+    [updateContent, scheduleAutoSave]
+  )
 
-  const handleViewModeToggle = useCallback(() => {
-    updateContent({ viewMode: viewMode === 'source' ? 'preview' : 'source' })
-  }, [updateContent, viewMode])
-
-  const showPreview = viewMode === 'preview' && showViewToggle
-
-  const renderContent = () => {
-    if (showPreview && isMarkdown(filePath)) {
-      return <MarkdownPreview content={content} />
-    }
-
-    if (showPreview && isHtml(filePath)) {
-      return (
-        <iframe
-          srcDoc={content}
-          title="HTML Preview"
-          className="w-full h-full border-0 bg-white"
-          sandbox="allow-scripts"
-        />
-      )
-    }
-
-    return (
-      <Editor
-        height="100%"
-        language={language || undefined}
-        value={content}
-        onChange={handleContentChange}
-        options={{
-          readOnly,
-          minimap: { enabled: false },
-          scrollBeyondLastLine: false,
-        }}
-        theme="vs-dark"
-      />
-    )
-  }
-
-  // Empty state
-  if (!filePath && !content) {
-    return (
-      <div className="flex flex-col h-full w-full bg-background">
-        <EditorToolbar
-          filePath=""
-          onPathChange={handlePathChange}
-          onOpenFile={handleOpenFile}
-          viewMode={viewMode}
-          onViewModeToggle={handleViewModeToggle}
-          showViewToggle={false}
-        />
-        <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-4">
-          <FileText className="h-12 w-12 opacity-50" />
-          <button
-            className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
-            onClick={handleOpenFile}
-          >
-            Open File
-          </button>
-          <span className="text-sm">or start typing to create a scratch pad</span>
-        </div>
-      </div>
-    )
-  }
+  const handleToggleViewMode = useCallback(() => {
+    const nextMode = currentViewMode === 'source' ? 'preview' : 'source'
+    setCurrentViewMode(nextMode)
+    updateContent({ viewMode: nextMode })
+  }, [currentViewMode, updateContent])
 
   return (
-    <div className="flex flex-col h-full w-full bg-background">
-      <EditorToolbar
-        filePath={filePath || ''}
-        onPathChange={handlePathChange}
-        onOpenFile={handleOpenFile}
-        viewMode={viewMode}
-        onViewModeToggle={handleViewModeToggle}
-        showViewToggle={showViewToggle}
+    <div className="h-full w-full flex flex-col" data-testid="editor-pane" data-pane-id={paneId}>
+      <div className="flex items-center border-b border-border">
+        <div className="flex-1">
+          <EditorToolbar
+            filePath={filePath}
+            onPathChange={handlePathChange}
+            onPathSelect={handlePathSelect}
+            onOpenFilePicker={handleOpenFilePicker}
+            suggestions={suggestions}
+            viewMode={currentViewMode}
+            onViewModeToggle={handleToggleViewMode}
+            showViewToggle={showPreviewToggle}
+            defaultBrowseRoot={defaultBrowseRoot}
+            inputRef={pathInputRef}
+          />
+        </div>
+      </div>
+      {filePickerMessage && (
+        <div className="px-3 py-1 text-xs text-muted-foreground" role="status">
+          {filePickerMessage}
+        </div>
+      )}
+      <div className="flex-1 relative">
+        {isLoading && (
+          <div className="absolute inset-0 flex items-center justify-center bg-background/50 z-10">
+            <div className="text-sm text-muted-foreground">Loading file...</div>
+          </div>
+        )}
+        {showEmptyState ? (
+          <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">
+            <button
+              className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90"
+              onClick={() => pathInputRef.current?.focus()}
+            >
+              Open File
+            </button>
+            <span className="text-sm">or start typing to create a scratch pad</span>
+          </div>
+        ) : currentViewMode === 'preview' && showPreviewToggle ? (
+          isHtmlPreview ? (
+            <iframe
+              title="HTML preview"
+              className="h-full w-full border-0"
+              sandbox=""
+              srcDoc={editorValue}
+            />
+          ) : (
+            <MarkdownPreview content={editorValue} language="markdown" />
+          )
+        ) : (
+          <Editor
+            height="100%"
+            language={editorLanguage}
+            value={editorValue}
+            theme="vs-dark"
+            onMount={handleEditorMount}
+            onChange={handleEditorChange}
+            options={{
+              minimap: { enabled: false },
+              fontSize: 14,
+              lineNumbers: 'on',
+              scrollBeyondLastLine: false,
+              automaticLayout: true,
+              tabSize: 2,
+              readOnly,
+            }}
+          />
+        )}
+      </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        style={{ display: 'none' }}
+        data-testid="file-input"
+        onChange={handleFileInputChange}
       />
-      <div className="flex-1 min-h-0">{renderContent()}</div>
     </div>
   )
 }
