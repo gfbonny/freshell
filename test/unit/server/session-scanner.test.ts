@@ -222,6 +222,32 @@ describe('SessionScanner', () => {
       expect(scanAfter.status).toBe('healthy')
       expect(scanAfter.chainDepth).toBe(21)
     })
+
+    it('repairs real-world corrupted session from production', async () => {
+      // This is a real corrupted session from freshell development
+      // Session b7936c10-4935-441c-837c-c1f33cafec2d had a progress message
+      // with parentUuid pointing to a subagent UUID that never got merged back
+      const testFile = await copyFixture('real-corrupted.jsonl')
+
+      // Verify it's actually corrupted
+      const scanBefore = await scanner.scan(testFile)
+      expect(scanBefore.status).toBe('corrupted')
+      expect(scanBefore.orphanCount).toBe(1)
+      expect(scanBefore.messageCount).toBe(4)
+      expect(scanBefore.chainDepth).toBe(2) // Only 2 messages reachable before break
+
+      // Repair it
+      const result = await scanner.repair(testFile)
+      expect(result.status).toBe('repaired')
+      expect(result.orphansFixed).toBe(1)
+      expect(result.newChainDepth).toBe(4) // All 4 messages now in chain
+
+      // Verify it's now healthy
+      const scanAfter = await scanner.scan(testFile)
+      expect(scanAfter.status).toBe('healthy')
+      expect(scanAfter.orphanCount).toBe(0)
+      expect(scanAfter.chainDepth).toBe(4)
+    })
   })
 
   describe('scanBatch()', () => {
