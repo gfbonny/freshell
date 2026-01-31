@@ -27,6 +27,7 @@ const mockSend = vi.fn()
 vi.mock('@/lib/ws-client', () => ({
   getWsClient: () => ({
     send: mockSend,
+    setHelloExtensionProvider: vi.fn(),
   }),
 }))
 

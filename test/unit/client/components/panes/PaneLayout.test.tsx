@@ -19,6 +19,7 @@ const { mockSend, mockTerminalView } = vi.hoisted(() => ({
 vi.mock('@/lib/ws-client', () => ({
   getWsClient: () => ({
     send: mockSend,
+    setHelloExtensionProvider: vi.fn(),
   }),
 }))
 

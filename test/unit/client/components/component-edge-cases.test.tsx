@@ -52,6 +52,7 @@ vi.mock('@/lib/ws-client', () => ({
     connect: mockWsConnect,
     onMessage: mockWsOnMessage,
     onReconnect: mockWsOnReconnect,
+    setHelloExtensionProvider: vi.fn(),
   }),
 }))
 

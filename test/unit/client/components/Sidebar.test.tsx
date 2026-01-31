@@ -10,6 +10,30 @@ import sessionsReducer from '@/store/sessionsSlice'
 import sessionActivityReducer from '@/store/sessionActivitySlice'
 import type { ProjectGroup, BackgroundTerminal } from '@/store/types'
 
+// Mock react-window's List component
+vi.mock('react-window', () => ({
+  List: ({ rowCount, rowComponent: Row, rowProps, style }: {
+    rowCount: number
+    rowComponent: React.ComponentType<any>
+    rowProps: any
+    style: React.CSSProperties
+  }) => {
+    const items = []
+    for (let i = 0; i < rowCount; i++) {
+      items.push(
+        <Row
+          key={i}
+          index={i}
+          style={{ height: 56 }}
+          ariaAttributes={{}}
+          {...rowProps}
+        />
+      )
+    }
+    return <div style={style} data-testid="virtualized-list">{items}</div>
+  },
+}))
+
 // Mock the WebSocket client
 const mockSend = vi.fn()
 const mockOnMessage = vi.fn(() => () => {})
