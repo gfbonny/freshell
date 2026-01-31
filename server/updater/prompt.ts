@@ -12,13 +12,17 @@ const BANNER_WIDTH = 45
 
 /**
  * Centers text within the banner width, accounting for ANSI escape codes.
+ * Handles cases where the visible text exceeds the banner width by
+ * using a minimum padding of 0 to prevent negative repeat counts.
+ *
  * @param text - The text to center (may include ANSI codes)
  * @param visibleLength - The visible length of the text (excluding ANSI codes)
+ * @returns The text padded with spaces on both sides to center it
  */
 function centerInBanner(text: string, visibleLength: number): string {
   const totalPadding = BANNER_WIDTH - visibleLength
-  const leftPad = Math.floor(totalPadding / 2)
-  const rightPad = totalPadding - leftPad
+  const leftPad = Math.max(0, Math.floor(totalPadding / 2))
+  const rightPad = Math.max(0, totalPadding - leftPad)
   return ' '.repeat(leftPad) + text + ' '.repeat(rightPad)
 }
 
@@ -53,6 +57,9 @@ export function formatUpdateBanner(currentVersion: string, latestVersion: string
  * Prompts the user interactively to confirm whether to update.
  * Displays the update banner and waits for user input.
  *
+ * In non-interactive mode (e.g., piped input, CI environments),
+ * returns false immediately to skip the update.
+ *
  * @param currentVersion - The currently installed version
  * @param latestVersion - The latest available version
  * @returns Promise that resolves to true if user confirms, false otherwise
@@ -64,12 +71,23 @@ export async function promptForUpdate(
   const banner = formatUpdateBanner(currentVersion, latestVersion)
   console.log(banner)
 
+  // Skip prompt in non-interactive mode
+  if (!process.stdin.isTTY) {
+    console.log('Non-interactive mode detected, skipping update prompt.')
+    return false
+  }
+
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout
   })
 
   return new Promise((resolve) => {
+    // Handle EOF (Ctrl+D) or unexpected close
+    rl.on('close', () => {
+      resolve(false)
+    })
+
     rl.question(`Upgrade now? [${GREEN}Y${RESET}/n] `, (answer) => {
       rl.close()
       const normalized = answer.trim().toLowerCase()
