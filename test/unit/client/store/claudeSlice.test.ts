@@ -23,7 +23,8 @@ describe('claudeSlice', () => {
 
       const state = store.getState().claude
       expect(state.sessions['session-1']).toBeDefined()
-      expect(state.sessions['session-1'].events).toEqual([])
+      expect(state.sessions['session-1'].messages).toEqual([])
+      expect(state.sessions['session-1'].result).toBeUndefined()
       expect(state.sessions['session-1'].status).toBe('running')
       expect(state.sessions['session-1'].prompt).toBe('hello')
     })
@@ -43,8 +44,8 @@ describe('claudeSlice', () => {
       store.dispatch(addClaudeEvent({ sessionId: 'session-1', event }))
 
       const state = store.getState().claude
-      expect(state.sessions['session-1'].events).toHaveLength(1)
-      expect(state.sessions['session-1'].events[0]).toEqual(event)
+      expect(state.sessions['session-1'].messages).toHaveLength(1)
+      expect(state.sessions['session-1'].messages[0]).toEqual(event)
     })
 
     it('ignores events for unknown sessions', () => {
@@ -78,6 +79,52 @@ describe('claudeSlice', () => {
 
       const state = store.getState().claude
       expect(state.sessions['session-1'].claudeSessionId).toBe('claude-session-abc')
+    })
+
+    it('stores result events separately', () => {
+      const store = createTestStore()
+      store.dispatch(createClaudeSession({ sessionId: 'session-1', prompt: 'test' }))
+
+      const resultEvent: ClaudeEvent = {
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        duration_ms: 1200,
+        session_id: 'abc',
+      }
+
+      store.dispatch(addClaudeEvent({ sessionId: 'session-1', event: resultEvent }))
+
+      const state = store.getState().claude
+      expect(state.sessions['session-1'].result).toEqual(resultEvent)
+      expect(state.sessions['session-1'].messages).toHaveLength(0)
+    })
+
+    it('retains full message history without capping', () => {
+      const store = createTestStore()
+      store.dispatch(createClaudeSession({ sessionId: 'session-1', prompt: 'test' }))
+
+      const firstEvent: ClaudeEvent = {
+        type: 'assistant',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'first' }] },
+        session_id: 'abc',
+        uuid: 'first',
+      }
+      store.dispatch(addClaudeEvent({ sessionId: 'session-1', event: firstEvent }))
+
+      for (let i = 0; i < 600; i += 1) {
+        const event: ClaudeEvent = {
+          type: 'assistant',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'msg-' + i }] },
+          session_id: 'abc',
+          uuid: 'msg-' + i,
+        }
+        store.dispatch(addClaudeEvent({ sessionId: 'session-1', event }))
+      }
+
+      const state = store.getState().claude
+      expect(state.sessions['session-1'].messages).toHaveLength(601)
+      expect(state.sessions['session-1'].messages[0]).toEqual(firstEvent)
     })
   })
 

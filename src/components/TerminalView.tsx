@@ -14,6 +14,8 @@ import { Loader2 } from 'lucide-react'
 import type { PaneContent, TerminalPaneContent } from '@/store/paneTypes'
 import 'xterm/css/xterm.css'
 
+const SESSION_ACTIVITY_THROTTLE_MS = 5000
+
 interface TerminalViewProps {
   tabId: string
   paneId: string
@@ -35,6 +37,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   const fitRef = useRef<FitAddon | null>(null)
   const mountedRef = useRef(false)
   const hiddenRef = useRef(hidden)
+  const lastSessionActivityAtRef = useRef(0)
 
   // Extract terminal-specific fields (safe because we check kind later)
   const isTerminal = paneContent.kind === 'terminal'
@@ -59,16 +62,22 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     hiddenRef.current = hidden
   }, [hidden])
 
+  useEffect(() => {
+    lastSessionActivityAtRef.current = 0
+  }, [tab?.resumeSessionId])
+
   // Helper to update pane content - uses ref to avoid recreation on content changes
   // This is CRITICAL: if updateContent depended on terminalContent directly,
   // it would be recreated on every status update, causing the effect to re-run
   const updateContent = useCallback((updates: Partial<TerminalPaneContent>) => {
     const current = contentRef.current
     if (!current) return
+    const next = { ...current, ...updates }
+    contentRef.current = next
     dispatch(updatePaneContent({
       tabId,
       paneId,
-      content: { ...current, ...updates },
+      content: next,
     }))
   }, [dispatch, tabId, paneId]) // NO terminalContent dependency - uses ref
 
@@ -118,7 +127,10 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         const now = Date.now()
         dispatch(updateTab({ id: currentTab.id, updates: { lastInputAt: now } }))
         if (currentTab.resumeSessionId) {
-          dispatch(updateSessionActivity({ sessionId: currentTab.resumeSessionId, lastInputAt: now }))
+          if (now - lastSessionActivityAtRef.current >= SESSION_ACTIVITY_THROTTLE_MS) {
+            lastSessionActivityAtRef.current = now
+            dispatch(updateSessionActivity({ sessionId: currentTab.resumeSessionId, lastInputAt: now }))
+          }
         }
       }
     })
@@ -344,7 +356,11 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         }
 
         if (msg.type === 'error' && msg.code === 'INVALID_TERMINAL_ID' && !msg.requestId) {
-          if (terminalIdRef.current) {
+          const currentTerminalId = terminalIdRef.current
+          if (msg.terminalId && msg.terminalId !== currentTerminalId) {
+            return
+          }
+          if (currentTerminalId) {
             term.writeln('\r\n[Reconnecting...]\r\n')
             const newRequestId = nanoid()
             requestIdRef.current = newRequestId

@@ -1,12 +1,13 @@
 // src/store/claudeSlice.ts
 import { createSlice, PayloadAction } from '@reduxjs/toolkit'
-import type { ClaudeEvent } from '@/lib/claude-types'
+import type { ClaudeEvent, MessageEvent, ResultEvent } from '@/lib/claude-types'
 
 export interface ClaudeSessionState {
   sessionId: string
   prompt: string
   status: 'running' | 'completed' | 'error'
-  events: ClaudeEvent[]
+  messages: MessageEvent[]
+  result?: ResultEvent
   claudeSessionId?: string
   cwd?: string
   createdAt: number
@@ -30,7 +31,7 @@ const claudeSlice = createSlice({
         prompt: action.payload.prompt,
         cwd: action.payload.cwd,
         status: 'running',
-        events: [],
+        messages: [],
         createdAt: Date.now(),
       }
     },
@@ -38,15 +39,23 @@ const claudeSlice = createSlice({
     addClaudeEvent(state, action: PayloadAction<{ sessionId: string; event: ClaudeEvent }>) {
       const session = state.sessions[action.payload.sessionId]
       if (session) {
-        session.events.push(action.payload.event)
+        const event = action.payload.event
+        if (event.type === 'assistant' || event.type === 'user') {
+          session.messages.push(event)
+        }
+
+        if (event.type === 'result') {
+          session.result = event
+        }
 
         // Extract Claude's session ID from init event
         if (
-          action.payload.event.type === 'system' &&
-          'subtype' in action.payload.event &&
-          action.payload.event.subtype === 'init'
+          event.type === 'system' &&
+          'subtype' in event &&
+          event.subtype === 'init'
         ) {
-          session.claudeSessionId = action.payload.event.session_id
+          session.claudeSessionId = event.session_id
+          session.cwd = event.cwd || session.cwd
         }
       }
     },
