@@ -1,6 +1,6 @@
 import { useRef, useCallback, useMemo } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { closePane, setActivePane, resizePanes } from '@/store/panesSlice'
+import { closePane, setActivePane, resizePanes, updatePaneContent } from '@/store/panesSlice'
 import type { PaneNode, PaneContent } from '@/store/paneTypes'
 import Pane from './Pane'
 import PaneDivider from './PaneDivider'
@@ -11,6 +11,7 @@ import PanePicker from './PanePicker'
 import { cn } from '@/lib/utils'
 import { getWsClient } from '@/lib/ws-client'
 import { derivePaneTitle } from '@/lib/derivePaneTitle'
+import { nanoid } from 'nanoid'
 
 // Stable empty object to avoid selector memoization issues
 const EMPTY_PANE_TITLES: Record<string, string> = {}
@@ -116,6 +117,65 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
   )
 }
 
+function PickerWrapper({
+  tabId,
+  paneId,
+  isOnlyPane,
+}: {
+  tabId: string
+  paneId: string
+  isOnlyPane: boolean
+}) {
+  const dispatch = useAppDispatch()
+
+  const handleSelect = useCallback((type: 'shell' | 'browser' | 'editor') => {
+    let newContent: PaneContent
+
+    switch (type) {
+      case 'shell':
+        newContent = {
+          kind: 'terminal',
+          mode: 'shell',
+          shell: 'system',
+          createRequestId: nanoid(),
+          status: 'creating',
+        }
+        break
+      case 'browser':
+        newContent = {
+          kind: 'browser',
+          url: '',
+          devToolsOpen: false,
+        }
+        break
+      case 'editor':
+        newContent = {
+          kind: 'editor',
+          filePath: null,
+          language: null,
+          readOnly: false,
+          content: '',
+          viewMode: 'source',
+        }
+        break
+    }
+
+    dispatch(updatePaneContent({ tabId, paneId, content: newContent }))
+  }, [dispatch, tabId, paneId])
+
+  const handleCancel = useCallback(() => {
+    dispatch(closePane({ tabId, paneId }))
+  }, [dispatch, tabId, paneId])
+
+  return (
+    <PanePicker
+      onSelect={handleSelect}
+      onCancel={handleCancel}
+      isOnlyPane={isOnlyPane}
+    />
+  )
+}
+
 function renderContent(tabId: string, paneId: string, content: PaneContent, isOnlyPane: boolean, hidden?: boolean) {
   if (content.kind === 'terminal') {
     // Terminal panes need a unique key based on paneId for proper lifecycle
@@ -143,9 +203,9 @@ function renderContent(tabId: string, paneId: string, content: PaneContent, isOn
 
   if (content.kind === 'picker') {
     return (
-      <PanePicker
-        onSelect={() => {/* Placeholder - Task 9 */}}
-        onCancel={() => {/* Placeholder - Task 9 */}}
+      <PickerWrapper
+        tabId={tabId}
+        paneId={paneId}
         isOnlyPane={isOnlyPane}
       />
     )
