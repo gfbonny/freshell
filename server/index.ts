@@ -333,7 +333,7 @@ async function main() {
 
   // Graceful shutdown handler
   let isShuttingDown = false
-  const shutdown = (signal: string) => {
+  const shutdown = async (signal: string) => {
     if (isShuttingDown) return
     isShuttingDown = true
 
