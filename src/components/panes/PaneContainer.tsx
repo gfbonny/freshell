@@ -7,6 +7,7 @@ import PaneDivider from './PaneDivider'
 import TerminalView from '../TerminalView'
 import BrowserPane from './BrowserPane'
 import EditorPane from './EditorPane'
+import PanePicker from './PanePicker'
 import { cn } from '@/lib/utils'
 import { getWsClient } from '@/lib/ws-client'
 import { derivePaneTitle } from '@/lib/derivePaneTitle'
@@ -82,7 +83,7 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
         onClose={() => handleClose(node.id, node.content)}
         onFocus={() => handleFocus(node.id)}
       >
-        {renderContent(tabId, node.id, node.content, hidden)}
+        {renderContent(tabId, node.id, node.content, isOnlyPane, hidden)}
       </Pane>
     )
   }
@@ -115,7 +116,7 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
   )
 }
 
-function renderContent(tabId: string, paneId: string, content: PaneContent, hidden?: boolean) {
+function renderContent(tabId: string, paneId: string, content: PaneContent, isOnlyPane: boolean, hidden?: boolean) {
   if (content.kind === 'terminal') {
     // Terminal panes need a unique key based on paneId for proper lifecycle
     // Pass paneContent directly to avoid redundant tree traversal in TerminalView
@@ -136,6 +137,16 @@ function renderContent(tabId: string, paneId: string, content: PaneContent, hidd
         readOnly={content.readOnly}
         content={content.content}
         viewMode={content.viewMode}
+      />
+    )
+  }
+
+  if (content.kind === 'picker') {
+    return (
+      <PanePicker
+        onSelect={() => {/* Placeholder - Task 9 */}}
+        onCancel={() => {/* Placeholder - Task 9 */}}
+        isOnlyPane={isOnlyPane}
       />
     )
   }
