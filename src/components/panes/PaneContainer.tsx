@@ -11,6 +11,9 @@ import { cn } from '@/lib/utils'
 import { getWsClient } from '@/lib/ws-client'
 import { derivePaneTitle } from '@/lib/derivePaneTitle'
 
+// Stable empty object to avoid selector memoization issues
+const EMPTY_PANE_TITLES: Record<string, string> = {}
+
 interface PaneContainerProps {
   tabId: string
   node: PaneNode
@@ -20,7 +23,7 @@ interface PaneContainerProps {
 export default function PaneContainer({ tabId, node, hidden }: PaneContainerProps) {
   const dispatch = useAppDispatch()
   const activePane = useAppSelector((s) => s.panes.activePane[tabId])
-  const paneTitles = useAppSelector((s) => s.panes.paneTitles[tabId] || {})
+  const paneTitles = useAppSelector((s) => s.panes.paneTitles[tabId] ?? EMPTY_PANE_TITLES)
   const containerRef = useRef<HTMLDivElement>(null)
   const ws = useMemo(() => getWsClient(), [])
 
