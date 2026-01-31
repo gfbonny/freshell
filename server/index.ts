@@ -350,6 +350,17 @@ async function main() {
   const port = Number(process.env.PORT || 3001)
   server.listen(port, '0.0.0.0', () => {
     logger.info({ port }, 'Server listening')
+
+    // Print friendly startup message
+    const token = process.env.AUTH_TOKEN
+    const lanIps = detectLanIps()
+    const lanIp = lanIps[0] || 'localhost'
+    const url = `http://${lanIp}:${port}/?token=${token}`
+
+    console.log('')
+    console.log(`\x1b[32m\u{1F41A} freshell is ready!\x1b[0m`)
+    console.log(`   Visit from anywhere on your network: \x1b[36m${url}\x1b[0m`)
+    console.log('')
   })
 
   // Graceful shutdown handler

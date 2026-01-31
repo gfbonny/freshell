@@ -33,7 +33,7 @@
 
 ```bash
 # Clone the repository at the latest stable release
-git clone --branch v0.2.3 https://github.com/danshapiro/freshell.git
+git clone --branch v0.2.4 https://github.com/danshapiro/freshell.git
 cd freshell
 
 # Install dependencies
@@ -111,7 +111,7 @@ sudo apt install -y nodejs
 
 ```bash
 # Clone the latest stable release
-git clone --branch v0.2.3 https://github.com/danshapiro/freshell.git
+git clone --branch v0.2.4 https://github.com/danshapiro/freshell.git
 cd freshell
 
 # Install dependencies
