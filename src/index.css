@@ -102,3 +102,24 @@ body {
 ::selection {
   background: hsl(var(--foreground) / 0.1);
 }
+
+@layer utilities {
+  /* Tab visibility classes - use visibility:hidden instead of display:none
+     to keep elements in layout flow with measurable dimensions */
+  .tab-hidden {
+    visibility: hidden;
+    position: absolute;
+    pointer-events: none;
+    /* Keep full dimensions for xterm.js measurement */
+    width: 100%;
+    height: 100%;
+    top: 0;
+    left: 0;
+  }
+
+  .tab-visible {
+    visibility: visible;
+    position: relative;
+    pointer-events: auto;
+  }
+}
