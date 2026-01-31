@@ -1,5 +1,6 @@
 import { detectLanIps } from './bootstrap' // Must be first - ensures .env exists before dotenv loads
 import 'dotenv/config'
+import { createRequire } from 'module'
 import express from 'express'
 import fs from 'fs'
 import http from 'http'
@@ -14,6 +15,14 @@ import { WsHandler } from './ws-handler'
 import { claudeIndexer } from './claude-indexer'
 import { claudeSessionManager } from './claude-session'
 import { AI_CONFIG, PROMPTS, stripAnsi } from './ai-prompts'
+import { runUpdateCheck } from './updater/index.js'
+
+const require = createRequire(import.meta.url)
+const packageJson = require('../package.json')
+const APP_VERSION: string = packageJson.version
+
+const SKIP_UPDATE_CHECK = process.argv.includes('--skip-update-check') ||
+                          process.env.SKIP_UPDATE_CHECK === 'true'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -282,6 +291,17 @@ async function main() {
       }
     }
   })
+
+  // Run update check before starting server
+  if (!SKIP_UPDATE_CHECK) {
+    const updateResult = await runUpdateCheck(APP_VERSION)
+
+    if (updateResult.action === 'updated') {
+      // Exit so process manager can restart with new version
+      console.log('Restarting with new version...')
+      process.exit(0)
+    }
+  }
 
   const port = Number(process.env.PORT || 3001)
   server.listen(port, '0.0.0.0', () => {
