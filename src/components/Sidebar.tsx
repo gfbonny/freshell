@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Terminal, History, Settings, LayoutGrid, Search, Play } from 'lucide-react'
+import { Terminal, History, Settings, LayoutGrid, Search, Play, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
@@ -368,30 +368,42 @@ export default function Sidebar({
 
       {/* Session List */}
       <div className="flex-1 overflow-y-auto px-2">
-        <div className="space-y-0.5">
-          {sortedItems.length === 0 ? (
-            <div className="px-2 py-8 text-center text-sm text-muted-foreground">
-              No sessions yet
-            </div>
-          ) : (
-            sortedItems.map((item) => {
-              const activeTab = tabs.find((t) => t.id === activeTabId)
-              const isActive = item.isRunning
-                ? item.runningTerminalId === activeTab?.terminalId
-                : item.sessionId === activeTab?.resumeSessionId
+        {isSearching && (
+          <div className="flex items-center justify-center py-8" data-testid="search-loading">
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            <span className="ml-2 text-sm text-muted-foreground">Searching...</span>
+          </div>
+        )}
+        {!isSearching && (
+          <div className="space-y-0.5">
+            {sortedItems.length === 0 ? (
+              <div className="px-2 py-8 text-center text-sm text-muted-foreground">
+                {filter.trim() && searchTier !== 'title'
+                  ? 'No results found'
+                  : filter.trim()
+                  ? 'No matching sessions'
+                  : 'No sessions yet'}
+              </div>
+            ) : (
+              sortedItems.map((item) => {
+                const activeTab = tabs.find((t) => t.id === activeTabId)
+                const isActive = item.isRunning
+                  ? item.runningTerminalId === activeTab?.terminalId
+                  : item.sessionId === activeTab?.resumeSessionId
 
-              return (
-                <SidebarItem
-                  key={item.id}
-                  item={item}
-                  isActiveTab={isActive}
-                  showProjectBadge={settings.sidebar?.showProjectBadges}
-                  onClick={() => handleItemClick(item)}
-                />
-              )
-            })
-          )}
-        </div>
+                return (
+                  <SidebarItem
+                    key={item.id}
+                    item={item}
+                    isActiveTab={isActive}
+                    showProjectBadge={settings.sidebar?.showProjectBadges}
+                    onClick={() => handleItemClick(item)}
+                  />
+                )
+              })
+            )}
+          </div>
+        )}
       </div>
 
     </div>

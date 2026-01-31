@@ -1278,6 +1278,59 @@ describe('Sidebar Component - Session-Centric Display', () => {
     })
   })
 
+  describe('Search loading state', () => {
+    it('shows loading indicator while searching', async () => {
+      // Make the search take some time
+      vi.mocked(mockSearchSessions).mockImplementation(
+        () => new Promise((resolve) => setTimeout(() => resolve({
+          results: [],
+          tier: 'userMessages',
+          query: 'test',
+          totalScanned: 0,
+        }), 1000))
+      )
+
+      const store = createTestStore({ projects: [] })
+      const { getByPlaceholderText, getByRole, getByTestId, queryByTestId } = renderSidebar(store, [])
+      await act(() => vi.advanceTimersByTime(100))
+
+      fireEvent.change(getByPlaceholderText('Search...'), { target: { value: 'test' } })
+      fireEvent.change(getByRole('combobox', { name: /search tier/i }), { target: { value: 'userMessages' } })
+
+      // After debounce but before search completes
+      await act(() => vi.advanceTimersByTime(350))
+      expect(getByTestId('search-loading')).toBeInTheDocument()
+
+      // After search completes
+      await act(() => vi.advanceTimersByTime(1000))
+      expect(queryByTestId('search-loading')).not.toBeInTheDocument()
+    })
+
+    it('shows "No results" message when search returns empty', async () => {
+      vi.mocked(mockSearchSessions).mockResolvedValue({
+        results: [],
+        tier: 'userMessages',
+        query: 'nonexistent',
+        totalScanned: 10,
+      })
+
+      const store = createTestStore({ projects: [] })
+      const { getByPlaceholderText, getByRole, getByText } = renderSidebar(store, [])
+      await act(() => vi.advanceTimersByTime(100))
+
+      fireEvent.change(getByPlaceholderText('Search...'), { target: { value: 'nonexistent' } })
+      fireEvent.change(getByRole('combobox', { name: /search tier/i }), { target: { value: 'userMessages' } })
+
+      // Wait for debounce and flush promises
+      await act(async () => {
+        vi.advanceTimersByTime(500)
+        await Promise.resolve()
+      })
+
+      expect(getByText(/no results/i)).toBeInTheDocument()
+    })
+  })
+
   describe('Backend search integration', () => {
     beforeEach(() => {
       vi.mocked(mockSearchSessions).mockReset()
