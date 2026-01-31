@@ -1,8 +1,10 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit'
 
-const STORAGE_KEY = 'freshell.sessionActivity.v1'
+export const SESSION_ACTIVITY_STORAGE_KEY = 'freshell.sessionActivity.v1'
+const MAX_SESSION_ACTIVITY_ENTRIES = 2000
+const SESSION_ACTIVITY_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 
-interface SessionActivityState {
+export interface SessionActivityState {
   sessions: Record<string, number>
 }
 
@@ -10,23 +12,51 @@ function canUseStorage(): boolean {
   return typeof localStorage !== 'undefined'
 }
 
+function normalizeSessions(raw: Record<string, unknown>): Record<string, number> {
+  const normalized: Record<string, number> = {}
+  for (const [sessionId, value] of Object.entries(raw)) {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      normalized[sessionId] = value
+    }
+  }
+  return normalized
+}
+
+function pruneSessions(sessions: Record<string, number>, now: number): Record<string, number> {
+  const entries = Object.entries(sessions)
+  if (entries.length === 0) return sessions
+
+  let changed = false
+  const fresh: Array<[string, number]> = []
+  for (const [sessionId, lastInputAt] of entries) {
+    if (now - lastInputAt > SESSION_ACTIVITY_RETENTION_MS) {
+      changed = true
+      continue
+    }
+    fresh.push([sessionId, lastInputAt])
+  }
+
+  if (fresh.length > MAX_SESSION_ACTIVITY_ENTRIES) {
+    changed = true
+    fresh.sort((a, b) => b[1] - a[1])
+    fresh.length = MAX_SESSION_ACTIVITY_ENTRIES
+  }
+
+  if (!changed) return sessions
+  return Object.fromEntries(fresh)
+}
+
 function loadFromStorage(): Record<string, number> {
   if (!canUseStorage()) return {}
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(SESSION_ACTIVITY_STORAGE_KEY)
     if (!raw) return {}
-    return JSON.parse(raw)
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') return {}
+    const normalized = normalizeSessions(parsed as Record<string, unknown>)
+    return pruneSessions(normalized, Date.now())
   } catch {
     return {}
-  }
-}
-
-function saveToStorage(sessions: Record<string, number>) {
-  if (!canUseStorage()) return
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions))
-  } catch {
-    // Ignore storage errors (quota exceeded, etc.)
   }
 }
 
@@ -49,7 +79,10 @@ export const sessionActivitySlice = createSlice({
 
       if (lastInputAt > existing) {
         state.sessions[sessionId] = lastInputAt
-        saveToStorage(state.sessions)
+        const pruned = pruneSessions(state.sessions, lastInputAt)
+        if (pruned !== state.sessions) {
+          state.sessions = pruned
+        }
       }
     },
   },

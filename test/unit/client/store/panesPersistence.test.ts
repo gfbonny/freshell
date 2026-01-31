@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi, beforeAll } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { configureStore } from '@reduxjs/toolkit'
 
 // Mock localStorage BEFORE importing slices
@@ -25,6 +25,11 @@ describe('Panes Persistence Integration', () => {
   beforeEach(() => {
     localStorageMock.clear()
     vi.clearAllMocks()
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('persists and restores panes across page refresh', () => {
@@ -59,6 +64,7 @@ describe('Panes Persistence Integration', () => {
     expect((layout1 as any).children).toHaveLength(2)
 
     // 6. Check localStorage was updated
+    vi.runAllTimers()
     const savedPanes = localStorage.getItem('freshell.panes.v1')
     expect(savedPanes).not.toBeNull()
     const parsedPanes = JSON.parse(savedPanes!)
@@ -66,6 +72,7 @@ describe('Panes Persistence Integration', () => {
 
     // 7. Simulate page refresh - create new store and hydrate
     // (Using explicit hydration to test that path still works)
+    vi.runAllTimers()
     const persistedTabs = loadPersistedTabs()
     const persistedPanes = loadPersistedPanes()
 
@@ -118,6 +125,7 @@ describe('Panes Persistence Integration', () => {
     }))
 
     // 2. Simulate refresh
+    vi.runAllTimers()
     const persistedTabs = loadPersistedTabs()
     const persistedPanes = loadPersistedPanes()
 
@@ -173,6 +181,7 @@ describe('Panes Persistence Integration', () => {
     }))
 
     // Verify state was persisted
+    vi.runAllTimers()
     const savedPanes = localStorage.getItem('freshell.panes.v1')
     expect(savedPanes).not.toBeNull()
     expect(JSON.parse(savedPanes!).layouts[tabId].type).toBe('split')
@@ -182,6 +191,40 @@ describe('Panes Persistence Integration', () => {
     expect(loaded).not.toBeNull()
     expect(loaded!.layouts[tabId]).toBeDefined()
     expect(loaded!.layouts[tabId].type).toBe('split')
+  })
+
+  it('strips editor content when persisting panes', () => {
+    const store = configureStore({
+      reducer: {
+        tabs: tabsReducer,
+        panes: panesReducer,
+      },
+      middleware: (getDefault) => getDefault().concat(persistMiddleware as any),
+    })
+
+    store.dispatch(addTab({ mode: 'shell' }))
+    const tabId = store.getState().tabs.tabs[0].id
+
+    store.dispatch(initLayout({
+      tabId,
+      content: {
+        kind: 'editor',
+        filePath: null,
+        language: 'markdown',
+        readOnly: false,
+        content: 'Large editor buffer that should not be persisted',
+        viewMode: 'source',
+      },
+    }))
+
+    vi.runAllTimers()
+
+    const savedPanes = localStorage.getItem('freshell.panes.v1')
+    expect(savedPanes).not.toBeNull()
+    const parsedPanes = JSON.parse(savedPanes!)
+    const layout = parsedPanes.layouts[tabId]
+    expect(layout.content.kind).toBe('editor')
+    expect(layout.content.content).toBe('')
   })
 })
 
@@ -285,6 +328,34 @@ describe('PaneContent migration', () => {
     expect(layout.content.kind).toBe('browser')
     expect(layout.content.url).toBe('https://example.com')
     expect(layout.content.devToolsOpen).toBe(true)
+  })
+
+  it('handles malformed pane content without crashing', () => {
+    const corruptedState = {
+      layouts: {
+        'tab-null': {
+          type: 'leaf',
+          id: 'pane-null',
+          content: null,
+        },
+        'tab-bad-split': {
+          type: 'split',
+          id: 'split1',
+          direction: 'horizontal',
+          sizes: [50, 50],
+          children: [],
+        },
+      },
+      activePane: { 'tab-null': 'pane-null' },
+    }
+
+    localStorage.setItem('freshell.panes.v1', JSON.stringify(corruptedState))
+
+    const loaded = loadPersistedPanes()
+
+    expect(loaded).not.toBeNull()
+    expect(loaded.layouts['tab-null']).toBeDefined()
+    expect(loaded.layouts['tab-bad-split']).toBeDefined()
   })
 })
 

@@ -1,31 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Terminal, History, Settings, LayoutGrid, Search, Play } from 'lucide-react'
+import { FixedSizeList as List, type ListChildComponentProps } from 'react-window'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { addTab, setActiveTab } from '@/store/tabsSlice'
-import { selectAllSessionActivity } from '@/store/sessionActivitySlice'
 import { getWsClient } from '@/lib/ws-client'
-import type { BackgroundTerminal, ClaudeSession, ProjectGroup } from '@/store/types'
+import type { BackgroundTerminal } from '@/store/types'
+import { makeSelectSortedSessionItems, type SidebarSessionItem } from '@/store/selectors/sidebarSelectors'
 
 export type AppView = 'terminal' | 'sessions' | 'overview' | 'settings'
 
-interface SessionItem {
-  id: string
-  sessionId: string
-  title: string
-  subtitle?: string
-  projectPath?: string
-  projectColor?: string
-  timestamp: number
-  cwd?: string
-  hasTab: boolean
-  tabLastInputAt?: number
-  ratchetedActivity?: number
-  // Running state (derived from terminals)
-  isRunning: boolean
-  runningTerminalId?: string
-}
+type SessionItem = SidebarSessionItem
+
+const SESSION_ITEM_HEIGHT = 56
+const SESSION_LIST_MAX_HEIGHT = 600
 
 function formatRelativeTime(timestamp: number): string {
   const now = Date.now()
@@ -41,11 +30,6 @@ function formatRelativeTime(timestamp: number): string {
   return new Date(timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
-function getProjectName(path: string): string {
-  const parts = path.replace(/\\/g, '/').split('/')
-  return parts[parts.length - 1] || path
-}
-
 export default function Sidebar({
   view,
   onNavigate,
@@ -57,15 +41,16 @@ export default function Sidebar({
 }) {
   const dispatch = useAppDispatch()
   const settings = useAppSelector((s) => s.settings.settings)
-  const projects = useAppSelector((s) => s.sessions.projects)
   const tabs = useAppSelector((s) => s.tabs.tabs)
   const activeTabId = useAppSelector((s) => s.tabs.activeTabId)
-  const sessionActivity = useAppSelector(selectAllSessionActivity)
+  const selectSortedItems = useMemo(() => makeSelectSortedSessionItems(), [])
 
   const ws = useMemo(() => getWsClient(), [])
   const [terminals, setTerminals] = useState<BackgroundTerminal[]>([])
   const [filter, setFilter] = useState('')
   const requestIdRef = useRef<string | null>(null)
+  const listContainerRef = useRef<HTMLDivElement | null>(null)
+  const [listHeight, setListHeight] = useState(0)
 
   // Fetch background terminals
   const refresh = () => {
@@ -96,116 +81,26 @@ export default function Sidebar({
   }, [ws])
 
   // Build session list with running state from terminals
-  const sessionItems = useMemo(() => {
-    const items: SessionItem[] = []
-    const terminalsArray = terminals ?? []
-    const projectsArray = projects ?? []
+  const sortedItems = useAppSelector((state) => selectSortedItems(state, terminals, filter))
 
-    // Build map: sessionId -> running terminalId
-    const runningSessionMap = new Map<string, string>()
-    terminalsArray.forEach((t) => {
-      if (t.mode === 'claude' && t.status === 'running' && t.resumeSessionId) {
-        runningSessionMap.set(t.resumeSessionId, t.terminalId)
+  useEffect(() => {
+    const container = listContainerRef.current
+    if (!container) return
+
+    const updateHeight = () => {
+      const nextHeight = container.clientHeight
+      if (nextHeight > 0) {
+        setListHeight(nextHeight)
       }
-    })
-
-    // Build map: sessionId -> tab info
-    const tabSessionMap = new Map<string, { hasTab: boolean; lastInputAt?: number }>()
-    tabs.forEach((t) => {
-      if (!t.resumeSessionId) return
-      const existing = tabSessionMap.get(t.resumeSessionId)
-      if (!existing) {
-        tabSessionMap.set(t.resumeSessionId, { hasTab: true, lastInputAt: t.lastInputAt })
-        return
-      }
-      const existingTime = existing.lastInputAt ?? 0
-      const nextTime = t.lastInputAt ?? 0
-      if (nextTime > existingTime) {
-        tabSessionMap.set(t.resumeSessionId, { hasTab: true, lastInputAt: t.lastInputAt })
-      }
-    })
-
-    // Add sessions with running, tab, and ratcheted activity state
-    projectsArray.forEach((project) => {
-      project.sessions.forEach((session) => {
-        const runningTerminalId = runningSessionMap.get(session.sessionId)
-        const tabInfo = tabSessionMap.get(session.sessionId)
-        const ratchetedActivity = sessionActivity[session.sessionId]
-        items.push({
-          id: `session-${session.sessionId}`,
-          sessionId: session.sessionId,
-          title: session.title || session.sessionId.slice(0, 8),
-          subtitle: getProjectName(project.projectPath),
-          projectPath: project.projectPath,
-          projectColor: project.color,
-          timestamp: session.updatedAt,
-          cwd: session.cwd,
-          hasTab: tabInfo?.hasTab ?? false,
-          tabLastInputAt: tabInfo?.lastInputAt,
-          ratchetedActivity,
-          isRunning: !!runningTerminalId,
-          runningTerminalId,
-        })
-      })
-    })
-
-    return items
-  }, [terminals, projects, tabs, sessionActivity])
-
-  // Filter items
-  const filteredItems = useMemo(() => {
-    if (!filter.trim()) return sessionItems
-    const q = filter.toLowerCase()
-    return sessionItems.filter(
-      (item) =>
-        item.title.toLowerCase().includes(q) ||
-        item.subtitle?.toLowerCase().includes(q) ||
-        item.projectPath?.toLowerCase().includes(q)
-    )
-  }, [sessionItems, filter])
-
-  // Sort items based on settings
-  const sortedItems = useMemo(() => {
-    const sortMode = settings.sidebar?.sortMode || 'activity'
-    const items = [...filteredItems]
-
-    if (sortMode === 'recency') {
-      return items.sort((a, b) => b.timestamp - a.timestamp)
     }
 
-    if (sortMode === 'activity') {
-      const withTabs = items.filter((i) => i.hasTab)
-      const withoutTabs = items.filter((i) => !i.hasTab)
+    updateHeight()
 
-      withTabs.sort((a, b) => {
-        const aTime = a.tabLastInputAt ?? a.timestamp
-        const bTime = b.tabLastInputAt ?? b.timestamp
-        return bTime - aTime
-      })
-
-      withoutTabs.sort((a, b) => {
-        const aHasRatcheted = typeof a.ratchetedActivity === 'number'
-        const bHasRatcheted = typeof b.ratchetedActivity === 'number'
-        if (aHasRatcheted !== bHasRatcheted) return aHasRatcheted ? -1 : 1
-        const aTime = a.ratchetedActivity ?? a.timestamp
-        const bTime = b.ratchetedActivity ?? b.timestamp
-        return bTime - aTime
-      })
-
-      return [...withTabs, ...withoutTabs]
-    }
-
-    if (sortMode === 'project') {
-      return items.sort((a, b) => {
-        const projA = a.projectPath || a.subtitle || ''
-        const projB = b.projectPath || b.subtitle || ''
-        if (projA !== projB) return projA.localeCompare(projB)
-        return b.timestamp - a.timestamp
-      })
-    }
-
-    return items
-  }, [filteredItems, settings.sidebar?.sortMode])
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => updateHeight())
+    ro.observe(container)
+    return () => ro.disconnect()
+  }, [])
 
   const handleItemClick = (item: SessionItem) => {
     if (item.isRunning && item.runningTerminalId) {
@@ -219,7 +114,8 @@ export default function Sidebar({
           title: item.title,
           terminalId: item.runningTerminalId,
           status: 'running',
-          mode: 'claude'
+          mode: 'claude',
+          resumeSessionId: item.sessionId,
         }))
       }
     } else {
@@ -246,6 +142,38 @@ export default function Sidebar({
     { id: 'overview' as const, label: 'Overview', icon: LayoutGrid, shortcut: 'O' },
     { id: 'settings' as const, label: 'Settings', icon: Settings, shortcut: ',' },
   ]
+
+  const activeTab = tabs.find((t) => t.id === activeTabId)
+  const activeResumeSessionId = activeTab?.resumeSessionId
+  const activeTerminalId = activeTab?.terminalId
+  const effectiveListHeight = listHeight > 0
+    ? listHeight
+    : Math.min(sortedItems.length * SESSION_ITEM_HEIGHT, SESSION_LIST_MAX_HEIGHT)
+
+  const listData = useMemo(() => ({
+    items: sortedItems,
+    activeResumeSessionId,
+    activeTerminalId,
+    showProjectBadge: settings.sidebar?.showProjectBadges,
+    onItemClick: handleItemClick,
+  }), [sortedItems, activeResumeSessionId, activeTerminalId, settings.sidebar?.showProjectBadges, handleItemClick])
+
+  const Row = ({ index, style, data }: ListChildComponentProps<typeof listData>) => {
+    const item = data.items[index]
+    const isActive = item.isRunning
+      ? item.runningTerminalId === data.activeTerminalId
+      : item.sessionId === data.activeResumeSessionId
+    return (
+      <div style={{ ...style, paddingBottom: 2 }}>
+        <SidebarItem
+          item={item}
+          isActiveTab={isActive}
+          showProjectBadge={data.showProjectBadge}
+          onClick={() => data.onItemClick(item)}
+        />
+      </div>
+    )
+  }
 
   return (
     <div
@@ -297,31 +225,24 @@ export default function Sidebar({
       </div>
 
       {/* Session List */}
-      <div className="flex-1 overflow-y-auto px-2">
-        <div className="space-y-0.5">
-          {sortedItems.length === 0 ? (
-            <div className="px-2 py-8 text-center text-sm text-muted-foreground">
-              No sessions yet
-            </div>
-          ) : (
-            sortedItems.map((item) => {
-              const activeTab = tabs.find((t) => t.id === activeTabId)
-              const isActive = item.isRunning
-                ? item.runningTerminalId === activeTab?.terminalId
-                : item.sessionId === activeTab?.resumeSessionId
-
-              return (
-                <SidebarItem
-                  key={item.id}
-                  item={item}
-                  isActiveTab={isActive}
-                  showProjectBadge={settings.sidebar?.showProjectBadges}
-                  onClick={() => handleItemClick(item)}
-                />
-              )
-            })
-          )}
-        </div>
+      <div ref={listContainerRef} className="flex-1 px-2">
+        {sortedItems.length === 0 ? (
+          <div className="px-2 py-8 text-center text-sm text-muted-foreground">
+            No sessions yet
+          </div>
+        ) : (
+          <List
+            height={effectiveListHeight}
+            itemCount={sortedItems.length}
+            itemSize={SESSION_ITEM_HEIGHT}
+            width="100%"
+            itemData={listData}
+            itemKey={(index, data) => data.items[index].id}
+            className="overflow-y-auto"
+          >
+            {Row}
+          </List>
+        )}
       </div>
 
     </div>

@@ -8,10 +8,12 @@ import { configStore } from './config-store.js'
 import type { ClaudeSessionManager } from './claude-session.js'
 import type { ClaudeEvent } from './claude-stream-types.js'
 import type { SessionRepairService } from './session-scanner/service.js'
+import type { SessionScanResult, SessionRepairResult } from './session-scanner/types.js'
 
 const MAX_CONNECTIONS = Number(process.env.MAX_CONNECTIONS || 10)
 const HELLO_TIMEOUT_MS = Number(process.env.HELLO_TIMEOUT_MS || 5_000)
 const PING_INTERVAL_MS = Number(process.env.PING_INTERVAL_MS || 30_000)
+const MAX_WS_BUFFERED_AMOUNT = Number(process.env.MAX_WS_BUFFERED_AMOUNT || 2 * 1024 * 1024)
 
 // Extended WebSocket with liveness tracking for keepalive
 interface LiveWebSocket extends WebSocket {
@@ -142,6 +144,7 @@ type ClientState = {
   attachedTerminalIds: Set<string>
   createdByRequestId: Map<string, string>
   claudeSessions: Set<string>
+  claudeSubscriptions: Map<string, () => void>
   interestedSessions: Set<string>
   helloTimer?: NodeJS.Timeout
 }
@@ -152,6 +155,10 @@ export class WsHandler {
   private clientStates = new Map<LiveWebSocket, ClientState>()
   private pingInterval: NodeJS.Timeout | null = null
   private sessionRepairService?: SessionRepairService
+  private sessionRepairListeners?: {
+    scanned: (result: SessionScanResult) => void
+    repaired: (result: SessionRepairResult) => void
+  }
 
   constructor(
     server: http.Server,
@@ -182,16 +189,16 @@ export class WsHandler {
 
     // Subscribe to session repair events
     if (this.sessionRepairService) {
-      this.sessionRepairService.on('scanned', (result) => {
+      const onScanned = (result: SessionScanResult) => {
         this.broadcastSessionStatus(result.sessionId, {
           type: 'session.status',
           sessionId: result.sessionId,
           status: result.status === 'healthy' ? 'healthy' : 'corrupted',
           chainDepth: result.chainDepth,
         })
-      })
+      }
 
-      this.sessionRepairService.on('repaired', (result) => {
+      const onRepaired = (result: SessionRepairResult) => {
         this.broadcastSessionStatus(result.sessionId, {
           type: 'session.status',
           sessionId: result.sessionId,
@@ -199,7 +206,11 @@ export class WsHandler {
           chainDepth: result.newChainDepth,
           orphansFixed: result.orphansFixed,
         })
-      })
+      }
+
+      this.sessionRepairListeners = { scanned: onScanned, repaired: onRepaired }
+      this.sessionRepairService.on('scanned', onScanned)
+      this.sessionRepairService.on('repaired', onRepaired)
     }
   }
 
@@ -259,6 +270,7 @@ export class WsHandler {
       attachedTerminalIds: new Set(),
       createdByRequestId: new Map(),
       claudeSessions: new Set(),
+      claudeSubscriptions: new Map(),
       interestedSessions: new Set(),
     }
     this.clientStates.set(ws, state)
@@ -291,10 +303,29 @@ export class WsHandler {
       this.registry.detach(terminalId, ws)
     }
     state.attachedTerminalIds.clear()
+    for (const off of state.claudeSubscriptions.values()) {
+      off()
+    }
+    state.claudeSubscriptions.clear()
+  }
+
+  private removeClaudeSubscription(state: ClientState, sessionId: string) {
+    const off = state.claudeSubscriptions.get(sessionId)
+    if (off) {
+      off()
+      state.claudeSubscriptions.delete(sessionId)
+    }
   }
 
   private send(ws: LiveWebSocket, msg: unknown) {
     try {
+      // Backpressure guard.
+      // @ts-ignore
+      const buffered = ws.bufferedAmount as number | undefined
+      if (typeof buffered === 'number' && buffered > MAX_WS_BUFFERED_AMOUNT) {
+        ws.close(CLOSE_CODES.BACKPRESSURE, 'Backpressure')
+        return
+      }
       ws.send(JSON.stringify(msg))
     } catch {
       // ignore
@@ -307,12 +338,16 @@ export class WsHandler {
     }
   }
 
-  private sendError(ws: LiveWebSocket, params: { code: z.infer<typeof ErrorCode>; message: string; requestId?: string }) {
+  private sendError(
+    ws: LiveWebSocket,
+    params: { code: z.infer<typeof ErrorCode>; message: string; requestId?: string; terminalId?: string }
+  ) {
     this.send(ws, {
       type: 'error',
       code: params.code,
       message: params.message,
       requestId: params.requestId,
+      terminalId: params.terminalId,
       timestamp: nowIso(),
     })
   }
@@ -445,7 +480,7 @@ export class WsHandler {
       case 'terminal.attach': {
         const rec = this.registry.attach(m.terminalId, ws)
         if (!rec) {
-          this.sendError(ws, { code: 'INVALID_TERMINAL_ID', message: 'Unknown terminalId' })
+          this.sendError(ws, { code: 'INVALID_TERMINAL_ID', message: 'Unknown terminalId', terminalId: m.terminalId })
           return
         }
         state.attachedTerminalIds.add(m.terminalId)
@@ -458,7 +493,7 @@ export class WsHandler {
         const ok = this.registry.detach(m.terminalId, ws)
         state.attachedTerminalIds.delete(m.terminalId)
         if (!ok) {
-          this.sendError(ws, { code: 'INVALID_TERMINAL_ID', message: 'Unknown terminalId' })
+          this.sendError(ws, { code: 'INVALID_TERMINAL_ID', message: 'Unknown terminalId', terminalId: m.terminalId })
           return
         }
         this.send(ws, { type: 'terminal.detached', terminalId: m.terminalId })
@@ -469,7 +504,7 @@ export class WsHandler {
       case 'terminal.input': {
         const ok = this.registry.input(m.terminalId, m.data)
         if (!ok) {
-          this.sendError(ws, { code: 'INVALID_TERMINAL_ID', message: 'Terminal not running' })
+          this.sendError(ws, { code: 'INVALID_TERMINAL_ID', message: 'Terminal not running', terminalId: m.terminalId })
         }
         return
       }
@@ -477,7 +512,7 @@ export class WsHandler {
       case 'terminal.resize': {
         const ok = this.registry.resize(m.terminalId, m.cols, m.rows)
         if (!ok) {
-          this.sendError(ws, { code: 'INVALID_TERMINAL_ID', message: 'Terminal not running' })
+          this.sendError(ws, { code: 'INVALID_TERMINAL_ID', message: 'Terminal not running', terminalId: m.terminalId })
         }
         return
       }
@@ -485,7 +520,7 @@ export class WsHandler {
       case 'terminal.kill': {
         const ok = this.registry.kill(m.terminalId)
         if (!ok) {
-          this.sendError(ws, { code: 'INVALID_TERMINAL_ID', message: 'Unknown terminalId' })
+          this.sendError(ws, { code: 'INVALID_TERMINAL_ID', message: 'Unknown terminalId', terminalId: m.terminalId })
           return
         }
         this.broadcast({ type: 'terminal.list.updated' })
@@ -531,29 +566,40 @@ export class WsHandler {
           // Track this client's session
           state.claudeSessions.add(session.id)
 
-          // Stream events to client
-          session.on('event', (event: ClaudeEvent) => {
+          // Stream events to client with detachable listeners
+          const onEvent = (event: ClaudeEvent) => {
             this.safeSend(ws, {
               type: 'claude.event',
               sessionId: session.id,
               event,
             })
-          })
+          }
 
-          session.on('exit', (code: number) => {
+          const onExit = (code: number) => {
             this.safeSend(ws, {
               type: 'claude.exit',
               sessionId: session.id,
               exitCode: code,
             })
-          })
+            this.removeClaudeSubscription(state, session.id)
+          }
 
-          session.on('stderr', (text: string) => {
+          const onStderr = (text: string) => {
             this.safeSend(ws, {
               type: 'claude.stderr',
               sessionId: session.id,
               text,
             })
+          }
+
+          session.on('event', onEvent)
+          session.on('exit', onExit)
+          session.on('stderr', onStderr)
+
+          state.claudeSubscriptions.set(session.id, () => {
+            session.off('event', onEvent)
+            session.off('exit', onExit)
+            session.off('stderr', onStderr)
           })
 
           this.send(ws, {
@@ -596,6 +642,7 @@ export class WsHandler {
 
         const removed = this.claudeManager.remove(m.sessionId)
         state.claudeSessions.delete(m.sessionId)
+        this.removeClaudeSubscription(state, m.sessionId)
         this.send(ws, {
           type: 'claude.killed',
           sessionId: m.sessionId,
@@ -622,6 +669,12 @@ export class WsHandler {
    * Gracefully close all WebSocket connections and the server.
    */
   close(): void {
+    if (this.sessionRepairService && this.sessionRepairListeners) {
+      this.sessionRepairService.off('scanned', this.sessionRepairListeners.scanned)
+      this.sessionRepairService.off('repaired', this.sessionRepairListeners.repaired)
+      this.sessionRepairListeners = undefined
+    }
+
     // Stop keepalive ping interval
     if (this.pingInterval) {
       clearInterval(this.pingInterval)

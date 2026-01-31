@@ -67,6 +67,19 @@ describe('SessionRepairQueue', () => {
       const next = queue.peek()
       expect(next?.priority).toBe('active')
     })
+
+    it('updates filePath when re-enqueued with a new path', () => {
+      queue.enqueue([
+        { sessionId: 'session1', filePath: '/path/to/session1.jsonl', priority: 'disk' },
+      ])
+
+      queue.enqueue([
+        { sessionId: 'session1', filePath: '/path/to/session1-new.jsonl', priority: 'disk' },
+      ])
+
+      const next = queue.peek()
+      expect(next?.filePath).toBe('/path/to/session1-new.jsonl')
+    })
   })
 
   describe('priority ordering', () => {
@@ -265,6 +278,38 @@ describe('SessionRepairQueue', () => {
       // This is tricky to test - need to check during processing
       // For now, just verify the method exists and returns boolean
       expect(typeof queue.isProcessing('any')).toBe('boolean')
+    })
+  })
+
+  describe('processed cache eviction', () => {
+    it('evicts oldest processed entries beyond the max cache size', () => {
+      const localQueue = new SessionRepairQueue(
+        createSessionScanner(),
+        cache,
+        { maxProcessedCache: 2 }
+      )
+
+      const setProcessed = (localQueue as any).setProcessed.bind(localQueue)
+
+      const baseResult: SessionScanResult = {
+        sessionId: 's1',
+        filePath: '/tmp/s1.jsonl',
+        status: 'healthy',
+        chainDepth: 1,
+        orphanCount: 0,
+        fileSize: 1,
+        messageCount: 1,
+      }
+
+      setProcessed('s1', baseResult)
+      setProcessed('s2', { ...baseResult, sessionId: 's2', filePath: '/tmp/s2.jsonl' })
+      setProcessed('s3', { ...baseResult, sessionId: 's3', filePath: '/tmp/s3.jsonl' })
+
+      const processed = (localQueue as any).processed as Map<string, SessionScanResult>
+      expect(processed.size).toBe(2)
+      expect(processed.has('s1')).toBe(false)
+      expect(processed.has('s2')).toBe(true)
+      expect(processed.has('s3')).toBe(true)
     })
   })
 })

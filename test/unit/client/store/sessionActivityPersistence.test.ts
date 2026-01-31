@@ -1,0 +1,71 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { configureStore } from '@reduxjs/toolkit'
+import sessionActivityReducer, { updateSessionActivity, SESSION_ACTIVITY_STORAGE_KEY } from '@/store/sessionActivitySlice'
+import {
+  sessionActivityPersistMiddleware,
+  SESSION_ACTIVITY_PERSIST_DEBOUNCE_MS,
+} from '@/store/sessionActivityPersistence'
+
+describe('sessionActivity persistence middleware', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function createStore() {
+    return configureStore({
+      reducer: { sessionActivity: sessionActivityReducer },
+      middleware: (getDefault) => getDefault().concat(sessionActivityPersistMiddleware),
+    })
+  }
+
+  it('debounces localStorage writes', () => {
+    const store = createStore()
+
+    store.dispatch(updateSessionActivity({ sessionId: 'session-1', lastInputAt: Date.now() }))
+
+    expect(localStorage.getItem(SESSION_ACTIVITY_STORAGE_KEY)).toBeNull()
+
+    vi.advanceTimersByTime(SESSION_ACTIVITY_PERSIST_DEBOUNCE_MS)
+
+    expect(localStorage.getItem(SESSION_ACTIVITY_STORAGE_KEY)).not.toBeNull()
+  })
+
+  it('persists the pruned activity map', () => {
+    const store = createStore()
+    const now = Date.now()
+    const oldTime = now - 1000 * 60 * 60 * 24 * 31
+
+    store.dispatch(updateSessionActivity({ sessionId: 'old-session', lastInputAt: oldTime }))
+    store.dispatch(updateSessionActivity({ sessionId: 'fresh-session', lastInputAt: now }))
+
+    vi.runAllTimers()
+
+    const stored = JSON.parse(localStorage.getItem(SESSION_ACTIVITY_STORAGE_KEY) || '{}')
+    expect(stored['old-session']).toBeUndefined()
+    expect(stored['fresh-session']).toBe(now)
+  })
+
+  it('retries persistence when storage becomes available', () => {
+    const originalStorage = globalThis.localStorage
+    // @ts-expect-error - simulate unavailable storage
+    globalThis.localStorage = undefined
+
+    const store = createStore()
+    store.dispatch(updateSessionActivity({ sessionId: 'session-1', lastInputAt: 123 }))
+
+    vi.advanceTimersByTime(SESSION_ACTIVITY_PERSIST_DEBOUNCE_MS)
+
+    // Restore storage and allow retry
+    // @ts-expect-error - restore
+    globalThis.localStorage = originalStorage
+
+    vi.advanceTimersByTime(SESSION_ACTIVITY_PERSIST_DEBOUNCE_MS)
+
+    expect(localStorage.getItem(SESSION_ACTIVITY_STORAGE_KEY)).not.toBeNull()
+  })
+})

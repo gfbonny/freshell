@@ -344,6 +344,7 @@ describe('ws protocol', () => {
 
     expect(error.type).toBe('error')
     expect(error.code).toBe('INVALID_TERMINAL_ID')
+    expect(error.terminalId).toBe('nonexistent_terminal')
 
     close()
   })
@@ -383,6 +384,7 @@ describe('ws protocol', () => {
 
     expect(error.type).toBe('error')
     expect(error.code).toBe('INVALID_TERMINAL_ID')
+    expect(error.terminalId).toBe('nonexistent_terminal')
 
     close()
   })
@@ -418,6 +420,7 @@ describe('ws protocol', () => {
 
     expect(error.type).toBe('error')
     expect(error.code).toBe('INVALID_TERMINAL_ID')
+    expect(error.terminalId).toBe('nonexistent_terminal')
 
     close()
   })
@@ -454,6 +457,7 @@ describe('ws protocol', () => {
 
     expect(error.type).toBe('error')
     expect(error.code).toBe('INVALID_TERMINAL_ID')
+    expect(error.terminalId).toBe('nonexistent_terminal')
 
     close()
   })
@@ -496,6 +500,7 @@ describe('ws protocol', () => {
 
     expect(error.type).toBe('error')
     expect(error.code).toBe('INVALID_TERMINAL_ID')
+    expect(error.terminalId).toBe('nonexistent_terminal')
 
     close()
   })

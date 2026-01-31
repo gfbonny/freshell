@@ -22,6 +22,8 @@ const PRIORITY_ORDER: Record<Priority, number> = {
   disk: 3,
 }
 
+const MAX_PROCESSED_CACHE = 1000
+
 export interface QueueItem {
   sessionId: string
   filePath: string
@@ -40,6 +42,7 @@ interface WaitingPromise {
  */
 export class SessionRepairQueue extends EventEmitter {
   private queue: QueueItem[] = []
+  private queuedBySessionId: Map<string, QueueItem> = new Map()
   private processing: Set<string> = new Set()
   private processed: Map<string, SessionScanResult> = new Map()
   private scanner: SessionScanner
@@ -47,11 +50,13 @@ export class SessionRepairQueue extends EventEmitter {
   private running = false
   private stopped = false
   private waiting: Map<string, WaitingPromise[]> = new Map()
+  private maxProcessedCache: number
 
-  constructor(scanner: SessionScanner, cache: SessionCache) {
+  constructor(scanner: SessionScanner, cache: SessionCache, options?: { maxProcessedCache?: number }) {
     super()
     this.scanner = scanner
     this.cache = cache
+    this.maxProcessedCache = options?.maxProcessedCache ?? MAX_PROCESSED_CACHE
   }
 
   /**
@@ -65,31 +70,45 @@ export class SessionRepairQueue extends EventEmitter {
   enqueue(
     sessions: Array<{ sessionId: string; filePath: string; priority: Priority }>
   ): void {
+    let needsSort = false
+    const now = Date.now()
+    let order = 0
+
     for (const session of sessions) {
       // Skip if currently processing
       if (this.processing.has(session.sessionId)) continue
 
       // Check if already in queue
-      const existing = this.queue.find((q) => q.sessionId === session.sessionId)
+      const existing = this.queuedBySessionId.get(session.sessionId)
 
       if (existing) {
+        if (session.filePath && session.filePath !== existing.filePath) {
+          existing.filePath = session.filePath
+        }
         // Re-prioritize if new priority is higher (lower number)
         if (PRIORITY_ORDER[session.priority] < PRIORITY_ORDER[existing.priority]) {
           existing.priority = session.priority
-          this.sortQueue()
+          needsSort = true
         }
       } else if (session.filePath) {
         // Only add new item if we have a filePath
-        this.queue.push({
+        const item: QueueItem = {
           sessionId: session.sessionId,
           filePath: session.filePath,
           priority: session.priority,
-          addedAt: Date.now(),
-        })
-        this.sortQueue()
+          addedAt: now + order,
+        }
+        order += 1
+        this.queue.push(item)
+        this.queuedBySessionId.set(session.sessionId, item)
+        needsSort = true
       }
       // If no existing entry and no filePath, skip silently
       // (session will be picked up on next full scan if it exists on disk)
+    }
+
+    if (needsSort) {
+      this.sortQueue()
     }
   }
 
@@ -122,7 +141,11 @@ export class SessionRepairQueue extends EventEmitter {
    * Remove and return next item.
    */
   dequeue(): QueueItem | undefined {
-    return this.queue.shift()
+    const item = this.queue.shift()
+    if (item) {
+      this.queuedBySessionId.delete(item.sessionId)
+    }
+    return item
   }
 
   /**
@@ -153,7 +176,7 @@ export class SessionRepairQueue extends EventEmitter {
       // Check cache first
       const cached = await this.cache.get(item.filePath)
       if (cached) {
-        this.processed.set(item.sessionId, cached)
+        this.setProcessed(item.sessionId, cached)
         this.emit('scanned', cached)
         this.resolveWaiting(item.sessionId, cached)
         this.processing.delete(item.sessionId)
@@ -174,10 +197,10 @@ export class SessionRepairQueue extends EventEmitter {
         // Re-scan to get updated result
         const newResult = await this.scanner.scan(item.filePath)
         await this.cache.set(item.filePath, newResult)
-        this.processed.set(item.sessionId, newResult)
+        this.setProcessed(item.sessionId, newResult)
         this.resolveWaiting(item.sessionId, newResult)
       } else {
-        this.processed.set(item.sessionId, scanResult)
+        this.setProcessed(item.sessionId, scanResult)
         this.resolveWaiting(item.sessionId, scanResult)
       }
     } catch (err) {
@@ -220,6 +243,20 @@ export class SessionRepairQueue extends EventEmitter {
     }
   }
 
+  private setProcessed(sessionId: string, result: SessionScanResult): void {
+    if (this.processed.has(sessionId)) {
+      this.processed.delete(sessionId)
+    }
+    this.processed.set(sessionId, result)
+
+    if (this.processed.size > this.maxProcessedCache) {
+      const oldest = this.processed.keys().next().value
+      if (oldest) {
+        this.processed.delete(oldest)
+      }
+    }
+  }
+
   /**
    * Stop processing (graceful shutdown).
    */
@@ -248,7 +285,7 @@ export class SessionRepairQueue extends EventEmitter {
     }
 
     // Check if in queue or processing
-    const inQueue = this.queue.some((q) => q.sessionId === sessionId)
+    const inQueue = this.queuedBySessionId.has(sessionId)
     const isProcessing = this.processing.has(sessionId)
 
     if (!inQueue && !isProcessing) {

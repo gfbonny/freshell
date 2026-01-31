@@ -1070,7 +1070,7 @@ describe('Sidebar Component - Session-Centric Display', () => {
       expect(state.tabs.activeTabId).toBe('existing-tab-for-terminal')
     })
 
-    it.skip('creates new tab to attach when clicking running session without existing tab', async () => {
+    it('creates new tab to attach when clicking running session without existing tab', async () => {
       const projects: ProjectGroup[] = [
         {
           projectPath: '/home/user/project',
@@ -1108,10 +1108,6 @@ describe('Sidebar Component - Session-Centric Display', () => {
         vi.advanceTimersByTime(100)
       })
 
-      // Verify the "Running" section appears (confirms terminals are loaded)
-      const runningSection = screen.queryByText('Running')
-      expect(runningSection).not.toBeNull()
-
       const sessionButton = screen.getByText('Running without tab').closest('button')
       fireEvent.click(sessionButton!)
 
@@ -1122,6 +1118,7 @@ describe('Sidebar Component - Session-Centric Display', () => {
       const state = store.getState()
       expect(state.tabs.tabs).toHaveLength(1)
       expect(state.tabs.tabs[0].terminalId).toBe('orphan-terminal-id')
+      expect(state.tabs.tabs[0].resumeSessionId).toBe('session-running-no-tab')
       expect(state.tabs.tabs[0].mode).toBe('claude')
     })
   })
