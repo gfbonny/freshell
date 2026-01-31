@@ -17,11 +17,38 @@
  * Windows networking services (like IP Helper for WSL) that won't block Vite from binding.
  */
 
-import { readFileSync } from 'fs'
+import { readFileSync, existsSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+const rootDir = resolve(__dirname, '..')
+
+/**
+ * Check if node_modules is missing required dependencies from package.json.
+ * Returns list of missing packages.
+ */
+function checkMissingDependencies() {
+  const missing = []
+  try {
+    const pkgPath = resolve(rootDir, 'package.json')
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'))
+    const allDeps = {
+      ...pkg.dependencies,
+      ...pkg.devDependencies,
+    }
+
+    for (const dep of Object.keys(allDeps)) {
+      const depPath = resolve(rootDir, 'node_modules', dep)
+      if (!existsSync(depPath)) {
+        missing.push(dep)
+      }
+    }
+  } catch {
+    // If we can't read package.json, skip this check
+  }
+  return missing
+}
 
 // Load .env file manually (dotenv not available at this stage)
 function loadEnv() {
@@ -117,6 +144,19 @@ async function checkVitePort() {
 }
 
 async function main() {
+  // Check for missing dependencies first
+  const missingDeps = checkMissingDependencies()
+  if (missingDeps.length > 0) {
+    console.error('\n\x1b[31m✖ Missing dependencies detected:\x1b[0m\n')
+    missingDeps.slice(0, 10).forEach(dep => console.error(`  • ${dep}`))
+    if (missingDeps.length > 10) {
+      console.error(`  • ... and ${missingDeps.length - 10} more`)
+    }
+    console.error('\n\x1b[33mTo fix:\x1b[0m')
+    console.error('  npm install\n')
+    process.exit(1)
+  }
+
   const [serverCheck, viteCheck] = await Promise.all([
     checkServerPort(SERVER_PORT),
     checkVitePort(),
