@@ -58,3 +58,35 @@ export const api = {
     return request<T>(path, { method: 'DELETE' })
   },
 }
+
+export type SearchResult = {
+  sessionId: string
+  projectPath: string
+  title?: string
+  summary?: string
+  matchedIn: 'title' | 'userMessage' | 'assistantMessage' | 'summary'
+  snippet?: string
+  updatedAt: number
+  cwd?: string
+}
+
+export type SearchResponse = {
+  results: SearchResult[]
+  tier: 'title' | 'userMessages' | 'fullText'
+  query: string
+  totalScanned: number
+}
+
+export type SearchOptions = {
+  query: string
+  tier?: 'title' | 'userMessages' | 'fullText'
+  limit?: number
+}
+
+export async function searchSessions(options: SearchOptions): Promise<SearchResponse> {
+  const { query, tier = 'title', limit } = options
+  const params = new URLSearchParams({ q: query, tier })
+  if (limit) params.set('limit', String(limit))
+
+  return api.get<SearchResponse>(`/api/sessions/search?${params}`)
+}
