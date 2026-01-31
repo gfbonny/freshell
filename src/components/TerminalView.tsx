@@ -237,18 +237,16 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   }, [isTerminal, settings, hidden])
 
   // When becoming visible, fit and send size
+  // Note: With visibility:hidden CSS, dimensions are always stable, so no RAF needed
   useEffect(() => {
     if (!isTerminal) return
     if (!hidden) {
-      const frameId = requestAnimationFrame(() => {
-        fitRef.current?.fit()
-        const term = termRef.current
-        const tid = terminalIdRef.current
-        if (term && tid) {
-          ws.send({ type: 'terminal.resize', terminalId: tid, cols: term.cols, rows: term.rows })
-        }
-      })
-      return () => cancelAnimationFrame(frameId)
+      fitRef.current?.fit()
+      const term = termRef.current
+      const tid = terminalIdRef.current
+      if (term && tid) {
+        ws.send({ type: 'terminal.resize', terminalId: tid, cols: term.cols, rows: term.rows })
+      }
     }
   }, [isTerminal, hidden, ws])
 
