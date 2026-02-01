@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest'
 import path from 'path'
 import os from 'os'
 import { defaultClaudeHome, parseSessionContent } from '../../../../server/coding-cli/providers/claude'
-import { ClaudeSessionIndexer } from '../../../../server/claude-indexer'
+import { ClaudeSessionIndexer, applyOverride } from '../../../../server/claude-indexer'
 import { looksLikePath } from '../../../../server/coding-cli/utils'
 
 describe('claude provider cross-platform tests', () => {
