@@ -100,6 +100,28 @@ export type JsonlMeta = {
   title?: string
   summary?: string
   messageCount?: number
+  createdAt?: number
+}
+
+function parseTimestamp(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value
+  }
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  if (!trimmed) return undefined
+
+  const numeric = Number(trimmed)
+  if (Number.isFinite(numeric)) {
+    return numeric
+  }
+
+  const parsed = Date.parse(trimmed)
+  if (!Number.isNaN(parsed)) {
+    return parsed
+  }
+
+  return undefined
 }
 
 /** Parse session metadata from jsonl content (pure function for testing) */
@@ -108,6 +130,7 @@ export function parseSessionContent(content: string): JsonlMeta {
   let cwd: string | undefined
   let title: string | undefined
   let summary: string | undefined
+  let createdAt: number | undefined
 
   for (const line of lines) {
     let obj: any
@@ -149,7 +172,19 @@ export function parseSessionContent(content: string): JsonlMeta {
       if (typeof s === 'string' && s.trim()) summary = s.trim().slice(0, 240)
     }
 
-    if (cwd && title && summary) break
+    if (createdAt === undefined) {
+      const candidate = parseTimestamp(obj?.timestamp || obj?.created_at || obj?.createdAt)
+      if (candidate !== undefined) {
+        createdAt = candidate
+      }
+    } else {
+      const candidate = parseTimestamp(obj?.timestamp || obj?.created_at || obj?.createdAt)
+      if (candidate !== undefined && candidate < createdAt) {
+        createdAt = candidate
+      }
+    }
+
+    if (cwd && title && summary && createdAt !== undefined) break
   }
 
   return {
@@ -157,6 +192,7 @@ export function parseSessionContent(content: string): JsonlMeta {
     title,
     summary,
     messageCount: lines.length,
+    createdAt,
   }
 }
 
@@ -207,7 +243,6 @@ export class ClaudeSessionIndexer {
   private sessionsById = new Map<string, ClaudeSession>()
   private projectsByPath = new Map<string, ProjectGroup>()
   private incrementalTimers = new Map<string, NodeJS.Timeout>()
-  private createdAtPinned = new Set<string>()
 
   async start() {
     // Initial scan (populates knownSessionIds with existing sessions)
@@ -316,14 +351,6 @@ export class ClaudeSessionIndexer {
 
   getProjects(): ProjectGroup[] {
     return this.projects
-  }
-
-  private ensureCreatedAtOverride(sessionKey: string, createdAt: number, ov?: SessionOverride) {
-    if (ov?.createdAtOverride || this.createdAtPinned.has(sessionKey)) return
-    this.createdAtPinned.add(sessionKey)
-    void configStore.patchSessionOverride(sessionKey, { createdAtOverride: createdAt }).catch((err) => {
-      logger.warn({ err, sessionKey }, 'Failed to persist createdAt override')
-    })
   }
 
   private scheduleFileUpsert(filePath: string) {
@@ -448,13 +475,7 @@ export class ClaudeSessionIndexer {
 
     const compositeKey = makeSessionKey('claude', sessionId)
     const ov = cfg.sessionOverrides?.[compositeKey] || cfg.sessionOverrides?.[sessionId]
-    const overrideKey = cfg.sessionOverrides?.[compositeKey]
-      ? compositeKey
-      : cfg.sessionOverrides?.[sessionId]
-        ? sessionId
-        : compositeKey
-    const createdAt = ov?.createdAtOverride ?? deriveCreatedAt(stat)
-    this.ensureCreatedAtOverride(overrideKey, createdAt, ov)
+    const createdAt = ov?.createdAtOverride ?? meta.createdAt ?? deriveCreatedAt(stat)
 
     const baseSession: ClaudeSession = {
       sessionId,
@@ -534,13 +555,7 @@ export class ClaudeSessionIndexer {
 
         const compositeKey = makeSessionKey('claude', sessionId)
         const ov = cfg.sessionOverrides?.[compositeKey] || cfg.sessionOverrides?.[sessionId]
-        const overrideKey = cfg.sessionOverrides?.[compositeKey]
-          ? compositeKey
-          : cfg.sessionOverrides?.[sessionId]
-            ? sessionId
-            : compositeKey
-        const createdAt = ov?.createdAtOverride ?? deriveCreatedAt(stat)
-        this.ensureCreatedAtOverride(overrideKey, createdAt, ov)
+        const createdAt = ov?.createdAtOverride ?? meta.createdAt ?? deriveCreatedAt(stat)
 
         const baseSession: ClaudeSession = {
           sessionId,
