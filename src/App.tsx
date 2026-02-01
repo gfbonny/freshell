@@ -9,6 +9,7 @@ import { getAuthToken } from '@/lib/auth'
 import { buildShareUrl } from '@/lib/utils'
 import { getWsClient } from '@/lib/ws-client'
 import { getSessionsForHello } from '@/lib/session-utils'
+import { setClientPerfEnabled } from '@/lib/perf-logger'
 import { store } from '@/store/store'
 import { useThemeEffect } from '@/hooks/useTheme'
 import { buildDefaultPaneContent } from '@/lib/default-pane'
@@ -230,6 +231,9 @@ export default function App() {
             console.log(`Session ${sessionId.slice(0, 8)}... repaired (${orphansFixed} orphans fixed)`)
           }
           // For 'healthy' status, no logging needed
+        }
+        if (msg.type === 'perf.logging') {
+          setClientPerfEnabled(!!msg.enabled, 'server')
         }
       })
 

@@ -3,10 +3,12 @@ import { randomUUID } from 'crypto'
 import WebSocket, { WebSocketServer } from 'ws'
 import { z } from 'zod'
 import { logger } from './logger.js'
+import { getPerfConfig, logPerfEvent, shouldLog, startPerfTimer } from './perf-logger.js'
 import { getRequiredAuthToken, isLoopbackAddress, isOriginAllowed } from './auth.js'
 import type { TerminalRegistry, TerminalMode } from './terminal-registry.js'
-import { configStore } from './config-store.js'
+import { configStore, type AppSettings } from './config-store.js'
 import type { CodingCliSessionManager } from './coding-cli/session-manager.js'
+import type { ProjectGroup } from './coding-cli/types.js'
 import type { SessionRepairService } from './session-scanner/service.js'
 import type { SessionScanResult, SessionRepairResult } from './session-scanner/types.js'
 
@@ -16,6 +18,7 @@ const PING_INTERVAL_MS = Number(process.env.PING_INTERVAL_MS || 30_000)
 const MAX_WS_BUFFERED_AMOUNT = Number(process.env.MAX_WS_BUFFERED_AMOUNT || 2 * 1024 * 1024)
 
 const log = logger.child({ component: 'ws' })
+const perfConfig = getPerfConfig()
 
 // Extended WebSocket with liveness tracking for keepalive
 interface LiveWebSocket extends WebSocket {
@@ -159,6 +162,14 @@ type ClientState = {
   helloTimer?: NodeJS.Timeout
 }
 
+type HandshakeSnapshot = {
+  settings?: AppSettings
+  projects?: ProjectGroup[]
+  perfLogging?: boolean
+}
+
+type HandshakeSnapshotProvider = () => Promise<HandshakeSnapshot>
+
 export class WsHandler {
   private wss: WebSocketServer
   private connections = new Set<LiveWebSocket>()
@@ -166,18 +177,22 @@ export class WsHandler {
   private pingInterval: NodeJS.Timeout | null = null
   private closed = false
   private sessionRepairService?: SessionRepairService
+  private handshakeSnapshotProvider?: HandshakeSnapshotProvider
   private sessionRepairListeners?: {
     scanned: (result: SessionScanResult) => void
     repaired: (result: SessionRepairResult) => void
+    error: (sessionId: string, error: Error) => void
   }
 
   constructor(
     server: http.Server,
     private registry: TerminalRegistry,
     private codingCliManager?: CodingCliSessionManager,
-    sessionRepairService?: SessionRepairService
+    sessionRepairService?: SessionRepairService,
+    handshakeSnapshotProvider?: HandshakeSnapshotProvider
   ) {
     this.sessionRepairService = sessionRepairService
+    this.handshakeSnapshotProvider = handshakeSnapshotProvider
     this.wss = new WebSocketServer({
       server,
       path: '/ws',
@@ -213,6 +228,16 @@ export class WsHandler {
           status: result.status === 'healthy' ? 'healthy' : 'corrupted',
           chainDepth: result.chainDepth,
         })
+
+        this.broadcast({
+          type: 'session.repair.activity',
+          event: 'scanned',
+          sessionId: result.sessionId,
+          status: result.status,
+          chainDepth: result.chainDepth,
+          orphanCount: result.orphanCount,
+        })
+        logger.debug({ sessionId: result.sessionId, status: result.status }, 'Session repair scan complete')
       }
 
       const onRepaired = (result: SessionRepairResult) => {
@@ -223,11 +248,32 @@ export class WsHandler {
           chainDepth: result.newChainDepth,
           orphansFixed: result.orphansFixed,
         })
+
+        this.broadcast({
+          type: 'session.repair.activity',
+          event: 'repaired',
+          sessionId: result.sessionId,
+          status: result.status,
+          orphansFixed: result.orphansFixed,
+          chainDepth: result.newChainDepth,
+        })
+        logger.info({ sessionId: result.sessionId, orphansFixed: result.orphansFixed }, 'Session repair completed')
       }
 
-      this.sessionRepairListeners = { scanned: onScanned, repaired: onRepaired }
+      const onError = (sessionId: string, error: Error) => {
+        this.broadcast({
+          type: 'session.repair.activity',
+          event: 'error',
+          sessionId,
+          message: error.message,
+        })
+        logger.warn({ err: error, sessionId }, 'Session repair failed')
+      }
+
+      this.sessionRepairListeners = { scanned: onScanned, repaired: onRepaired, error: onError }
       this.sessionRepairService.on('scanned', onScanned)
       this.sessionRepairService.on('repaired', onRepaired)
+      this.sessionRepairService.on('error', onError)
     }
   }
 
@@ -372,6 +418,17 @@ export class WsHandler {
       // @ts-ignore
       const buffered = ws.bufferedAmount as number | undefined
       if (typeof buffered === 'number' && buffered > MAX_WS_BUFFERED_AMOUNT) {
+        if (perfConfig.enabled && shouldLog(`ws_backpressure_${ws.connectionId || 'unknown'}`, perfConfig.rateLimitMs)) {
+          logPerfEvent(
+            'ws_backpressure_close',
+            {
+              connectionId: ws.connectionId,
+              bufferedBytes: buffered,
+              limitBytes: MAX_WS_BUFFERED_AMOUNT,
+            },
+            'warn',
+          )
+        }
         ws.close(CLOSE_CODES.BACKPRESSURE, 'Backpressure')
         return
       }
@@ -401,69 +458,119 @@ export class WsHandler {
     })
   }
 
-  private async onMessage(ws: LiveWebSocket, state: ClientState, data: WebSocket.RawData) {
-    let msg: any
+  private scheduleHandshakeSnapshot(ws: LiveWebSocket) {
+    if (!this.handshakeSnapshotProvider) return
+    setTimeout(() => {
+      void this.sendHandshakeSnapshot(ws)
+    }, 0)
+  }
+
+  private async sendHandshakeSnapshot(ws: LiveWebSocket) {
+    if (!this.handshakeSnapshotProvider) return
     try {
-      msg = JSON.parse(data.toString())
-    } catch {
-      this.sendError(ws, { code: 'INVALID_MESSAGE', message: 'Invalid JSON' })
-      return
+      const snapshot = await this.handshakeSnapshotProvider()
+      if (snapshot.settings) {
+        this.safeSend(ws, { type: 'settings.updated', settings: snapshot.settings })
+      }
+      if (snapshot.projects) {
+        this.safeSend(ws, { type: 'sessions.updated', projects: snapshot.projects })
+      }
+      if (typeof snapshot.perfLogging === 'boolean') {
+        this.safeSend(ws, { type: 'perf.logging', enabled: snapshot.perfLogging })
+      }
+    } catch (err) {
+      logger.warn({ err }, 'Failed to send handshake snapshot')
+    }
+  }
+
+  private async onMessage(ws: LiveWebSocket, state: ClientState, data: WebSocket.RawData) {
+    const endMessageTimer = startPerfTimer(
+      'ws_message',
+      { connectionId: ws.connectionId },
+      { minDurationMs: perfConfig.wsSlowMs, level: 'warn' },
+    )
+    let messageType: string | undefined
+    let payloadBytes: number | undefined
+    if (perfConfig.enabled) {
+      if (typeof data === 'string') payloadBytes = data.length
+      else if (Array.isArray(data)) payloadBytes = data.reduce((sum, item) => sum + item.length, 0)
+      else if (Buffer.isBuffer(data)) payloadBytes = data.length
+      else if (data instanceof ArrayBuffer) payloadBytes = data.byteLength
     }
 
-    const parsed = ClientMessageSchema.safeParse(msg)
-    if (!parsed.success) {
-      this.sendError(ws, { code: 'INVALID_MESSAGE', message: parsed.error.message, requestId: msg?.requestId })
-      return
-    }
-
-    const m = parsed.data
-
-    if (m.type === 'ping') {
-      // Respond to confirm liveness.
-      this.send(ws, { type: 'pong', timestamp: nowIso() })
-      return
-    }
-
-    if (m.type === 'hello') {
-      const expected = getRequiredAuthToken()
-      if (!m.token || m.token !== expected) {
-        log.warn({ event: 'ws_auth_failed', connectionId: ws.connectionId }, 'WebSocket auth failed')
-        this.sendError(ws, { code: 'NOT_AUTHENTICATED', message: 'Invalid token' })
-        ws.close(CLOSE_CODES.NOT_AUTHENTICATED, 'Invalid token')
+    try {
+      let msg: any
+      try {
+        msg = JSON.parse(data.toString())
+      } catch {
+        this.sendError(ws, { code: 'INVALID_MESSAGE', message: 'Invalid JSON' })
         return
       }
-      state.authenticated = true
-      if (state.helloTimer) clearTimeout(state.helloTimer)
 
-      log.info({ event: 'ws_authenticated', connectionId: ws.connectionId }, 'WebSocket client authenticated')
-
-      // Track and prioritize sessions from client
-      if (m.sessions && this.sessionRepairService) {
-        const allSessions = [
-          m.sessions.active,
-          ...(m.sessions.visible || []),
-          ...(m.sessions.background || []),
-        ].filter((s): s is string => !!s)
-
-        for (const sessionId of allSessions) {
-          state.interestedSessions.add(sessionId)
-        }
-
-        this.sessionRepairService.prioritizeSessions(m.sessions)
+      const parsed = ClientMessageSchema.safeParse(msg)
+      if (!parsed.success) {
+        this.sendError(ws, { code: 'INVALID_MESSAGE', message: parsed.error.message, requestId: msg?.requestId })
+        return
       }
 
-      this.send(ws, { type: 'ready', timestamp: nowIso() })
-      return
-    }
+      const m = parsed.data
+      messageType = m.type
 
-    if (!state.authenticated) {
-      this.sendError(ws, { code: 'NOT_AUTHENTICATED', message: 'Send hello first' })
-      ws.close(CLOSE_CODES.NOT_AUTHENTICATED, 'Not authenticated')
-      return
-    }
+      if (m.type === 'ping') {
+        // Respond to confirm liveness.
+        this.send(ws, { type: 'pong', timestamp: nowIso() })
+        return
+      }
 
-    switch (m.type) {
+      if (m.type === 'hello') {
+        const expected = getRequiredAuthToken()
+        if (!m.token || m.token !== expected) {
+          log.warn({ event: 'ws_auth_failed', connectionId: ws.connectionId }, 'WebSocket auth failed')
+          this.sendError(ws, { code: 'NOT_AUTHENTICATED', message: 'Invalid token' })
+          ws.close(CLOSE_CODES.NOT_AUTHENTICATED, 'Invalid token')
+          return
+        }
+        state.authenticated = true
+        if (state.helloTimer) clearTimeout(state.helloTimer)
+
+        log.info({ event: 'ws_authenticated', connectionId: ws.connectionId }, 'WebSocket client authenticated')
+
+        // Track and prioritize sessions from client
+        if (m.sessions && this.sessionRepairService) {
+          const allSessions = [
+            m.sessions.active,
+            ...(m.sessions.visible || []),
+            ...(m.sessions.background || []),
+          ].filter((s): s is string => !!s)
+
+          for (const sessionId of allSessions) {
+            state.interestedSessions.add(sessionId)
+          }
+
+          this.sessionRepairService.prioritizeSessions(m.sessions)
+        }
+
+        this.send(ws, { type: 'ready', timestamp: nowIso() })
+        this.scheduleHandshakeSnapshot(ws)
+        return
+      }
+
+      if (!state.authenticated) {
+        this.sendError(ws, { code: 'NOT_AUTHENTICATED', message: 'Send hello first' })
+        ws.close(CLOSE_CODES.NOT_AUTHENTICATED, 'Not authenticated')
+        return
+      }
+
+      switch (m.type) {
       case 'terminal.create': {
+        const endCreateTimer = startPerfTimer(
+          'terminal_create',
+          { connectionId: ws.connectionId, mode: m.mode, shell: m.shell },
+          { minDurationMs: perfConfig.slowTerminalCreateMs, level: 'warn' },
+        )
+        let terminalId: string | undefined
+        let reused = false
+        let error = false
         try {
           const existingId = state.createdByRequestId.get(m.requestId)
           if (existingId) {
@@ -471,6 +578,8 @@ export class WsHandler {
             if (existing) {
               this.registry.attach(existingId, ws)
               state.attachedTerminalIds.add(existingId)
+              terminalId = existingId
+              reused = true
               this.send(ws, { type: 'terminal.created', requestId: m.requestId, terminalId: existingId, snapshot: existing.buffer.snapshot(), createdAt: existing.createdAt })
               return
             }
@@ -503,6 +612,7 @@ export class WsHandler {
           })
 
           state.createdByRequestId.set(m.requestId, record.terminalId)
+          terminalId = record.terminalId
 
           // Attach creator immediately
           this.registry.attach(record.terminalId, ws)
@@ -519,12 +629,15 @@ export class WsHandler {
           // Notify all clients that list changed
           this.broadcast({ type: 'terminal.list.updated' })
         } catch (err: any) {
+          error = true
           log.warn({ err, connectionId: ws.connectionId }, 'terminal.create failed')
           this.sendError(ws, {
             code: 'PTY_SPAWN_FAILED',
             message: err?.message || 'Failed to spawn PTY',
             requestId: m.requestId,
           })
+        } finally {
+          endCreateTimer({ terminalId, reused, error })
         }
         return
       }
@@ -605,6 +718,13 @@ export class WsHandler {
           return
         }
 
+        const endCodingTimer = startPerfTimer(
+          'codingcli_create',
+          { connectionId: ws.connectionId, provider: m.provider },
+          { minDurationMs: perfConfig.slowTerminalCreateMs, level: 'warn' },
+        )
+        let sessionId: string | undefined
+        let error = false
         try {
           const cfg = await awaitConfig()
           if (!this.codingCliManager.hasProvider(m.provider)) {
@@ -638,6 +758,7 @@ export class WsHandler {
 
           // Track this client's session
           state.codingCliSessions.add(session.id)
+          sessionId = session.id
 
           // Stream events to client with detachable listeners
           const onEvent = (event: unknown) => {
@@ -685,12 +806,15 @@ export class WsHandler {
             provider: session.provider.name,
           })
         } catch (err: any) {
+          error = true
           log.warn({ err, connectionId: ws.connectionId }, 'codingcli.create failed')
           this.sendError(ws, {
             code: 'INTERNAL_ERROR',
             message: err?.message || 'Failed to create coding CLI session',
             requestId: m.requestId,
           })
+        } finally {
+          endCodingTimer({ sessionId, error })
         }
         return
       }
@@ -731,6 +855,9 @@ export class WsHandler {
       default:
         this.sendError(ws, { code: 'UNKNOWN_MESSAGE', message: 'Unknown message type' })
         return
+      }
+    } finally {
+      endMessageTimer({ messageType, payloadBytes })
     }
   }
 
@@ -752,6 +879,7 @@ export class WsHandler {
     if (this.sessionRepairService && this.sessionRepairListeners) {
       this.sessionRepairService.off('scanned', this.sessionRepairListeners.scanned)
       this.sessionRepairService.off('repaired', this.sessionRepairListeners.repaired)
+      this.sessionRepairService.off('error', this.sessionRepairListeners.error)
       this.sessionRepairListeners = undefined
     }
 
