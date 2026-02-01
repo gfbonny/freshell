@@ -83,6 +83,17 @@ export const terminalActivitySlice = createSlice({
       }
     },
 
+    /** Reset input timestamps for non-working panes (when tab becomes active) */
+    resetInputForTab: (state, action: PayloadAction<{ paneIds: string[] }>) => {
+      const { paneIds } = action.payload
+      for (const paneId of paneIds) {
+        // Only reset if pane is not currently working
+        if (!state.working[paneId]) {
+          delete state.lastInputAt[paneId]
+        }
+      }
+    },
+
     /** Clean up all state for removed panes */
     removePaneActivity: (state, action: PayloadAction<{ paneId: string }>) => {
       const { paneId } = action.payload
@@ -100,6 +111,7 @@ export const {
   enterWorking,
   finishWorking,
   clearFinishedForTab,
+  resetInputForTab,
   removePaneActivity,
 } = terminalActivitySlice.actions
 

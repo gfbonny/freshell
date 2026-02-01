@@ -4,6 +4,7 @@ import {
   enterWorking,
   finishWorking,
   clearFinishedForTab,
+  resetInputForTab,
   STREAMING_THRESHOLD_MS,
   INPUT_ECHO_WINDOW_MS,
   WORKING_ENTER_THRESHOLD_MS,
@@ -164,11 +165,13 @@ export function useTerminalActivityMonitor() {
       if (wasStreaming && !isNowStreaming) {
         // Only transition to finished if the pane was in working state
         if (working[paneId]) {
+          const ownerTabId = findOwnerTab(paneId)
           dispatch(finishWorking({ paneId }))
 
-          // Play sound only for background tabs
-          const ownerTabId = findOwnerTab(paneId)
-          if (ownerTabId && ownerTabId !== activeTabId && notifications?.soundWhenFinished) {
+          // Play sound for background tabs, or when browser is hidden/unfocused
+          const isBackgroundTab = ownerTabId !== activeTabId
+          const isBrowserHidden = document.hidden || !document.hasFocus()
+          if (ownerTabId && (isBackgroundTab || isBrowserHidden) && notifications?.soundWhenFinished) {
             shouldPlaySound = true
           }
         }
@@ -199,7 +202,7 @@ export function useTerminalActivityMonitor() {
     }
   }, [hasActiveStreaming, checkTransitions])
 
-  // Clear finished state when tab is selected
+  // Clear finished state and reset input tracking when tab is selected
   useEffect(() => {
     if (!activeTabId) return
 
@@ -207,6 +210,8 @@ export function useTerminalActivityMonitor() {
     const paneIds = collectPaneIds(layout)
     if (paneIds.length > 0) {
       dispatch(clearFinishedForTab({ paneIds }))
+      // Reset stale input timestamps so panes need fresh input to enter working state
+      dispatch(resetInputForTab({ paneIds }))
     }
   }, [activeTabId, layouts, dispatch])
 

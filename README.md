@@ -25,6 +25,7 @@
 - **Detach/reattach** — Background terminals persist across browser sessions
 - **Search & browse** — Filter coding CLI sessions by provider, project, date, or content
 - **Speak with the dead** — Invoke the spirits of ancient Claudes and ask them what they were thinking
+- **Cheery notifications** — Audio and visual alerts when your agent needs your attention
 - **Keep it tidy** — AI (or your pedantic self) names, summarizes, and organizes
 - **Dark/light themes** — Are we savages?
 - **Keyboard-driven** — tmux-style prefix shortcuts for power users
