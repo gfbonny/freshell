@@ -4,7 +4,26 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip
 import type { Tab } from '@/store/types'
 import type { MouseEvent, KeyboardEvent } from 'react'
 
-function StatusIndicator({ status }: { status: string }) {
+function StatusIndicator({ status, isWorking, isReady }: { status: string; isWorking: boolean; isReady: boolean }) {
+  // Working state: show animated indicator
+  if (isWorking) {
+    return (
+      <div className="relative">
+        <Circle className="h-2 w-2 fill-primary text-primary animate-pulse" />
+      </div>
+    )
+  }
+
+  // Ready state: show notification badge
+  if (isReady) {
+    return (
+      <div className="relative">
+        <Circle className="h-2 w-2 fill-warning text-warning" />
+      </div>
+    )
+  }
+
+  // Normal status indicators
   if (status === 'running') {
     return (
       <div className="relative">
@@ -26,6 +45,8 @@ export interface TabItemProps {
   isActive: boolean
   isDragging: boolean
   isRenaming: boolean
+  isWorking: boolean
+  isReady: boolean
   renameValue: string
   onRenameChange: (value: string) => void
   onRenameBlur: () => void
@@ -40,6 +61,8 @@ export default function TabItem({
   isActive,
   isDragging,
   isRenaming,
+  isWorking,
+  isReady,
   renameValue,
   onRenameChange,
   onRenameBlur,
@@ -60,7 +83,7 @@ export default function TabItem({
       onClick={onClick}
       onDoubleClick={onDoubleClick}
     >
-      <StatusIndicator status={tab.status} />
+      <StatusIndicator status={tab.status} isWorking={isWorking} isReady={isReady} />
 
       {isRenaming ? (
         <input

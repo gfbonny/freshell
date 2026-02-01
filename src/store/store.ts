@@ -6,6 +6,7 @@ import settingsReducer from './settingsSlice'
 import claudeReducer from './claudeSlice'
 import panesReducer from './panesSlice'
 import sessionActivityReducer from './sessionActivitySlice'
+import terminalActivityReducer from './terminalActivitySlice'
 import { persistMiddleware } from './persistMiddleware'
 import { sessionActivityPersistMiddleware } from './sessionActivityPersistence'
 
@@ -18,6 +19,7 @@ export const store = configureStore({
     claude: claudeReducer,
     panes: panesReducer,
     sessionActivity: sessionActivityReducer,
+    terminalActivity: terminalActivityReducer,
   },
   middleware: (getDefault) =>
     getDefault({

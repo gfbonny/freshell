@@ -5,6 +5,7 @@ import { getWsClient } from '@/lib/ws-client'
 import { deriveTabName } from '@/lib/deriveTabName'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import TabItem from './TabItem'
+import { useTerminalActivityMonitor } from '@/hooks/useTerminalActivityMonitor'
 import {
   DndContext,
   closestCenter,
@@ -32,6 +33,8 @@ interface SortableTabProps {
   isActive: boolean
   isDragging: boolean
   isRenaming: boolean
+  isWorking: boolean
+  isReady: boolean
   renameValue: string
   onRenameChange: (value: string) => void
   onRenameBlur: () => void
@@ -47,6 +50,8 @@ function SortableTab({
   isActive,
   isDragging,
   isRenaming,
+  isWorking,
+  isReady,
   renameValue,
   onRenameChange,
   onRenameBlur,
@@ -81,6 +86,8 @@ function SortableTab({
         isActive={isActive}
         isDragging={isDragging}
         isRenaming={isRenaming}
+        isWorking={isWorking}
+        isReady={isReady}
         renameValue={renameValue}
         onRenameChange={onRenameChange}
         onRenameBlur={onRenameBlur}
@@ -102,6 +109,9 @@ export default function TabBar() {
   const paneLayouts = useAppSelector((s) => s.panes?.layouts) ?? EMPTY_LAYOUTS
 
   const ws = useMemo(() => getWsClient(), [])
+
+  // Monitor terminal activity for working/ready indicators
+  const { tabActivityStates } = useTerminalActivityMonitor()
 
   // Compute display title for a single tab
   // Priority: user-set title > programmatically-set title (e.g., from Claude) > derived name
@@ -188,7 +198,9 @@ export default function TabBar() {
           strategy={horizontalListSortingStrategy}
         >
           <div className="flex items-end gap-0.5 overflow-x-auto flex-1">
-            {tabs.map((tab: Tab) => (
+            {tabs.map((tab: Tab) => {
+              const activityState = tabActivityStates[tab.id] ?? { isWorking: false, isReady: false }
+              return (
               <SortableTab
                 key={tab.id}
                 tab={tab}
@@ -196,6 +208,8 @@ export default function TabBar() {
                 isActive={tab.id === activeTabId}
                 isDragging={activeId === tab.id}
                 isRenaming={renamingId === tab.id}
+                isWorking={activityState.isWorking}
+                isReady={activityState.isReady}
                 renameValue={renameValue}
                 onRenameChange={setRenameValue}
                 onRenameBlur={() => {
@@ -228,7 +242,8 @@ export default function TabBar() {
                   setRenameValue(getDisplayTitle(tab))
                 }}
               />
-            ))}
+              )
+            })}
             <button
               className="flex-shrink-0 ml-1 mb-1 p-1 rounded-md border border-dashed border-muted-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground/50 hover:bg-muted/30 transition-colors"
               title="New shell tab"
@@ -254,6 +269,8 @@ export default function TabBar() {
                 isActive={activeTab.id === activeTabId}
                 isDragging={false}
                 isRenaming={false}
+                isWorking={tabActivityStates[activeTab.id]?.isWorking ?? false}
+                isReady={tabActivityStates[activeTab.id]?.isReady ?? false}
                 renameValue=""
                 onRenameChange={() => {}}
                 onRenameBlur={() => {}}

@@ -103,6 +103,8 @@ import settingsReducer, { defaultSettings, SettingsState } from '@/store/setting
 import sessionsReducer, { SessionsState } from '@/store/sessionsSlice'
 import connectionReducer from '@/store/connectionSlice'
 import claudeReducer from '@/store/claudeSlice'
+import panesReducer from '@/store/panesSlice'
+import terminalActivityReducer from '@/store/terminalActivitySlice'
 import type { Tab, AppSettings, ProjectGroup, BackgroundTerminal } from '@/store/types'
 
 // Import the mocked api to get access to the mocks
@@ -127,6 +129,8 @@ function createTestStore(state: TestStoreState = {}) {
       sessions: sessionsReducer,
       connection: connectionReducer,
       claude: claudeReducer,
+      panes: panesReducer,
+      terminalActivity: terminalActivityReducer,
     },
     middleware: (getDefault) =>
       getDefault({
@@ -150,6 +154,14 @@ function createTestStore(state: TestStoreState = {}) {
         projects: [],
         expandedProjects: new Set<string>(),
         ...state.sessions,
+      },
+      panes: {
+        layouts: {},
+        activePane: {},
+      },
+      terminalActivity: {
+        lastOutputAt: {},
+        ready: {},
       },
     },
   })

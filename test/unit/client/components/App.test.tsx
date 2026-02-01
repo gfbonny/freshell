@@ -8,6 +8,7 @@ import tabsReducer from '@/store/tabsSlice'
 import connectionReducer from '@/store/connectionSlice'
 import sessionsReducer from '@/store/sessionsSlice'
 import panesReducer from '@/store/panesSlice'
+import terminalActivityReducer from '@/store/terminalActivitySlice'
 
 // Mock the WebSocket client
 const mockSend = vi.fn()
@@ -74,6 +75,7 @@ function createTestStore() {
       connection: connectionReducer,
       sessions: sessionsReducer,
       panes: panesReducer,
+      terminalActivity: terminalActivityReducer,
     },
     middleware: (getDefault) =>
       getDefault({
@@ -104,6 +106,10 @@ function createTestStore() {
       panes: {
         layouts: {},
         activePane: {},
+      },
+      terminalActivity: {
+        lastOutputAt: {},
+        ready: {},
       },
     },
   })

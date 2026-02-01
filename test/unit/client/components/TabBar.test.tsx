@@ -5,6 +5,9 @@ import { Provider } from 'react-redux'
 import TabBar from '@/components/TabBar'
 import tabsReducer, { TabsState } from '@/store/tabsSlice'
 import claudeReducer from '@/store/claudeSlice'
+import panesReducer from '@/store/panesSlice'
+import settingsReducer, { defaultSettings } from '@/store/settingsSlice'
+import terminalActivityReducer from '@/store/terminalActivitySlice'
 import type { Tab } from '@/store/types'
 
 // Mock the ws-client module
@@ -55,6 +58,9 @@ function createStore(initialState: Partial<TabsState> = {}) {
     reducer: {
       tabs: tabsReducer,
       claude: claudeReducer,
+      panes: panesReducer,
+      settings: settingsReducer,
+      terminalActivity: terminalActivityReducer,
     },
     preloadedState: {
       tabs: {
@@ -64,6 +70,18 @@ function createStore(initialState: Partial<TabsState> = {}) {
       },
       claude: {
         sessions: {},
+      },
+      panes: {
+        layouts: {},
+        activePane: {},
+      },
+      settings: {
+        settings: defaultSettings,
+        loaded: true,
+      },
+      terminalActivity: {
+        lastOutputAt: {},
+        ready: {},
       },
     },
   })

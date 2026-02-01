@@ -6,7 +6,8 @@ import TabBar from '../../../../src/components/TabBar'
 import tabsReducer from '../../../../src/store/tabsSlice'
 import panesReducer from '../../../../src/store/panesSlice'
 import connectionReducer from '../../../../src/store/connectionSlice'
-import settingsReducer from '../../../../src/store/settingsSlice'
+import settingsReducer, { defaultSettings } from '../../../../src/store/settingsSlice'
+import terminalActivityReducer from '../../../../src/store/terminalActivitySlice'
 
 // Mock ws-client
 vi.mock('@/lib/ws-client', () => ({
@@ -33,17 +34,19 @@ function createStore(tabsState: any, panesState: any) {
       panes: panesReducer,
       connection: connectionReducer,
       settings: settingsReducer,
+      terminalActivity: terminalActivityReducer,
     },
     preloadedState: {
       tabs: tabsState,
       panes: panesState,
       connection: { status: 'connected', error: null, reconnectAttempts: 0 },
       settings: {
-        settings: null,
-        status: 'idle',
-        error: null,
-        lastSaved: null,
-        pendingSave: null,
+        settings: defaultSettings,
+        loaded: true,
+      },
+      terminalActivity: {
+        lastOutputAt: {},
+        ready: {},
       },
     },
   })

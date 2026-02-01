@@ -3,6 +3,7 @@ import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { updateTab } from '@/store/tabsSlice'
 import { updatePaneContent, updatePaneTitle } from '@/store/panesSlice'
 import { updateSessionActivity } from '@/store/sessionActivitySlice'
+import { recordOutput } from '@/store/terminalActivitySlice'
 import { getWsClient } from '@/lib/ws-client'
 import { getTerminalTheme } from '@/lib/terminal-themes'
 import { getResumeSessionIdFromRef } from '@/components/terminal-view-utils'
@@ -280,6 +281,8 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
 
         if (msg.type === 'terminal.output' && msg.terminalId === tid) {
           term.write(msg.data || '')
+          // Track output activity for notification system
+          dispatch(recordOutput({ paneId }))
         }
 
         if (msg.type === 'terminal.snapshot' && msg.terminalId === tid) {

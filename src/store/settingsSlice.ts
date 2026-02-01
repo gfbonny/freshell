@@ -26,6 +26,11 @@ export const defaultSettings: AppSettings = {
   panes: {
     defaultNewPane: 'ask' as const,
   },
+  notifications: {
+    visualWhenWorking: true,
+    visualWhenFinished: true,
+    soundWhenFinished: true,
+  },
 }
 
 export function migrateSortMode(mode: string | undefined): SidebarSortMode {
@@ -62,6 +67,7 @@ export const settingsSlice = createSlice({
     },
     updateSettingsLocal: (state, action: PayloadAction<Partial<AppSettings>>) => {
       const currentSidebar = state.settings.sidebar ?? defaultSettings.sidebar
+      const currentNotifications = state.settings.notifications ?? defaultSettings.notifications
       state.settings = {
         ...state.settings,
         ...action.payload,
@@ -73,6 +79,7 @@ export const settingsSlice = createSlice({
           sortMode: migrateSortMode(action.payload.sidebar?.sortMode ?? currentSidebar.sortMode),
         },
         panes: { ...state.settings.panes, ...(action.payload.panes || {}) },
+        notifications: { ...currentNotifications, ...(action.payload.notifications || {}) },
       }
     },
     markSaved: (state) => {
