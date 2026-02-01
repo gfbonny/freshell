@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import { configureStore } from '@reduxjs/toolkit'
 import codingCliReducer, {
+  CODING_CLI_MAX_EVENTS,
   createCodingCliSession,
   addCodingCliEvent,
+  getCodingCliSessionEvents,
   setCodingCliSessionStatus,
   clearCodingCliSession,
   registerCodingCliRequest,
@@ -104,8 +106,34 @@ describe('codingCliSlice', () => {
       const state = store.getState().codingCli
       expect(state.sessions['session-1'].providerSessionId).toBe('provider-session-init')
     })
-  })
 
+    it('caps events and tracks total count', () => {
+      const store = createTestStore()
+      store.dispatch(createCodingCliSession({ sessionId: 'session-1', provider: 'claude', prompt: 'test' }))
+
+      for (let i = 1; i <= CODING_CLI_MAX_EVENTS + 5; i++) {
+        const event: NormalizedEvent = {
+          type: 'message.assistant',
+          timestamp: new Date().toISOString(),
+          sessionId: 'provider-session',
+          provider: 'claude',
+          sequenceNumber: i,
+          raw: {},
+          message: { role: 'assistant', content: String(i) },
+        }
+        store.dispatch(addCodingCliEvent({ sessionId: 'session-1', event }))
+      }
+
+      const session = store.getState().codingCli.sessions['session-1']
+      const events = getCodingCliSessionEvents(session)
+
+      expect(events).toHaveLength(CODING_CLI_MAX_EVENTS)
+      expect(events[0].sequenceNumber).toBe(6)
+      expect(events[events.length - 1].sequenceNumber).toBe(CODING_CLI_MAX_EVENTS + 5)
+      expect(session.eventCount).toBe(CODING_CLI_MAX_EVENTS + 5)
+    })
+
+  })
   describe('setCodingCliSessionStatus', () => {
     it('updates session status', () => {
       const store = createTestStore()

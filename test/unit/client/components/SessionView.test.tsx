@@ -31,6 +31,8 @@ function createTestStore(codingCliState = {}) {
             prompt: 'test prompt',
             status: 'running' as const,
             events: [],
+            eventStart: 0,
+            eventCount: 0,
             createdAt: Date.now(),
           },
           ...codingCliState,
@@ -90,6 +92,8 @@ describe('SessionView', () => {
             },
           },
         ],
+        eventStart: 0,
+        eventCount: 1,
         createdAt: Date.now(),
       },
     })
@@ -120,6 +124,8 @@ describe('SessionView', () => {
             reasoning: 'Thinking through the problem...',
           },
         ],
+        eventStart: 0,
+        eventCount: 1,
         createdAt: Date.now(),
       },
     })
@@ -160,6 +166,8 @@ describe('SessionView', () => {
             raw: {},
           },
         ],
+        eventStart: 0,
+        eventCount: 1,
         createdAt: Date.now(),
       },
     })

@@ -1,12 +1,16 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit'
 import type { NormalizedEvent, CodingCliProviderName } from '@/lib/coding-cli-types'
 
+export const CODING_CLI_MAX_EVENTS = 1000
+
 export interface CodingCliSessionState {
   sessionId: string
   provider: CodingCliProviderName
   prompt: string
   status: 'running' | 'completed' | 'error'
   events: NormalizedEvent[]
+  eventStart: number
+  eventCount: number
   providerSessionId?: string
   cwd?: string
   createdAt: number
@@ -46,6 +50,8 @@ const codingCliSlice = createSlice({
         cwd: action.payload.cwd,
         status: 'running',
         events: [],
+        eventStart: 0,
+        eventCount: 0,
         createdAt: Date.now(),
       }
     },
@@ -53,7 +59,13 @@ const codingCliSlice = createSlice({
     addCodingCliEvent(state, action: PayloadAction<{ sessionId: string; event: NormalizedEvent }>) {
       const session = state.sessions[action.payload.sessionId]
       if (session) {
-        session.events.push(action.payload.event)
+        if (session.events.length < CODING_CLI_MAX_EVENTS) {
+          session.events.push(action.payload.event)
+        } else {
+          session.events[session.eventStart] = action.payload.event
+          session.eventStart = (session.eventStart + 1) % CODING_CLI_MAX_EVENTS
+        }
+        session.eventCount += 1
         if (action.payload.event.type === 'session.start' || action.payload.event.type === 'session.init') {
           session.providerSessionId = action.payload.event.sessionId
         }
@@ -97,6 +109,17 @@ const codingCliSlice = createSlice({
     },
   },
 })
+
+export function getCodingCliSessionEvents(session: CodingCliSessionState): NormalizedEvent[] {
+  if (session.events.length === 0) return []
+  if (session.eventStart === 0 || session.events.length < CODING_CLI_MAX_EVENTS) {
+    return session.events
+  }
+  return [
+    ...session.events.slice(session.eventStart),
+    ...session.events.slice(0, session.eventStart),
+  ]
+}
 
 export const {
   createCodingCliSession,

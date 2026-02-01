@@ -5,6 +5,23 @@ import { logger } from '../logger.js'
 import type { CodingCliProvider } from './provider.js'
 import type { CodingCliProviderName, CodingCliSessionInfo, NormalizedEvent } from './types.js'
 
+const DEFAULT_MAX_EVENTS = 1000
+const MAX_EVENTS = (() => {
+  const raw = Number.parseInt(process.env.FRESHELL_MAX_SESSION_EVENTS || String(DEFAULT_MAX_EVENTS), 10)
+  if (!Number.isFinite(raw) || raw <= 0) return DEFAULT_MAX_EVENTS
+  return raw
+})()
+
+// How long to keep completed sessions before auto-cleanup (default: 30 minutes)
+const COMPLETED_SESSION_RETENTION_MS = (() => {
+  const raw = Number.parseInt(process.env.FRESHELL_COMPLETED_SESSION_RETENTION_MS || String(30 * 60 * 1000), 10)
+  if (!Number.isFinite(raw) || raw <= 0) return 30 * 60 * 1000
+  return raw
+})()
+
+// Cleanup cadence for completed sessions
+const CLEANUP_INTERVAL_MS = 5 * 60 * 1000
+
 export type SpawnFn = (
   command: string,
   args: string[],
@@ -35,6 +52,9 @@ export class CodingCliSession extends EventEmitter {
   private _status: 'running' | 'completed' | 'error' = 'running'
   private _providerSessionId?: string
   private _events: NormalizedEvent[] = []
+  private _eventStart = 0
+  private _eventCount = 0
+  private _completedAt?: number
   readonly createdAt = Date.now()
   readonly prompt: string
   readonly cwd?: string
@@ -73,6 +93,7 @@ export class CodingCliSession extends EventEmitter {
     })
 
     this.process.on('close', (code) => {
+      this._completedAt = Date.now()
       this._status = code === 0 ? 'completed' : 'error'
       logger.info({ id: this.id, provider: this.provider.name, code }, 'Coding CLI session closed')
       if (!this._events.some((e) => e.type === 'session.end')) {
@@ -84,7 +105,7 @@ export class CodingCliSession extends EventEmitter {
           raw: { exitCode: code },
           error: code !== 0 ? { message: `Process exited with code ${code}`, recoverable: false } : undefined,
         }
-        this._events.push(endEvent)
+        this.appendEvent(endEvent)
         this.emit('event', endEvent)
       }
       this.emit('exit', code)
@@ -92,9 +113,27 @@ export class CodingCliSession extends EventEmitter {
 
     this.process.on('error', (err) => {
       this._status = 'error'
+      if (!this._completedAt) this._completedAt = Date.now()
       logger.error({ id: this.id, provider: this.provider.name, err }, 'Coding CLI session error')
       this.emit('error', err)
     })
+  }
+
+  private appendEvent(event: NormalizedEvent) {
+    if (this._events.length < MAX_EVENTS) {
+      this._events.push(event)
+    } else {
+      this._events[this._eventStart] = event
+      this._eventStart = (this._eventStart + 1) % MAX_EVENTS
+    }
+    this._eventCount += 1
+  }
+
+  private getOrderedEvents(): NormalizedEvent[] {
+    if (this._eventStart === 0 || this._events.length < MAX_EVENTS) {
+      return this._events.slice()
+    }
+    return [...this._events.slice(this._eventStart), ...this._events.slice(0, this._eventStart)]
   }
 
   private handleStdout(data: string) {
@@ -107,7 +146,7 @@ export class CodingCliSession extends EventEmitter {
       try {
         const events = this.provider.parseEvent(line)
         for (const event of events) {
-          this._events.push(event)
+          this.appendEvent(event)
           if (!this._providerSessionId && event.sessionId) {
             this._providerSessionId = event.sessionId
           }
@@ -128,7 +167,15 @@ export class CodingCliSession extends EventEmitter {
   }
 
   get events() {
-    return this._events
+    return this.getOrderedEvents()
+  }
+
+  get eventCount() {
+    return this._eventCount
+  }
+
+  get completedAt() {
+    return this._completedAt
   }
 
   getInfo(): CodingCliSessionInfo {
@@ -138,9 +185,11 @@ export class CodingCliSession extends EventEmitter {
       providerSessionId: this._providerSessionId,
       status: this._status,
       createdAt: this.createdAt,
+      completedAt: this._completedAt,
       prompt: this.prompt,
       cwd: this.cwd,
-      events: this._events,
+      events: this.getOrderedEvents(),
+      eventCount: this._eventCount,
     }
   }
 
@@ -154,6 +203,7 @@ export class CodingCliSession extends EventEmitter {
     if (this.process) {
       this.process.kill()
       this._status = 'error'
+      if (!this._completedAt) this._completedAt = Date.now()
     }
   }
 }
@@ -161,10 +211,38 @@ export class CodingCliSession extends EventEmitter {
 export class CodingCliSessionManager {
   private sessions = new Map<string, CodingCliSession>()
   private providers = new Map<CodingCliProviderName, CodingCliProvider>()
+  private cleanupTimer?: NodeJS.Timeout
 
   constructor(providers: CodingCliProvider[]) {
     for (const provider of providers) {
       this.providers.set(provider.name, provider)
+    }
+    this.startCleanupTimer()
+  }
+
+  private startCleanupTimer() {
+    this.cleanupTimer = setInterval(() => {
+      this.cleanupCompletedSessions()
+    }, CLEANUP_INTERVAL_MS)
+    this.cleanupTimer.unref()
+  }
+
+  private cleanupCompletedSessions() {
+    const now = Date.now()
+    const expired: string[] = []
+
+    for (const [id, session] of this.sessions) {
+      if (session.status === 'running') continue
+      const completedAt = session.completedAt
+      if (!completedAt) continue
+      if (now - completedAt > COMPLETED_SESSION_RETENTION_MS) {
+        expired.push(id)
+      }
+    }
+
+    for (const id of expired) {
+      logger.info({ id }, 'Auto-cleaning completed coding CLI session')
+      this.sessions.delete(id)
     }
   }
 
@@ -198,7 +276,7 @@ export class CodingCliSessionManager {
     this.sessions.set(session.id, session)
 
     session.on('exit', () => {
-      // Keep session for history, don't auto-remove
+      // Session kept briefly for history; cleanup timer removes it later.
     })
 
     return session
@@ -227,6 +305,10 @@ export class CodingCliSessionManager {
   }
 
   shutdown() {
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer)
+      this.cleanupTimer = undefined
+    }
     for (const session of this.sessions.values()) {
       session.kill()
     }

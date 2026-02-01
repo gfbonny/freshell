@@ -125,9 +125,11 @@ export interface CodingCliSessionInfo {
   providerSessionId?: string
   status: 'running' | 'completed' | 'error'
   createdAt: number
+  completedAt?: number
   prompt: string
   cwd?: string
   events: NormalizedEvent[]
+  eventCount: number
 }
 
 export interface CodingCliSession {

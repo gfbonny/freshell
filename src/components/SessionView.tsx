@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useAppSelector, useAppDispatch } from '@/store/hooks'
-import { addCodingCliEvent, setCodingCliSessionStatus } from '@/store/codingCliSlice'
+import { addCodingCliEvent, getCodingCliSessionEvents, setCodingCliSessionStatus } from '@/store/codingCliSlice'
 import { cn } from '@/lib/utils'
 import { MessageBubble } from './session/MessageBubble'
 import { ToolCallBlock } from './session/ToolCallBlock'
@@ -19,6 +19,7 @@ export default function SessionView({ sessionId, hidden }: SessionViewProps) {
   const dispatch = useAppDispatch()
   const scrollRef = useRef<HTMLDivElement>(null)
   const ws = useMemo(() => getWsClient(), [])
+  const events = useMemo(() => (session ? getCodingCliSessionEvents(session) : []), [session])
 
   // Subscribe to WebSocket events for this session
   useEffect(() => {
@@ -45,7 +46,7 @@ export default function SessionView({ sessionId, hidden }: SessionViewProps) {
     if (scrollRef.current && !hidden) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
-  }, [session?.events.length, hidden])
+  }, [events.length, hidden])
 
   if (!session) {
     return (
@@ -57,7 +58,7 @@ export default function SessionView({ sessionId, hidden }: SessionViewProps) {
 
   const statusBadge = session.status
   const providerLabel = getProviderLabel(session.provider)
-  const endEvent = session.events.find((e) => e.type === 'session.end')
+  const endEvent = events.find((e) => e.type === 'session.end')
 
   const renderEvent = (event: NormalizedEvent, index: number) => {
     if (event.type === 'message.user' || event.type === 'message.assistant') {
@@ -107,13 +108,13 @@ export default function SessionView({ sessionId, hidden }: SessionViewProps) {
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
-        {session.events.length === 0 && session.status === 'running' && (
+        {events.length === 0 && session.status === 'running' && (
           <div className="text-center text-muted-foreground py-8">
             <div className="animate-pulse">Waiting for response...</div>
           </div>
         )}
 
-        {session.events.map(renderEvent)}
+        {events.map(renderEvent)}
 
         {endEvent && (
           <div className="text-center text-sm text-muted-foreground py-4 border-t mt-4">

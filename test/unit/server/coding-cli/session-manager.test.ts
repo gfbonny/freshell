@@ -24,6 +24,35 @@ function createMockProcess() {
   return mockProcess
 }
 
+function makeStreamingProvider(): CodingCliProvider {
+  return {
+    name: 'codex',
+    displayName: 'Codex',
+    homeDir: '/tmp',
+    getSessionGlob: () => '/tmp/*.jsonl',
+    listSessionFiles: async () => [],
+    parseSessionFile: () => ({}),
+    resolveProjectPath: async () => '/project',
+    extractSessionId: () => 'session-id',
+    getCommand: () => 'codex',
+    getStreamArgs: () => ['exec', '--json'],
+    getResumeArgs: () => ['resume', 'session-id'],
+    parseEvent: (line: string) => [
+      {
+        type: 'message.assistant',
+        timestamp: new Date().toISOString(),
+        sessionId: 'provider-session',
+        provider: 'codex',
+        sequenceNumber: Number(line),
+        raw: { line },
+        message: { role: 'assistant', content: line },
+      },
+    ],
+    supportsLiveStreaming: () => true,
+    supportsSessionResume: () => true,
+  }
+}
+
 describe('CodingCliSession (Claude provider)', () => {
   let mockProcess: any
   let mockSpawn: ReturnType<typeof vi.fn>
@@ -225,6 +254,30 @@ describe('CodingCliSession (Claude provider)', () => {
       expect(events[2].type).toBe('session.end')
     })
   })
+
+  it('caps stored events while tracking total event count', async () => {
+    const provider = makeStreamingProvider()
+    const session = new CodingCliSession({
+      provider,
+      prompt: 'test',
+      _spawn: mockSpawn as SpawnFn,
+      _nanoid: () => 'cap-test',
+    })
+
+    for (let i = 1; i <= 1005; i++) {
+      mockProcess.stdout.emit('data', Buffer.from(String(i) + '\n'))
+    }
+
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(session.events).toHaveLength(1000)
+    expect(session.events[0].sequenceNumber).toBe(6)
+    expect(session.events[session.events.length - 1].sequenceNumber).toBe(1005)
+    expect(session.eventCount).toBe(1005)
+
+    const info = session.getInfo()
+    expect(info.eventCount).toBe(1005)
+  })
 })
 
 describe('CodingCliSessionManager', () => {
@@ -304,5 +357,30 @@ describe('CodingCliSessionManager', () => {
         _nanoid: () => 'id-1',
       })
     ).toThrow(/resume/i)
+  })
+
+  it('retains running sessions past retention and cleans after completion', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-02-01T00:00:00Z'))
+
+    const manager = new CodingCliSessionManager([claudeProvider])
+    const session = manager.create('claude', {
+      prompt: 'test',
+      _spawn: mockSpawn as SpawnFn,
+      _nanoid: () => 'id-1',
+    })
+
+    vi.advanceTimersByTime(31 * 60 * 1000)
+    ;(manager as any).cleanupCompletedSessions()
+    expect(manager.get(session.id)).toBeDefined()
+
+    mockProcess.emit('close', 0)
+
+    vi.advanceTimersByTime(31 * 60 * 1000)
+    ;(manager as any).cleanupCompletedSessions()
+    expect(manager.get(session.id)).toBeUndefined()
+
+    manager.shutdown()
+    vi.useRealTimers()
   })
 })
