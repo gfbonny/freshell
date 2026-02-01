@@ -109,6 +109,7 @@ function createTestStore() {
       },
       terminalActivity: {
         lastOutputAt: {},
+        lastInputAt: {},
         ready: {},
       },
     },

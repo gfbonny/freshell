@@ -7,17 +7,23 @@ import { createSlice, PayloadAction } from '@reduxjs/toolkit'
 export interface TerminalActivityState {
   /** Map of paneId -> last output timestamp */
   lastOutputAt: Record<string, number>
+  /** Map of paneId -> last input timestamp (for filtering echo) */
+  lastInputAt: Record<string, number>
   /** Set of paneIds that have finished streaming and are awaiting user attention */
   ready: Record<string, boolean>
 }
 
 const initialState: TerminalActivityState = {
   lastOutputAt: {},
+  lastInputAt: {},
   ready: {},
 }
 
 /** Threshold in ms to consider a terminal "streaming" */
 export const STREAMING_THRESHOLD_MS = 1000
+
+/** Window after input where output is considered echo (not streaming) */
+export const INPUT_ECHO_WINDOW_MS = 200
 
 /** Debounce window for sound notifications */
 export const SOUND_DEBOUNCE_MS = 2000
@@ -32,6 +38,12 @@ export const terminalActivitySlice = createSlice({
       state.lastOutputAt[paneId] = Date.now()
       // Clear ready state when new output arrives (terminal is working again)
       delete state.ready[paneId]
+    },
+
+    /** Record input activity for a pane (to filter out echo) */
+    recordInput: (state, action: PayloadAction<{ paneId: string }>) => {
+      const { paneId } = action.payload
+      state.lastInputAt[paneId] = Date.now()
     },
 
     /** Mark a pane as ready (finished streaming, awaiting attention) */
@@ -58,6 +70,7 @@ export const terminalActivitySlice = createSlice({
     removePaneActivity: (state, action: PayloadAction<{ paneId: string }>) => {
       const { paneId } = action.payload
       delete state.lastOutputAt[paneId]
+      delete state.lastInputAt[paneId]
       delete state.ready[paneId]
     },
   },
@@ -65,6 +78,7 @@ export const terminalActivitySlice = createSlice({
 
 export const {
   recordOutput,
+  recordInput,
   markReady,
   clearReady,
   clearReadyForTab,

@@ -120,6 +120,7 @@ function createTestStore(options?: {
       },
       terminalActivity: {
         lastOutputAt: {},
+        lastInputAt: {},
         ready: {},
       },
     },

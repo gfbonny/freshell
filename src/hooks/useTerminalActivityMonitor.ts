@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { markReady, clearReadyForTab, STREAMING_THRESHOLD_MS } from '@/store/terminalActivitySlice'
+import { markReady, clearReadyForTab, STREAMING_THRESHOLD_MS, INPUT_ECHO_WINDOW_MS } from '@/store/terminalActivitySlice'
 import { useNotificationSound } from './useNotificationSound'
 import type { PaneNode } from '@/store/paneTypes'
 
@@ -11,10 +11,21 @@ function collectPaneIds(node: PaneNode | undefined): string[] {
   return [...collectPaneIds(node.children[0]), ...collectPaneIds(node.children[1])]
 }
 
-/** Check if a pane is streaming based on last output time */
-function isStreaming(lastOutputAt: number | undefined, now: number): boolean {
+/**
+ * Check if a pane is streaming based on last output time.
+ * Filters out output that's likely just input echo (within INPUT_ECHO_WINDOW_MS of input).
+ */
+function isPaneStreaming(
+  lastOutputAt: number | undefined,
+  lastInputAt: number | undefined,
+  now: number
+): boolean {
   if (!lastOutputAt) return false
-  return now - lastOutputAt < STREAMING_THRESHOLD_MS
+  // No recent output = not streaming
+  if (now - lastOutputAt >= STREAMING_THRESHOLD_MS) return false
+  // If there's been recent input, output might just be echo - don't count as streaming
+  if (lastInputAt && now - lastInputAt < INPUT_ECHO_WINDOW_MS) return false
+  return true
 }
 
 export interface TabActivityState {
@@ -45,6 +56,7 @@ export function useTerminalActivityMonitor() {
   const activeTabId = useAppSelector((s) => s.tabs.activeTabId)
   const layouts = useAppSelector((s) => s.panes.layouts)
   const lastOutputAt = useAppSelector((s) => s.terminalActivity.lastOutputAt)
+  const lastInputAt = useAppSelector((s) => s.terminalActivity.lastInputAt)
   const ready = useAppSelector((s) => s.terminalActivity.ready)
   const notifications = useAppSelector((s) => s.settings.settings.notifications)
 
@@ -62,10 +74,10 @@ export function useTerminalActivityMonitor() {
   useEffect(() => {
     const now = Date.now()
 
-    // Calculate current streaming state
+    // Calculate current streaming state (filtering out input echo)
     const currentStreaming: Record<string, boolean> = {}
     for (const paneId of Object.keys(lastOutputAt)) {
-      currentStreaming[paneId] = isStreaming(lastOutputAt[paneId], now)
+      currentStreaming[paneId] = isPaneStreaming(lastOutputAt[paneId], lastInputAt[paneId], now)
     }
 
     const prevStreaming = prevStreamingRef.current
@@ -87,7 +99,7 @@ export function useTerminalActivityMonitor() {
           }
         }
 
-        // Only mark ready if this isn't the active tab
+        // Only mark finished if this isn't the active tab
         if (ownerTabId && ownerTabId !== activeTabId) {
           if (notifications?.visualWhenFinished) {
             dispatch(markReady({ paneId }))
@@ -105,7 +117,7 @@ export function useTerminalActivityMonitor() {
     }
 
     prevStreamingRef.current = currentStreaming
-  }, [lastOutputAt, tabs, layouts, activeTabId, notifications, dispatch, playSound])
+  }, [lastOutputAt, lastInputAt, tabs, layouts, activeTabId, notifications, dispatch, playSound])
 
   // Clear ready state when tab is selected
   useEffect(() => {
@@ -127,15 +139,15 @@ export function useTerminalActivityMonitor() {
       const layout = layouts[tab.id]
       const paneIds = collectPaneIds(layout)
 
-      let isStreaming = false
-      let isFinished = false
+      let tabIsStreaming = false
+      let tabIsFinished = false
 
       for (const paneId of paneIds) {
-        if (lastOutputAt[paneId] && now - lastOutputAt[paneId] < STREAMING_THRESHOLD_MS) {
-          isStreaming = true
+        if (isPaneStreaming(lastOutputAt[paneId], lastInputAt[paneId], now)) {
+          tabIsStreaming = true
         }
         if (ready[paneId]) {
-          isFinished = true
+          tabIsFinished = true
         }
       }
 
@@ -144,13 +156,13 @@ export function useTerminalActivityMonitor() {
       // Working: only shown on active tab when streaming
       // Finished: shown on background tabs that stopped streaming
       states[tab.id] = {
-        isWorking: notifications?.visualWhenWorking && isActiveTab && isStreaming,
-        isFinished: notifications?.visualWhenFinished && !isActiveTab && isFinished,
+        isWorking: notifications?.visualWhenWorking && isActiveTab && tabIsStreaming,
+        isFinished: notifications?.visualWhenFinished && !isActiveTab && tabIsFinished,
       }
     }
 
     return states
-  }, [tabs, layouts, lastOutputAt, ready, notifications, activeTabId])
+  }, [tabs, layouts, lastOutputAt, lastInputAt, ready, notifications, activeTabId])
 
   return { tabActivityStates }
 }
