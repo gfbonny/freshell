@@ -18,20 +18,24 @@ function isStreaming(lastOutputAt: number | undefined, now: number): boolean {
 }
 
 export interface TabActivityState {
+  /** Terminal is actively streaming (only shown on active tab) */
   isWorking: boolean
-  isReady: boolean
+  /** Terminal stopped streaming on background tab (needs attention) */
+  isFinished: boolean
 }
 
 /**
  * Monitor terminal activity and handle transitions.
- * Also returns activity state for all tabs.
  *
- * This hook:
- * - Detects streaming -> idle transitions
- * - Marks panes as ready when they finish on non-active tabs
- * - Plays notification sound when configured
- * - Clears ready state when tab is selected
- * - Returns { tabActivityStates: Record<tabId, { isWorking, isReady }> }
+ * States:
+ * - Ready (default): green dot - terminal is idle
+ * - Working: pulsing grey - terminal is streaming (only shown on active tab)
+ * - Finished: green dot + blue tab bg - streaming stopped on background tab
+ *
+ * Rules:
+ * - Working can only be shown when tab is active
+ * - Finished is entered when background tab stops streaming
+ * - Selecting a finished tab clears it to ready
  */
 export function useTerminalActivityMonitor() {
   const dispatch = useAppDispatch()
@@ -123,29 +127,25 @@ export function useTerminalActivityMonitor() {
       const layout = layouts[tab.id]
       const paneIds = collectPaneIds(layout)
 
-      let tabIsWorking = false
-      let tabIsReady = false
+      let isStreaming = false
+      let isFinished = false
 
       for (const paneId of paneIds) {
-        if (isStreaming(lastOutputAt[paneId], now)) {
-          tabIsWorking = true
+        if (lastOutputAt[paneId] && now - lastOutputAt[paneId] < STREAMING_THRESHOLD_MS) {
+          isStreaming = true
         }
         if (ready[paneId]) {
-          tabIsReady = true
+          isFinished = true
         }
       }
 
-      // Working takes precedence over ready
-      if (tabIsWorking) {
-        tabIsReady = false
-      }
-
-      // Don't show working indicator for active tab (you can already see it)
       const isActiveTab = tab.id === activeTabId
 
+      // Working: only shown on active tab when streaming
+      // Finished: shown on background tabs that stopped streaming
       states[tab.id] = {
-        isWorking: notifications?.visualWhenWorking && !isActiveTab ? tabIsWorking : false,
-        isReady: notifications?.visualWhenFinished ? tabIsReady : false,
+        isWorking: notifications?.visualWhenWorking && isActiveTab && isStreaming,
+        isFinished: notifications?.visualWhenFinished && !isActiveTab && isFinished,
       }
     }
 

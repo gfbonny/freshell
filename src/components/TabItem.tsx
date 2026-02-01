@@ -4,32 +4,15 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip
 import type { Tab } from '@/store/types'
 import type { MouseEvent, KeyboardEvent } from 'react'
 
-function StatusIndicator({ status, isWorking, isReady }: { status: string; isWorking: boolean; isReady: boolean }) {
-  // Working state: show animated indicator
+function StatusIndicator({ status, isWorking }: { status: string; isWorking: boolean }) {
+  // Working state: pulsing grey (only on active tab when streaming)
   if (isWorking) {
-    return (
-      <div className="relative">
-        <Circle className="h-2 w-2 fill-primary text-primary animate-pulse" />
-      </div>
-    )
+    return <Circle className="h-2 w-2 fill-muted-foreground text-muted-foreground animate-pulse" />
   }
 
-  // Ready state: show notification badge
-  if (isReady) {
-    return (
-      <div className="relative">
-        <Circle className="h-2 w-2 fill-warning text-warning" />
-      </div>
-    )
-  }
-
-  // Normal status indicators
+  // Ready state (default): green dot for running terminals
   if (status === 'running') {
-    return (
-      <div className="relative">
-        <Circle className="h-2 w-2 fill-success text-success" />
-      </div>
-    )
+    return <Circle className="h-2 w-2 fill-success text-success" />
   }
   if (status === 'exited') {
     return <Circle className="h-2 w-2 text-muted-foreground/40" />
@@ -37,6 +20,7 @@ function StatusIndicator({ status, isWorking, isReady }: { status: string; isWor
   if (status === 'error') {
     return <Circle className="h-2 w-2 fill-destructive text-destructive" />
   }
+  // Creating state
   return <Circle className="h-2 w-2 text-muted-foreground/20 animate-pulse" />
 }
 
@@ -46,7 +30,7 @@ export interface TabItemProps {
   isDragging: boolean
   isRenaming: boolean
   isWorking: boolean
-  isReady: boolean
+  isFinished: boolean
   renameValue: string
   onRenameChange: (value: string) => void
   onRenameBlur: () => void
@@ -62,7 +46,7 @@ export default function TabItem({
   isDragging,
   isRenaming,
   isWorking,
-  isReady,
+  isFinished,
   renameValue,
   onRenameChange,
   onRenameBlur,
@@ -78,12 +62,14 @@ export default function TabItem({
         isActive
           ? 'bg-background text-foreground shadow-sm'
           : 'bg-muted text-muted-foreground hover:text-foreground hover:bg-accent mt-1',
-        isDragging && 'opacity-50'
+        isDragging && 'opacity-50',
+        // Finished state: blue tint on background tabs
+        isFinished && !isActive && 'bg-blue-500/20'
       )}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
     >
-      <StatusIndicator status={tab.status} isWorking={isWorking} isReady={isReady} />
+      <StatusIndicator status={tab.status} isWorking={isWorking} />
 
       {isRenaming ? (
         <input

@@ -34,7 +34,7 @@ interface SortableTabProps {
   isDragging: boolean
   isRenaming: boolean
   isWorking: boolean
-  isReady: boolean
+  isFinished: boolean
   renameValue: string
   onRenameChange: (value: string) => void
   onRenameBlur: () => void
@@ -51,7 +51,7 @@ function SortableTab({
   isDragging,
   isRenaming,
   isWorking,
-  isReady,
+  isFinished,
   renameValue,
   onRenameChange,
   onRenameBlur,
@@ -87,7 +87,7 @@ function SortableTab({
         isDragging={isDragging}
         isRenaming={isRenaming}
         isWorking={isWorking}
-        isReady={isReady}
+        isFinished={isFinished}
         renameValue={renameValue}
         onRenameChange={onRenameChange}
         onRenameBlur={onRenameBlur}
@@ -199,7 +199,7 @@ export default function TabBar() {
         >
           <div className="flex items-end gap-0.5 overflow-x-auto flex-1">
             {tabs.map((tab: Tab) => {
-              const activityState = tabActivityStates[tab.id] ?? { isWorking: false, isReady: false }
+              const activityState = tabActivityStates[tab.id] ?? { isWorking: false, isFinished: false }
               return (
               <SortableTab
                 key={tab.id}
@@ -209,7 +209,7 @@ export default function TabBar() {
                 isDragging={activeId === tab.id}
                 isRenaming={renamingId === tab.id}
                 isWorking={activityState.isWorking}
-                isReady={activityState.isReady}
+                isFinished={activityState.isFinished}
                 renameValue={renameValue}
                 onRenameChange={setRenameValue}
                 onRenameBlur={() => {
@@ -270,7 +270,7 @@ export default function TabBar() {
                 isDragging={false}
                 isRenaming={false}
                 isWorking={tabActivityStates[activeTab.id]?.isWorking ?? false}
-                isReady={tabActivityStates[activeTab.id]?.isReady ?? false}
+                isFinished={tabActivityStates[activeTab.id]?.isFinished ?? false}
                 renameValue=""
                 onRenameChange={() => {}}
                 onRenameBlur={() => {}}
