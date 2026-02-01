@@ -6,6 +6,7 @@ import {
   clearFinishedForTab,
   STREAMING_THRESHOLD_MS,
   INPUT_ECHO_WINDOW_MS,
+  WORKING_ENTER_THRESHOLD_MS,
 } from '@/store/terminalActivitySlice'
 import { useNotificationSound } from './useNotificationSound'
 import type { PaneNode } from '@/store/paneTypes'
@@ -30,6 +31,23 @@ function isPaneStreaming(
   // No recent output = not streaming
   if (now - lastOutputAt >= STREAMING_THRESHOLD_MS) return false
   // If there's been recent input, output might just be echo - don't count as streaming
+  if (lastInputAt && now - lastInputAt < INPUT_ECHO_WINDOW_MS) return false
+  return true
+}
+
+/**
+ * Check if a pane has output happening RIGHT NOW (for entering working state).
+ * Uses a much shorter threshold than isPaneStreaming.
+ */
+function isPaneOutputActive(
+  lastOutputAt: number | undefined,
+  lastInputAt: number | undefined,
+  now: number
+): boolean {
+  if (!lastOutputAt) return false
+  // Must have very recent output (within last 1-2 seconds)
+  if (now - lastOutputAt >= WORKING_ENTER_THRESHOLD_MS) return false
+  // If there's been recent input, output might just be echo
   if (lastInputAt && now - lastInputAt < INPUT_ECHO_WINDOW_MS) return false
   return true
 }
@@ -99,15 +117,23 @@ export function useTerminalActivityMonitor() {
     return false
   }, [lastOutputAt, lastInputAt])
 
-  // Handle entering working state when output starts on active tab
+  // Handle entering working state when output starts on active tab after user input
   useEffect(() => {
     const now = Date.now()
     for (const paneId of Object.keys(lastOutputAt)) {
       // Skip if already working
       if (working[paneId]) continue
 
-      // Check if this pane is streaming (has recent output, not echo)
-      if (!isPaneStreaming(lastOutputAt[paneId], lastInputAt[paneId], now)) continue
+      // Must have had user input first (user initiated the work)
+      if (!lastInputAt[paneId]) continue
+
+      // Output must be happening after the input (response to user action)
+      const outputTime = lastOutputAt[paneId]
+      const inputTime = lastInputAt[paneId]
+      if (!outputTime || outputTime < inputTime) continue
+
+      // Check if output is happening RIGHT NOW
+      if (!isPaneOutputActive(outputTime, inputTime, now)) continue
 
       // Check if this pane's tab is active
       const ownerTabId = findOwnerTab(paneId)

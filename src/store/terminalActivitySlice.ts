@@ -35,6 +35,9 @@ const initialState: TerminalActivityState = {
 /** Threshold in ms to consider a terminal "streaming" (must be idle this long to trigger finished) */
 export const STREAMING_THRESHOLD_MS = 20000
 
+/** Threshold in ms for output to be considered "active" (for entering working state) */
+export const WORKING_ENTER_THRESHOLD_MS = 2000
+
 /** Window after input where output is considered echo (not streaming) */
 export const INPUT_ECHO_WINDOW_MS = 200
 
