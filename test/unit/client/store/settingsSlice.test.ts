@@ -74,6 +74,14 @@ describe('settingsSlice', () => {
           width: 320,
           collapsed: true,
         },
+        panes: {
+          defaultNewPane: 'shell',
+        },
+        notifications: {
+          visualWhenWorking: false,
+          visualWhenFinished: false,
+          soundWhenFinished: false,
+        },
       }
 
       const state = settingsReducer(initialState, setSettings(newSettings))

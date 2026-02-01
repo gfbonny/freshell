@@ -818,6 +818,16 @@ describe('State Edge Cases', () => {
           sidebar: {
             sortMode: 'activity',
             showProjectBadges: false,
+            width: 400,
+            collapsed: true,
+          },
+          panes: {
+            defaultNewPane: 'shell',
+          },
+          notifications: {
+            visualWhenWorking: false,
+            visualWhenFinished: false,
+            soundWhenFinished: false,
           },
         }
 

@@ -57,11 +57,17 @@ export const settingsSlice = createSlice({
   reducers: {
     setSettings: (state, action: PayloadAction<AppSettings>) => {
       state.settings = {
+        ...defaultSettings,
         ...action.payload,
+        terminal: { ...defaultSettings.terminal, ...(action.payload.terminal || {}) },
+        safety: { ...defaultSettings.safety, ...(action.payload.safety || {}) },
         sidebar: {
-          ...action.payload.sidebar,
+          ...defaultSettings.sidebar,
+          ...(action.payload.sidebar || {}),
           sortMode: migrateSortMode(action.payload.sidebar?.sortMode),
         },
+        panes: { ...defaultSettings.panes, ...(action.payload.panes || {}) },
+        notifications: { ...defaultSettings.notifications, ...(action.payload.notifications || {}) },
       }
       state.loaded = true
     },
