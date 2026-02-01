@@ -556,3 +556,66 @@ describe('App Component - Share Button', () => {
     })
   })
 })
+
+describe('App Bootstrap', () => {
+  const originalSessionStorage = global.sessionStorage
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    const sessionStorageMock: Record<string, string> = {
+      'auth-token': 'test-token-abc123',
+    }
+    Object.defineProperty(global, 'sessionStorage', {
+      value: {
+        getItem: vi.fn((key: string) => sessionStorageMock[key] || null),
+        setItem: vi.fn((key: string, value: string) => {
+          sessionStorageMock[key] = value
+        }),
+        removeItem: vi.fn((key: string) => {
+          delete sessionStorageMock[key]
+        }),
+        clear: vi.fn(),
+      },
+      writable: true,
+    })
+    mockApiGet.mockResolvedValue({})
+  })
+
+  afterEach(() => {
+    cleanup()
+    Object.defineProperty(global, 'sessionStorage', {
+      value: originalSessionStorage,
+      writable: true,
+    })
+  })
+
+  it('does not refetch settings or sessions after websocket connect', async () => {
+    let resolveConnect: () => void
+    const connectPromise = new Promise<void>((resolve) => {
+      resolveConnect = resolve
+    })
+    mockConnect.mockReturnValueOnce(connectPromise)
+
+    renderApp()
+
+    await waitFor(() => {
+      expect(mockConnect).toHaveBeenCalled()
+    })
+
+    await waitFor(() => {
+      const sessionsCalls = mockApiGet.mock.calls.filter(([url]) => url === '/api/sessions')
+      const settingsCalls = mockApiGet.mock.calls.filter(([url]) => url === '/api/settings')
+      expect(sessionsCalls.length).toBe(1)
+      expect(settingsCalls.length).toBe(1)
+    })
+
+    resolveConnect!()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const sessionsCalls = mockApiGet.mock.calls.filter(([url]) => url === '/api/sessions')
+    const settingsCalls = mockApiGet.mock.calls.filter(([url]) => url === '/api/settings')
+    expect(sessionsCalls.length).toBe(1)
+    expect(settingsCalls.length).toBe(1)
+  })
+})

@@ -5,8 +5,9 @@ import { z } from 'zod'
 import { logger } from './logger.js'
 import { getRequiredAuthToken, isLoopbackAddress, isOriginAllowed } from './auth.js'
 import type { TerminalRegistry, TerminalMode } from './terminal-registry.js'
-import { configStore } from './config-store.js'
+import { configStore, type AppSettings } from './config-store.js'
 import type { CodingCliSessionManager } from './coding-cli/session-manager.js'
+import type { ProjectGroup } from './coding-cli/types.js'
 import type { SessionRepairService } from './session-scanner/service.js'
 import type { SessionScanResult, SessionRepairResult } from './session-scanner/types.js'
 
@@ -159,24 +160,35 @@ type ClientState = {
   helloTimer?: NodeJS.Timeout
 }
 
+type HandshakeSnapshot = {
+  settings?: AppSettings
+  projects?: ProjectGroup[]
+}
+
+type HandshakeSnapshotProvider = () => Promise<HandshakeSnapshot>
+
 export class WsHandler {
   private wss: WebSocketServer
   private connections = new Set<LiveWebSocket>()
   private clientStates = new Map<LiveWebSocket, ClientState>()
   private pingInterval: NodeJS.Timeout | null = null
   private sessionRepairService?: SessionRepairService
+  private handshakeSnapshotProvider?: HandshakeSnapshotProvider
   private sessionRepairListeners?: {
     scanned: (result: SessionScanResult) => void
     repaired: (result: SessionRepairResult) => void
+    error: (sessionId: string, error: Error) => void
   }
 
   constructor(
     server: http.Server,
     private registry: TerminalRegistry,
     private codingCliManager?: CodingCliSessionManager,
-    sessionRepairService?: SessionRepairService
+    sessionRepairService?: SessionRepairService,
+    handshakeSnapshotProvider?: HandshakeSnapshotProvider
   ) {
     this.sessionRepairService = sessionRepairService
+    this.handshakeSnapshotProvider = handshakeSnapshotProvider
     this.wss = new WebSocketServer({
       server,
       path: '/ws',
@@ -206,6 +218,16 @@ export class WsHandler {
           status: result.status === 'healthy' ? 'healthy' : 'corrupted',
           chainDepth: result.chainDepth,
         })
+
+        this.broadcast({
+          type: 'session.repair.activity',
+          event: 'scanned',
+          sessionId: result.sessionId,
+          status: result.status,
+          chainDepth: result.chainDepth,
+          orphanCount: result.orphanCount,
+        })
+        logger.debug({ sessionId: result.sessionId, status: result.status }, 'Session repair scan complete')
       }
 
       const onRepaired = (result: SessionRepairResult) => {
@@ -216,11 +238,32 @@ export class WsHandler {
           chainDepth: result.newChainDepth,
           orphansFixed: result.orphansFixed,
         })
+
+        this.broadcast({
+          type: 'session.repair.activity',
+          event: 'repaired',
+          sessionId: result.sessionId,
+          status: result.status,
+          orphansFixed: result.orphansFixed,
+          chainDepth: result.newChainDepth,
+        })
+        logger.info({ sessionId: result.sessionId, orphansFixed: result.orphansFixed }, 'Session repair completed')
       }
 
-      this.sessionRepairListeners = { scanned: onScanned, repaired: onRepaired }
+      const onError = (sessionId: string, error: Error) => {
+        this.broadcast({
+          type: 'session.repair.activity',
+          event: 'error',
+          sessionId,
+          message: error.message,
+        })
+        logger.warn({ err: error, sessionId }, 'Session repair failed')
+      }
+
+      this.sessionRepairListeners = { scanned: onScanned, repaired: onRepaired, error: onError }
       this.sessionRepairService.on('scanned', onScanned)
       this.sessionRepairService.on('repaired', onRepaired)
+      this.sessionRepairService.on('error', onError)
     }
   }
 
@@ -394,6 +437,28 @@ export class WsHandler {
     })
   }
 
+  private scheduleHandshakeSnapshot(ws: LiveWebSocket) {
+    if (!this.handshakeSnapshotProvider) return
+    setTimeout(() => {
+      void this.sendHandshakeSnapshot(ws)
+    }, 0)
+  }
+
+  private async sendHandshakeSnapshot(ws: LiveWebSocket) {
+    if (!this.handshakeSnapshotProvider) return
+    try {
+      const snapshot = await this.handshakeSnapshotProvider()
+      if (snapshot.settings) {
+        this.safeSend(ws, { type: 'settings.updated', settings: snapshot.settings })
+      }
+      if (snapshot.projects) {
+        this.safeSend(ws, { type: 'sessions.updated', projects: snapshot.projects })
+      }
+    } catch (err) {
+      logger.warn({ err }, 'Failed to send handshake snapshot')
+    }
+  }
+
   private async onMessage(ws: LiveWebSocket, state: ClientState, data: WebSocket.RawData) {
     let msg: any
     try {
@@ -446,6 +511,7 @@ export class WsHandler {
       }
 
       this.send(ws, { type: 'ready', timestamp: nowIso() })
+      this.scheduleHandshakeSnapshot(ws)
       return
     }
 
@@ -742,6 +808,7 @@ export class WsHandler {
     if (this.sessionRepairService && this.sessionRepairListeners) {
       this.sessionRepairService.off('scanned', this.sessionRepairListeners.scanned)
       this.sessionRepairService.off('repaired', this.sessionRepairListeners.repaired)
+      this.sessionRepairService.off('error', this.sessionRepairListeners.error)
       this.sessionRepairListeners = undefined
     }
 

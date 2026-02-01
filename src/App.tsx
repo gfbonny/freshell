@@ -225,20 +225,8 @@ export default function App() {
         }
       })
 
-      const unsubReconnect = ws.onReconnect(async () => {
-        try {
-          const projects = await api.get('/api/sessions')
-          dispatch(setProjects(projects))
-        } catch {}
-        try {
-          const settings = await api.get('/api/settings')
-          dispatch(setSettings(settings))
-        } catch {}
-      })
-
       return () => {
         unsubscribe()
-        unsubReconnect()
       }
     }
 

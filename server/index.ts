@@ -24,6 +24,7 @@ import { migrateSettingsSortMode } from './settings-migrate.js'
 import { filesRouter } from './files-router.js'
 import { getSessionRepairService } from './session-scanner/service.js'
 import { createClientLogsRouter } from './client-logs.js'
+import { createStartupState } from './startup-state.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -79,9 +80,16 @@ async function main() {
     res.sendFile(resolved)
   })
 
+  const startupState = createStartupState()
+
   // Health check endpoint (no auth required - used by precheck script)
   app.get('/api/health', (_req, res) => {
-    res.json({ app: 'freshell', ok: true })
+    res.json({
+      app: 'freshell',
+      ok: true,
+      version: APP_VERSION,
+      ready: startupState.isReady(),
+    })
   })
 
   // Basic rate limiting for /api
@@ -120,10 +128,15 @@ async function main() {
 
   // Start session repair service (background scanning of Claude sessions)
   const sessionRepairService = getSessionRepairService()
-  await sessionRepairService.start()
 
   const server = http.createServer(app)
-  const wsHandler = new WsHandler(server, registry, codingCliSessionManager, sessionRepairService)
+  const wsHandler = new WsHandler(server, registry, codingCliSessionManager, sessionRepairService, async () => {
+    const settings = migrateSettingsSortMode(await configStore.getSettings())
+    return {
+      settings,
+      projects: codingCliIndexer.getProjects(),
+    }
+  })
 
   // --- API: settings ---
   //
@@ -366,8 +379,6 @@ async function main() {
     app.get('*', (_req, res) => res.sendFile(indexHtml))
   }
 
-  // Start coding CLI watcher
-  await codingCliIndexer.start()
   codingCliIndexer.onUpdate((projects) => {
     wsHandler.broadcast({ type: 'sessions.updated', projects })
 
@@ -399,9 +410,6 @@ async function main() {
     }
   })
 
-  // Start Claude watcher (for search + session association)
-  await claudeIndexer.start()
-
   // One-time session association for new Claude sessions
   // When Claude creates a session file, associate it with the oldest unassociated
   // claude-mode terminal matching the session's cwd. This allows the terminal to
@@ -430,6 +438,35 @@ async function main() {
     }
   })
 
+  const startBackgroundTasks = () => {
+    void sessionRepairService.start()
+      .then(() => {
+        startupState.markReady('sessionRepairService')
+        logger.info({ task: 'sessionRepairService' }, 'Startup task ready')
+      })
+      .catch((err) => {
+        logger.error({ err }, 'Session repair service failed to start')
+      })
+
+    void codingCliIndexer.start()
+      .then(() => {
+        startupState.markReady('codingCliIndexer')
+        logger.info({ task: 'codingCliIndexer' }, 'Startup task ready')
+      })
+      .catch((err) => {
+        logger.error({ err }, 'Coding CLI indexer failed to start')
+      })
+
+    void claudeIndexer.start()
+      .then(() => {
+        startupState.markReady('claudeIndexer')
+        logger.info({ task: 'claudeIndexer' }, 'Startup task ready')
+      })
+      .catch((err) => {
+        logger.error({ err }, 'Claude indexer failed to start')
+      })
+  }
+
   const port = Number(process.env.PORT || 3001)
   server.listen(port, '0.0.0.0', () => {
     log.info({ port, appVersion: APP_VERSION }, 'Server listening')
@@ -444,6 +481,8 @@ async function main() {
     console.log(`\x1b[32m\u{1F41A}\u{1F525} freshell is ready!\x1b[0m`)
     console.log(`   Visit from anywhere on your network: \x1b[36m${url}\x1b[0m`)
     console.log('')
+
+    startBackgroundTasks()
   })
 
   // Graceful shutdown handler

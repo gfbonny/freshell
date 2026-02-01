@@ -34,7 +34,7 @@ describe('API Endpoints', () => {
 
     // Health endpoint - mirrors server/index.ts
     app.get('/api/health', (_req, res) => {
-      res.json({ ok: true, version: APP_VERSION })
+      res.json({ app: 'freshell', ok: true, version: APP_VERSION, ready: true })
     })
 
     // Debug endpoint - mirrors server/index.ts
@@ -68,6 +68,13 @@ describe('API Endpoints', () => {
 
       expect(res.body).toHaveProperty('version')
       expect(typeof res.body.version).toBe('string')
+    })
+
+    it('returns readiness status', async () => {
+      const res = await request(app).get('/api/health')
+
+      expect(res.body).toHaveProperty('ready')
+      expect(typeof res.body.ready).toBe('boolean')
     })
 
     it('returns version matching package.json', async () => {
