@@ -19,14 +19,14 @@ const initialState: TerminalActivityState = {
   ready: {},
 }
 
-/** Threshold in ms to consider a terminal "streaming" */
-export const STREAMING_THRESHOLD_MS = 1000
+/** Threshold in ms to consider a terminal "streaming" (must be idle this long to trigger finished) */
+export const STREAMING_THRESHOLD_MS = 20000
 
 /** Window after input where output is considered echo (not streaming) */
 export const INPUT_ECHO_WINDOW_MS = 200
 
-/** Debounce window for sound notifications (10 seconds) */
-export const SOUND_DEBOUNCE_MS = 10000
+/** Debounce window for sound notifications (30 seconds) */
+export const SOUND_DEBOUNCE_MS = 30000
 
 export const terminalActivitySlice = createSlice({
   name: 'terminalActivity',
