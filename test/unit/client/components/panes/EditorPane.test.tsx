@@ -474,5 +474,62 @@ describe('EditorPane', () => {
         expect.any(Object)
       )
     })
+
+    it('auto-fetches file content on mount when filePath is set but content is empty (restoration)', async () => {
+      // This simulates restoration from localStorage where content is stripped
+      sessionStorage.setItem('auth-token', 'test-token')
+      mockFetch.mockResolvedValueOnce(
+        createMockResponse({ content: 'restored file content', language: 'typescript' })
+      )
+
+      render(
+        <Provider store={store}>
+          <EditorPane
+            paneId="pane-1"
+            tabId="tab-1"
+            filePath="/path/to/restored-file.ts"
+            language="typescript"
+            readOnly={false}
+            content=""
+            viewMode="source"
+          />
+        </Provider>
+      )
+
+      // Should automatically fetch the file content on mount
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledWith(
+          '/api/files/read?path=%2Fpath%2Fto%2Frestored-file.ts',
+          expect.any(Object)
+        )
+      })
+    })
+
+    it('does not auto-fetch on mount when content is already present', async () => {
+      sessionStorage.setItem('auth-token', 'test-token')
+
+      render(
+        <Provider store={store}>
+          <EditorPane
+            paneId="pane-1"
+            tabId="tab-1"
+            filePath="/path/to/file.ts"
+            language="typescript"
+            readOnly={false}
+            content="existing content"
+            viewMode="source"
+          />
+        </Provider>
+      )
+
+      // Give it time to potentially make a fetch call
+      await new Promise(resolve => setTimeout(resolve, 50))
+
+      // Should NOT fetch since content is already present
+      expect(mockFetch).not.toHaveBeenCalledWith(
+        expect.stringContaining('/api/files/read'),
+        expect.any(Object)
+      )
+    })
   })
 })

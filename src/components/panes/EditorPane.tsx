@@ -360,6 +360,17 @@ export default function EditorPane({
     [defaultBrowseRoot, updateContent]
   )
 
+  // Auto-fetch file content on mount if filePath is set but content is empty.
+  // This handles restoration from localStorage where content is stripped to save space.
+  const restoredRef = useRef(false)
+  useEffect(() => {
+    if (restoredRef.current) return
+    if (filePath && !content) {
+      restoredRef.current = true
+      handlePathSelect(filePath)
+    }
+  }, [filePath, content, handlePathSelect])
+
   const handleFileInputChange = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0]
