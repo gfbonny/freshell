@@ -34,11 +34,20 @@ async function readSessionSnippet(filePath: string): Promise<string> {
   }
 }
 
+type CachedSessionEntry = {
+  mtimeMs: number
+  size: number
+  baseSession: CodingCliSession | null
+}
+
 export class CodingCliSessionIndexer {
   private watcher: chokidar.FSWatcher | null = null
   private projects: ProjectGroup[] = []
   private onUpdateHandlers = new Set<(projects: ProjectGroup[]) => void>()
   private refreshTimer: NodeJS.Timeout | null = null
+  private refreshInFlight = false
+  private refreshQueued = false
+  private fileCache = new Map<string, CachedSessionEntry>()
 
   constructor(private providers: CodingCliProvider[]) {}
 
@@ -82,6 +91,22 @@ export class CodingCliSessionIndexer {
   }
 
   async refresh() {
+    if (this.refreshInFlight) {
+      this.refreshQueued = true
+      return
+    }
+    this.refreshInFlight = true
+    try {
+      do {
+        this.refreshQueued = false
+        await this.performRefresh()
+      } while (this.refreshQueued)
+    } finally {
+      this.refreshInFlight = false
+    }
+  }
+
+  private async performRefresh() {
     const endRefreshTimer = startPerfTimer(
       'coding_cli_refresh',
       {},
@@ -95,6 +120,7 @@ export class CodingCliSessionIndexer {
     const groupsByPath = new Map<string, ProjectGroup>()
     let fileCount = 0
     let sessionCount = 0
+    const seenFiles = new Set<string>()
 
     for (const provider of this.providers) {
       if (!enabledSet.has(provider.name)) continue
@@ -108,16 +134,43 @@ export class CodingCliSessionIndexer {
       fileCount += files.length
 
       for (const file of files) {
+        seenFiles.add(file)
         let stat: any
         try {
           stat = await fsp.stat(file)
         } catch {
           continue
         }
+        const mtimeMs = stat.mtimeMs || stat.mtime.getTime()
+        const size = stat.size
+
+        const cached = this.fileCache.get(file)
+        if (cached && cached.mtimeMs === mtimeMs && cached.size === size) {
+          if (!cached.baseSession) continue
+          const compositeKey = makeSessionKey(cached.baseSession.provider, cached.baseSession.sessionId)
+          const ov = cfg.sessionOverrides?.[compositeKey]
+          const merged = applyOverride(cached.baseSession, ov)
+          if (!merged) continue
+          const group = groupsByPath.get(merged.projectPath) || {
+            projectPath: merged.projectPath,
+            sessions: [],
+          }
+          group.sessions.push(merged)
+          groupsByPath.set(merged.projectPath, group)
+          sessionCount += 1
+          continue
+        }
 
         const content = await readSessionSnippet(file)
         const meta = provider.parseSessionFile(content, file)
-        if (!meta.cwd) continue
+        if (!meta.cwd) {
+          this.fileCache.set(file, {
+            mtimeMs,
+            size,
+            baseSession: null,
+          })
+          continue
+        }
 
         const projectPath = await provider.resolveProjectPath(file, meta)
         const sessionId = meta.sessionId || provider.extractSessionId(file, meta)
@@ -134,6 +187,12 @@ export class CodingCliSessionIndexer {
           sourceFile: file,
         }
 
+        this.fileCache.set(file, {
+          mtimeMs,
+          size,
+          baseSession,
+        })
+
         const compositeKey = makeSessionKey(provider.name, sessionId)
         const ov = cfg.sessionOverrides?.[compositeKey]
         const merged = applyOverride(baseSession, ov)
@@ -146,6 +205,12 @@ export class CodingCliSessionIndexer {
         group.sessions.push(merged)
         groupsByPath.set(projectPath, group)
         sessionCount += 1
+      }
+    }
+
+    for (const cachedFile of this.fileCache.keys()) {
+      if (!seenFiles.has(cachedFile)) {
+        this.fileCache.delete(cachedFile)
       }
     }
 

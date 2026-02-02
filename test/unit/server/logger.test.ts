@@ -132,6 +132,15 @@ describe("logger", () => {
   })
 
   describe("debug log path resolution", () => {
+    it("skips debug log path when running under vitest", async () => {
+      const { resolveDebugLogPath } = await import("../../../server/logger")
+      const resolved = resolveDebugLogPath(
+        { VITEST: "true", NODE_ENV: "production" } as NodeJS.ProcessEnv,
+        "/home/test",
+      )
+      expect(resolved).toBeNull()
+    })
+
     it("prefers LOG_DEBUG_PATH when provided", async () => {
       const customPath = path.join(os.tmpdir(), "freshell-debug.jsonl")
       const { resolveDebugLogPath } = await import("../../../server/logger")

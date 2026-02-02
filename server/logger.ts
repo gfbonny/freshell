@@ -31,6 +31,15 @@ type DebugFileStreamOptions = {
   maxFiles?: number
 }
 
+function isTestRuntime(envVars: NodeJS.ProcessEnv): boolean {
+  return (
+    (envVars.NODE_ENV || 'development') === 'test' ||
+    envVars.VITEST === 'true' ||
+    envVars.VITEST === '1' ||
+    envVars.VITEST_POOL_ID !== undefined
+  )
+}
+
 function findPackageJson(): string | undefined {
   const __filename = fileURLToPath(import.meta.url)
   let dir = path.dirname(__filename)
@@ -74,7 +83,7 @@ export function resolveDebugLogPath(
 ): string | null {
   const explicitPath = envVars.LOG_DEBUG_PATH?.trim()
   if (explicitPath) return path.resolve(explicitPath)
-  if ((envVars.NODE_ENV || 'development') === 'test') return null
+  if (isTestRuntime(envVars)) return null
 
   const logDirOverride = envVars.FRESHELL_LOG_DIR?.trim()
   const logDir = logDirOverride ? path.resolve(logDirOverride) : path.join(homeDir, '.freshell', 'logs')

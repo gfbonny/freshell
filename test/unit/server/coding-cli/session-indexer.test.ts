@@ -45,6 +45,16 @@ function makeProvider(files: string[]): CodingCliProvider {
   }
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
 describe('CodingCliSessionIndexer', () => {
   let tempDir: string
 
@@ -125,5 +135,65 @@ describe('CodingCliSessionIndexer', () => {
     await indexer.refresh()
 
     expect(indexer.getProjects()).toHaveLength(0)
+  })
+
+  it('reuses cached session metadata when file unchanged', async () => {
+    const fileA = path.join(tempDir, 'session-a.jsonl')
+    await fsp.writeFile(fileA, JSON.stringify({ cwd: '/project/a', title: 'Title A' }) + '\n')
+
+    const parseSessionFile = vi.fn().mockReturnValue({
+      cwd: '/project/a',
+      title: 'Title A',
+      messageCount: 1,
+    })
+
+    const provider: CodingCliProvider = {
+      ...makeProvider([fileA]),
+      parseSessionFile,
+    }
+
+    const indexer = new CodingCliSessionIndexer([provider])
+
+    await indexer.refresh()
+    await indexer.refresh()
+
+    expect(parseSessionFile).toHaveBeenCalledTimes(1)
+  })
+
+  it('coalesces refreshes while a refresh is in flight', async () => {
+    const fileA = path.join(tempDir, 'session-a.jsonl')
+    await fsp.writeFile(fileA, JSON.stringify({ cwd: '/project/a', title: 'Title A' }) + '\n')
+
+    const firstList = createDeferred<string[]>()
+    const secondList = createDeferred<string[]>()
+
+    const listSessionFiles = vi
+      .fn()
+      .mockReturnValueOnce(firstList.promise)
+      .mockReturnValueOnce(secondList.promise)
+
+    const provider: CodingCliProvider = {
+      ...makeProvider([fileA]),
+      listSessionFiles,
+      parseSessionFile: vi.fn().mockReturnValue({
+        cwd: '/project/a',
+        title: 'Title A',
+        messageCount: 1,
+      }),
+    }
+
+    const indexer = new CodingCliSessionIndexer([provider])
+
+    const refreshPromise = indexer.refresh()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    indexer.refresh()
+
+    expect(listSessionFiles).toHaveBeenCalledTimes(1)
+
+    firstList.resolve([fileA])
+    secondList.resolve([fileA])
+    await refreshPromise
+
+    expect(listSessionFiles).toHaveBeenCalledTimes(2)
   })
 })
