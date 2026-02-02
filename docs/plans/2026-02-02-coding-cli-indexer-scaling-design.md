@@ -1,14 +1,15 @@
 # Coding CLI Indexer Scaling Design (50k sessions)
 
 ## Summary
-Scale the Coding CLI session indexer to handle up to ~50,000 sessions without blocking the event loop, while keeping default UX fast by indexing only the newest 10,000 sessions across all providers. Provide clear structured logs for high volumes and cap usage, and add a user-visible toggle (duplicated in Settings) to optionally search beyond the cap.
+Scale the Coding CLI session indexer to handle up to ~50,000 sessions without blocking the event loop, while keeping default UX fast by indexing only the newest 10,000 sessions across all providers (even if this hides older projects entirely). Provide clear structured logs for high volumes and cap usage, add a user-visible toggle (duplicated in Settings) to optionally search beyond the cap, and surface partial-results indicators when a search scan is interrupted or errors.
 
 ## Goals
 - Keep WebSocket input latency responsive (avoid multi-second event-loop stalls).
 - Default behavior remains fast for 1–10k sessions and graceful up to 50k.
 - Index only the newest 10k sessions across all providers by default.
-- Preserve existing UI behavior and API shape (projects array and /api/sessions).
+- Preserve API shape (projects array and /api/sessions) while allowing capped project lists (older projects may be omitted).
 - Provide structured logs for high volume and cap enforcement.
+- Indicate cap activity and partial search results in UI/API responses.
 
 ## Non-goals
 - Full-text search index (FTS) at this stage.
@@ -41,14 +42,15 @@ Scale the Coding CLI session indexer to handle up to ~50,000 sessions without bl
 - Use a min-heap of size N to keep only the newest sessions by updatedAt.
 - This bounds memory and avoids sorting all sessions when counts are large.
 - The cap is strict; no more than N sessions are returned in projects.
+- Projects with no sessions in the newest N are omitted from the projects array.
 
 ### 3) Search Beyond Cap (explicit, optional)
 - New toggle: Search beyond cap (default off).
 - The toggle appears in the search UI and is duplicated in Settings for persistence.
 - When off: title search + user/full-text search limited to indexed sessions only.
-- When on: the server may scan files outside the cap for user/full-text tiers,
-  but with hard limits (max files scanned, max duration, and low concurrency)
-  to prevent event-loop stalls.
+- When on: the server scans files outside the cap for user/full-text tiers
+  without hard limits on file count or duration. Scans yield between batches
+  and can be canceled by a newer search; partial results are flagged.
 
 ### 4) Event-loop Safety
 - Use async directory iteration (opendir) and yield between batches (setImmediate)
@@ -69,11 +71,16 @@ Scale the Coding CLI session indexer to handle up to ~50,000 sessions without bl
 - Error once at startup if total sessions > 50k.
 
 ## API / UI Behavior
-- /api/sessions and WS ready return only the capped session set.
+- /api/sessions and WS ready return only the capped session set and include
+  cap metadata (cap, totalSessions, indexedSessions, cutoffUpdatedAt).
+- Projects without indexed sessions are omitted.
 - Sidebar shows a subtle indicator when cap is active:
-  "Showing newest 10,000 of 37,214 sessions."
+  "Showing newest 10,000 of 37,214 sessions. Older projects are hidden."
 - Search toggle controls whether backend search can go beyond cap.
 - Settings stores the toggle state and cap value.
+- Search responses include scope (indexed | all) and partial=true/false with a
+  partialReason (canceled | io_error). UI shows a "Partial results" badge
+  when partial=true.
 
 ## Data Flow
 1) Startup:
@@ -85,13 +92,15 @@ Scale the Coding CLI session indexer to handle up to ~50,000 sessions without bl
    - Apply cap, update projects, broadcast sessions.updated.
 3) Search:
    - Title tier: metadata only (fast).
-   - User/full-text tiers: respect toggle and limits to avoid stalls.
+   - User/full-text tiers: respect toggle; beyond-cap scans are cooperative
+     and may return partial results if canceled or erroring.
 
 ## Testing
 - Unit tests for cap behavior and heap selection.
 - Unit tests for cache reuse (no re-parse on unchanged files).
-- Unit tests for search scope toggle behavior.
+- Unit tests for search scope toggle behavior and partial results metadata.
 - Integration test: cap warning log emitted when exceeding cap.
+- Integration test: beyond-cap search returns partial=true when canceled.
 
 ## Risks and Mitigations
 - Risk: cap hides older sessions unexpectedly.
@@ -99,10 +108,9 @@ Scale the Coding CLI session indexer to handle up to ~50,000 sessions without bl
 - Risk: cache drift.
   - Mitigation: background reconciliation and watcher error handling.
 - Risk: large file scans for search beyond cap.
-  - Mitigation: low concurrency, hard limits, optional user confirmation.
+  - Mitigation: cooperative yielding, cancel-on-new-search, partial results UI.
 
 ## Rollout
 - Default cap on (10k).
 - Search beyond cap off by default.
 - Monitor logs for high volume and cap enforcement.
-
