@@ -10,6 +10,7 @@ import codingCliReducer from './codingCliSlice'
 import panesReducer from './panesSlice'
 import sessionActivityReducer from './sessionActivitySlice'
 import terminalActivityReducer from './terminalActivitySlice'
+import { perfMiddleware } from './perfMiddleware'
 import { persistMiddleware } from './persistMiddleware'
 import { sessionActivityPersistMiddleware } from './sessionActivityPersistence'
 import { paneActivityCleanupMiddleware } from './paneActivityCleanupMiddleware'
@@ -30,8 +31,8 @@ export const store = configureStore({
       serializableCheck: {
         ignoredPaths: ['sessions.expandedProjects'],
       },
-	    }).concat(paneActivityCleanupMiddleware, persistMiddleware, sessionActivityPersistMiddleware),
-	})
+    }).concat(perfMiddleware, paneActivityCleanupMiddleware, persistMiddleware, sessionActivityPersistMiddleware),
+})
 
 // Note: Tabs and Panes are now loaded from localStorage directly in their slice
 // initial states (see tabsSlice.ts and panesSlice.ts). This ensures the state
