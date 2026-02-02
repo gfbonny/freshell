@@ -47,6 +47,13 @@ function registerFlushCallback(cb: () => void) {
   attachFlushListeners()
 }
 
+function stripTabVolatileFields(tab: RootState['tabs']['tabs'][number]) {
+  return {
+    ...tab,
+    lastInputAt: undefined,
+  }
+}
+
 export function resetPersistFlushListenersForTests() {
   flushCallbacks.clear()
 }
@@ -223,7 +230,10 @@ export const persistMiddleware: Middleware<{}, RootState> = (store) => {
 
     if (tabsDirty) {
       const tabsPayload = {
-        tabs: state.tabs,
+        tabs: {
+          ...state.tabs,
+          tabs: state.tabs.tabs.map(stripTabVolatileFields),
+        },
       }
 
       try {
@@ -272,6 +282,10 @@ export const persistMiddleware: Middleware<{}, RootState> = (store) => {
 
   return (next) => (action) => {
     const result = next(action)
+
+    if (action?.meta?.skipPersist) {
+      return result
+    }
 
     if (typeof action?.type === 'string') {
       if (action.type.startsWith('tabs/')) {
