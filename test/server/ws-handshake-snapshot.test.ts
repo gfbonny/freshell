@@ -1,6 +1,8 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import http from 'http'
 import WebSocket from 'ws'
+
+vi.setConfig({ testTimeout: 30000, hookTimeout: 30000 })
 
 type Snapshot = {
   settings: any

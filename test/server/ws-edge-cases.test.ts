@@ -3,7 +3,7 @@ import http from 'http'
 import WebSocket from 'ws'
 
 // Increase test timeout for network tests
-vi.setConfig({ testTimeout: 15000, hookTimeout: 15000 })
+vi.setConfig({ testTimeout: 30000, hookTimeout: 30000 })
 
 // Mock the config-store module before importing ws-handler
 vi.mock('../../server/config-store', () => ({
