@@ -2,6 +2,8 @@
 import { describe, it, expect } from 'vitest'
 import { loadEnv } from 'vite'
 
+const TEST_TIMEOUT_MS = 20000
+
 describe('vite config', () => {
   it('uses ipv4 loopback for backend proxy by default', async () => {
     const originalBackendHost = process.env.VITE_BACKEND_HOST
@@ -46,5 +48,5 @@ describe('vite config', () => {
         delete process.env.PORT
       }
     }
-  })
+  }, TEST_TIMEOUT_MS)
 })

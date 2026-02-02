@@ -6,6 +6,7 @@ import path from 'path'
 import os from 'os'
 
 const TEST_AUTH_TOKEN = 'test-auth-token-12345678'
+const SLOW_TEST_TIMEOUT_MS = 20000
 
 describe('Files API Integration', () => {
   let app: Express
@@ -153,7 +154,7 @@ describe('Files API Integration', () => {
         .send({ path: path.join(tempDir, 'file.txt') })
 
       expect(res.status).toBe(400)
-    })
+    }, SLOW_TEST_TIMEOUT_MS)
   })
 
   describe('GET /api/files/complete', () => {

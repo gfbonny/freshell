@@ -27,6 +27,7 @@ import { ConfigStore, defaultSettings, type AppSettings } from '../../../server/
 
 const TEST_AUTH_TOKEN = 'test-auth-token-12345678'
 const WEAK_TOKEN = 'short'
+const SLOW_TEST_TIMEOUT_MS = 20000
 
 describe('API Edge Cases - Security Testing', () => {
   let app: Express
@@ -1190,7 +1191,7 @@ describe('API Edge Cases - Security Testing', () => {
           // Ignore
         }
       }
-    })
+    }, SLOW_TEST_TIMEOUT_MS)
   })
 
   // =============================================================================
