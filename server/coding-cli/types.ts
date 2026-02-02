@@ -44,7 +44,6 @@ export interface NormalizedEvent {
   sessionId: string
   provider: CodingCliProviderName
   sequenceNumber?: number        // Monotonic, for ordering
-  raw: unknown                   // Original provider event for debugging
 
   // Type-specific payloads (only one populated per event)
   session?: SessionPayload       // session.start

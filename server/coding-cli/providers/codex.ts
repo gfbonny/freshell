@@ -173,7 +173,6 @@ export const codexProvider: CodingCliProvider = {
       timestamp,
       sessionId,
       provider: 'codex' as const,
-      raw: obj,
     }
 
     if (obj?.type === 'session_meta') {

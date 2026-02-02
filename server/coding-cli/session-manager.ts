@@ -102,7 +102,6 @@ export class CodingCliSession extends EventEmitter {
           timestamp: new Date().toISOString(),
           sessionId: this._providerSessionId || 'unknown',
           provider: this.provider.name,
-          raw: { exitCode: code },
           error: code !== 0 ? { message: `Process exited with code ${code}`, recoverable: false } : undefined,
         }
         this.appendEvent(endEvent)

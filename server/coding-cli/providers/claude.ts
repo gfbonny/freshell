@@ -215,7 +215,6 @@ export const claudeProvider: CodingCliProvider = {
       timestamp: now,
       sessionId,
       provider: 'claude' as const,
-      raw: event,
     }
 
     if (event.type === 'system' && 'subtype' in event && event.subtype === 'init') {
