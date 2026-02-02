@@ -44,7 +44,6 @@ describe('codingCliSlice', () => {
         timestamp: new Date().toISOString(),
         sessionId: 'provider-session',
         provider: 'claude',
-        raw: {},
         message: { role: 'assistant', content: 'hello' },
       }
       store.dispatch(addCodingCliEvent({ sessionId: 'session-1', event }))
@@ -61,7 +60,6 @@ describe('codingCliSlice', () => {
         timestamp: new Date().toISOString(),
         sessionId: 'provider-session',
         provider: 'claude',
-        raw: {},
         message: { role: 'assistant', content: '' },
       }
       store.dispatch(addCodingCliEvent({ sessionId: 'unknown', event }))
@@ -79,7 +77,6 @@ describe('codingCliSlice', () => {
         timestamp: new Date().toISOString(),
         sessionId: 'provider-session-abc',
         provider: 'claude',
-        raw: {},
         sessionInfo: { cwd: '/test', model: 'claude-3', provider: 'claude' },
       }
       store.dispatch(addCodingCliEvent({ sessionId: 'session-1', event: initEvent }))
@@ -97,7 +94,6 @@ describe('codingCliSlice', () => {
         timestamp: new Date().toISOString(),
         sessionId: 'provider-session-init',
         provider: 'claude',
-        raw: {},
         sessionInfo: { cwd: '/test', model: 'claude-3', provider: 'claude' },
       } as unknown as NormalizedEvent
 
@@ -118,7 +114,6 @@ describe('codingCliSlice', () => {
           sessionId: 'provider-session',
           provider: 'claude',
           sequenceNumber: i,
-          raw: {},
           message: { role: 'assistant', content: String(i) },
         }
         store.dispatch(addCodingCliEvent({ sessionId: 'session-1', event }))

@@ -12,7 +12,6 @@ describe('MessageBubble', () => {
       timestamp: new Date().toISOString(),
       sessionId: 'provider-session',
       provider: 'claude',
-      raw: {},
       message: {
         role: 'assistant',
         content: 'Hello, world!',
@@ -29,7 +28,6 @@ describe('MessageBubble', () => {
       timestamp: new Date().toISOString(),
       sessionId: 'provider-session',
       provider: 'claude',
-      raw: {},
       message: {
         role: 'assistant',
         content: 'First paragraph\nSecond paragraph',
@@ -47,7 +45,6 @@ describe('MessageBubble', () => {
       timestamp: new Date().toISOString(),
       sessionId: 'provider-session',
       provider: 'claude',
-      raw: {},
       message: { role: 'assistant', content: 'Hi' },
     }
 
@@ -61,7 +58,6 @@ describe('MessageBubble', () => {
       timestamp: new Date().toISOString(),
       sessionId: 'provider-session',
       provider: 'claude',
-      raw: {},
       message: { role: 'user', content: 'Hi' },
     }
 

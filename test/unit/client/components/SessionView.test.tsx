@@ -85,7 +85,6 @@ describe('SessionView', () => {
             timestamp: new Date().toISOString(),
             sessionId: 'provider-session',
             provider: 'claude',
-            raw: {},
             message: {
               role: 'assistant',
               content: 'Hello from Claude!',
@@ -120,7 +119,6 @@ describe('SessionView', () => {
             timestamp: new Date().toISOString(),
             sessionId: 'provider-session',
             provider: 'claude',
-            raw: {},
             reasoning: 'Thinking through the problem...',
           },
         ],
@@ -163,7 +161,6 @@ describe('SessionView', () => {
             timestamp: new Date().toISOString(),
             sessionId: 'provider-session',
             provider: 'claude',
-            raw: {},
           },
         ],
         eventStart: 0,
