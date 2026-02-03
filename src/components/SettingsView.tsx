@@ -391,6 +391,7 @@ export default function SettingsView() {
                 className="h-8 px-3 text-sm bg-muted border-0 rounded-md focus:outline-none focus:ring-1 focus:ring-border"
               >
                 <option value="recency">Recency</option>
+                <option value="recency-pinned">Recency (pinned)</option>
                 <option value="activity">Activity (tabs first)</option>
                 <option value="project">Project</option>
               </select>

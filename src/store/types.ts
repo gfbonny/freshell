@@ -82,7 +82,7 @@ export interface TerminalOverride {
   deleted?: boolean
 }
 
-export type SidebarSortMode = 'recency' | 'activity' | 'project'
+export type SidebarSortMode = 'recency' | 'recency-pinned' | 'activity' | 'project'
 
 export type DefaultNewPane = 'ask' | 'shell' | 'browser' | 'editor'
 

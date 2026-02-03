@@ -45,7 +45,7 @@ export const defaultSettings: AppSettings = {
 }
 
 export function migrateSortMode(mode: string | undefined): SidebarSortMode {
-  if (mode === 'recency' || mode === 'activity' || mode === 'project') {
+  if (mode === 'recency' || mode === 'recency-pinned' || mode === 'activity' || mode === 'project') {
     return mode
   }
   return 'activity'

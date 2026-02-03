@@ -408,6 +408,7 @@ describe('settingsSlice - sortMode migration', () => {
   it('preserves valid sort modes', async () => {
     const { migrateSortMode } = await import('@/store/settingsSlice')
     expect(migrateSortMode('recency')).toBe('recency')
+    expect(migrateSortMode('recency-pinned')).toBe('recency-pinned')
     expect(migrateSortMode('activity')).toBe('activity')
     expect(migrateSortMode('project')).toBe('project')
   })

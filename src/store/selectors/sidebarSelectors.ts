@@ -113,7 +113,7 @@ function filterSessionItems(items: SidebarSessionItem[], filter: string): Sideba
   )
 }
 
-function sortSessionItems(items: SidebarSessionItem[], sortMode: string): SidebarSessionItem[] {
+export function sortSessionItems(items: SidebarSessionItem[], sortMode: string): SidebarSessionItem[] {
   const sorted = [...items]
 
   const active = sorted.filter((i) => !i.archived)
@@ -124,6 +124,17 @@ function sortSessionItems(items: SidebarSessionItem[], sortMode: string): Sideba
 
     if (sortMode === 'recency') {
       return copy.sort((a, b) => b.timestamp - a.timestamp)
+    }
+
+    if (sortMode === 'recency-pinned') {
+      const withTabs = copy.filter((i) => i.hasTab)
+      const withoutTabs = copy.filter((i) => !i.hasTab)
+
+      // Sort both groups by recency (timestamp)
+      withTabs.sort((a, b) => b.timestamp - a.timestamp)
+      withoutTabs.sort((a, b) => b.timestamp - a.timestamp)
+
+      return [...withTabs, ...withoutTabs]
     }
 
     if (sortMode === 'activity') {

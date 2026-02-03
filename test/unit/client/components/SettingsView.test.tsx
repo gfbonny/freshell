@@ -675,6 +675,29 @@ describe('SettingsView Component', () => {
       })
     })
 
+    it('updates sidebar sort mode to recency-pinned', async () => {
+      const store = createTestStore()
+      renderWithStore(store)
+
+      const selects = screen.getAllByRole('combobox')
+      const sortModeSelect = selects.find((select) => {
+        return select.querySelector('option[value="recency-pinned"]') !== null
+      })!
+      const recencyPinnedOption = sortModeSelect.querySelector('option[value="recency-pinned"]')
+      expect(recencyPinnedOption?.textContent).toBe('Recency (pinned)')
+      fireEvent.change(sortModeSelect, { target: { value: 'recency-pinned' } })
+
+      expect(store.getState().settings.settings.sidebar.sortMode).toBe('recency-pinned')
+
+      await act(async () => {
+        vi.advanceTimersByTime(500)
+      })
+
+      expect(api.patch).toHaveBeenCalledWith('/api/settings', {
+        sidebar: { sortMode: 'recency-pinned' },
+      })
+    })
+
     it('toggles show project badges', async () => {
       const store = createTestStore({
         settings: {
