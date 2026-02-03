@@ -31,6 +31,87 @@ function normalizeContent(input: PaneContentInput): PaneContent {
   return input
 }
 
+function applyLegacyResumeSessionIds(state: PanesState): PanesState {
+  if (typeof localStorage === 'undefined') return state
+  const rawTabs = localStorage.getItem('freshell.tabs.v1')
+  if (!rawTabs) return state
+
+  let parsedTabs: any
+  try {
+    parsedTabs = JSON.parse(rawTabs)
+  } catch {
+    return state
+  }
+
+  const tabsState = parsedTabs?.tabs
+  if (!tabsState?.tabs) return state
+
+  const resumeByTabId = new Map<string, string>()
+  for (const tab of tabsState.tabs) {
+    if (tab?.mode !== 'claude') continue
+    if (isValidClaudeSessionId(tab?.resumeSessionId)) {
+      resumeByTabId.set(tab.id, tab.resumeSessionId)
+    }
+  }
+
+  if (resumeByTabId.size === 0) return state
+
+  const nextLayouts: Record<string, PaneNode> = {}
+  let changed = false
+
+  const findLeaf = (node: PaneNode, targetId: string): Extract<PaneNode, { type: 'leaf' }> | null => {
+    if (node.type === 'leaf') return node.id === targetId ? node : null
+    return findLeaf(node.children[0], targetId) || findLeaf(node.children[1], targetId)
+  }
+
+  const findFirstClaudeLeaf = (node: PaneNode): Extract<PaneNode, { type: 'leaf' }> | null => {
+    if (node.type === 'leaf') {
+      if (node.content.kind === 'terminal' && node.content.mode === 'claude') return node
+      return null
+    }
+    return findFirstClaudeLeaf(node.children[0]) || findFirstClaudeLeaf(node.children[1])
+  }
+
+  const assignToTarget = (node: PaneNode, targetId: string, resumeSessionId: string): PaneNode => {
+    if (node.type === 'leaf') {
+      if (node.id !== targetId) return node
+      if (node.content.kind !== 'terminal' || node.content.mode !== 'claude') return node
+      if (node.content.resumeSessionId) return node
+      changed = true
+      return { ...node, content: { ...node.content, resumeSessionId } }
+    }
+
+    const left = assignToTarget(node.children[0], targetId, resumeSessionId)
+    const right = assignToTarget(node.children[1], targetId, resumeSessionId)
+    if (left === node.children[0] && right === node.children[1]) return node
+    return { ...node, children: [left, right] }
+  }
+
+  for (const [tabId, node] of Object.entries(state.layouts)) {
+    const resume = resumeByTabId.get(tabId)
+    if (!resume) {
+      nextLayouts[tabId] = node as PaneNode
+      continue
+    }
+
+    const activeId = state.activePane[tabId]
+    const activeLeaf = activeId ? findLeaf(node as PaneNode, activeId) : null
+    const targetLeaf =
+      activeLeaf && activeLeaf.content.kind === 'terminal' && activeLeaf.content.mode === 'claude'
+        ? activeLeaf
+        : findFirstClaudeLeaf(node as PaneNode)
+
+    if (!targetLeaf) {
+      nextLayouts[tabId] = node as PaneNode
+      continue
+    }
+
+    nextLayouts[tabId] = assignToTarget(node as PaneNode, targetLeaf.id, resume)
+  }
+
+  return changed ? { ...state, layouts: nextLayouts } : state
+}
+
 // Load persisted panes state directly at module initialization time
 // This ensures the initial state includes persisted data BEFORE the store is created
 function loadInitialPanesState(): PanesState {
@@ -47,11 +128,12 @@ function loadInitialPanesState(): PanesState {
     if (import.meta.env.MODE === 'development') {
       console.log('[PanesSlice] Loaded initial state from localStorage:', Object.keys(parsed.layouts || {}))
     }
-    return {
+    const state = {
       layouts: parsed.layouts || {},
       activePane: parsed.activePane || {},
       paneTitles: parsed.paneTitles || {},
     }
+    return applyLegacyResumeSessionIds(state)
   } catch (err) {
     if (import.meta.env.MODE === 'development') {
       console.error('[PanesSlice] Failed to load from localStorage:', err)

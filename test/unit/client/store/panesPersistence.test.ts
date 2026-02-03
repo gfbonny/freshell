@@ -420,3 +420,140 @@ describe('version 3 migration', () => {
     expect(result.paneTitles).toEqual({ 'tab-1': { 'pane-1': 'My Title' } })
   })
 })
+
+describe('legacy tab resumeSessionId migration', () => {
+  const validSessionId = '550e8400-e29b-41d4-a716-446655440000'
+
+  it('migrates tab resumeSessionId into the active claude pane when panes load without it', async () => {
+    localStorage.setItem('freshell.tabs.v1', JSON.stringify({
+      tabs: {
+        tabs: [
+          { id: 'tab-1', mode: 'claude', resumeSessionId: validSessionId, status: 'running', title: 'Claude', createRequestId: 'tab-1' },
+        ],
+        activeTabId: 'tab-1',
+      },
+    }))
+
+    localStorage.setItem('freshell.panes.v1', JSON.stringify({
+      version: 3,
+      layouts: {
+        'tab-1': {
+          type: 'leaf',
+          id: 'pane-1',
+          content: { kind: 'terminal', mode: 'claude', createRequestId: 'req-1', status: 'running' },
+        },
+      },
+      activePane: { 'tab-1': 'pane-1' },
+      paneTitles: {},
+    }))
+
+    vi.resetModules()
+    const panesReducer = (await import('../../../../src/store/panesSlice')).default
+    const tabsReducer = (await import('../../../../src/store/tabsSlice')).default
+
+    const store = configureStore({ reducer: { tabs: tabsReducer, panes: panesReducer } })
+    const layout = store.getState().panes.layouts['tab-1'] as any
+    expect(layout.content.resumeSessionId).toBe(validSessionId)
+  })
+
+  it('does not migrate resumeSessionId into non-claude panes', async () => {
+    localStorage.setItem('freshell.tabs.v1', JSON.stringify({
+      tabs: {
+        tabs: [
+          { id: 'tab-1', mode: 'claude', resumeSessionId: validSessionId, status: 'running', title: 'Claude', createRequestId: 'tab-1' },
+        ],
+        activeTabId: 'tab-1',
+      },
+    }))
+
+    localStorage.setItem('freshell.panes.v1', JSON.stringify({
+      version: 3,
+      layouts: {
+        'tab-1': {
+          type: 'leaf',
+          id: 'pane-1',
+          content: { kind: 'terminal', mode: 'shell', createRequestId: 'req-1', status: 'running' },
+        },
+      },
+      activePane: { 'tab-1': 'pane-1' },
+      paneTitles: {},
+    }))
+
+    vi.resetModules()
+    const panesReducer = (await import('../../../../src/store/panesSlice')).default
+    const tabsReducer = (await import('../../../../src/store/tabsSlice')).default
+
+    const store = configureStore({ reducer: { tabs: tabsReducer, panes: panesReducer } })
+    const layout = store.getState().panes.layouts['tab-1'] as any
+    expect(layout.content.resumeSessionId).toBeUndefined()
+  })
+
+  it('migrates resumeSessionId to the first claude pane when active pane is shell', async () => {
+    localStorage.setItem('freshell.tabs.v1', JSON.stringify({
+      tabs: {
+        tabs: [
+          { id: 'tab-1', mode: 'claude', resumeSessionId: validSessionId, status: 'running', title: 'Claude', createRequestId: 'tab-1' },
+        ],
+        activeTabId: 'tab-1',
+      },
+    }))
+
+    localStorage.setItem('freshell.panes.v1', JSON.stringify({
+      version: 3,
+      layouts: {
+        'tab-1': {
+          type: 'split',
+          id: 'split-1',
+          direction: 'horizontal',
+          sizes: [50, 50],
+          children: [
+            { type: 'leaf', id: 'pane-shell', content: { kind: 'terminal', mode: 'shell', createRequestId: 'req-shell', status: 'running' } },
+            { type: 'leaf', id: 'pane-claude', content: { kind: 'terminal', mode: 'claude', createRequestId: 'req-claude', status: 'running' } },
+          ],
+        },
+      },
+      activePane: { 'tab-1': 'pane-shell' },
+      paneTitles: {},
+    }))
+
+    vi.resetModules()
+    const panesReducer = (await import('../../../../src/store/panesSlice')).default
+    const tabsReducer = (await import('../../../../src/store/tabsSlice')).default
+
+    const store = configureStore({ reducer: { tabs: tabsReducer, panes: panesReducer } })
+    const layout = store.getState().panes.layouts['tab-1'] as any
+    expect(layout.children[1].content.resumeSessionId).toBe(validSessionId)
+  })
+
+  it('skips migration when resumeSessionId is invalid', async () => {
+    localStorage.setItem('freshell.tabs.v1', JSON.stringify({
+      tabs: {
+        tabs: [
+          { id: 'tab-1', mode: 'claude', resumeSessionId: 'not-a-uuid', status: 'running', title: 'Claude', createRequestId: 'tab-1' },
+        ],
+        activeTabId: 'tab-1',
+      },
+    }))
+
+    localStorage.setItem('freshell.panes.v1', JSON.stringify({
+      version: 3,
+      layouts: {
+        'tab-1': {
+          type: 'leaf',
+          id: 'pane-1',
+          content: { kind: 'terminal', mode: 'claude', createRequestId: 'req-1', status: 'running' },
+        },
+      },
+      activePane: { 'tab-1': 'pane-1' },
+      paneTitles: {},
+    }))
+
+    vi.resetModules()
+    const panesReducer = (await import('../../../../src/store/panesSlice')).default
+    const tabsReducer = (await import('../../../../src/store/tabsSlice')).default
+
+    const store = configureStore({ reducer: { tabs: tabsReducer, panes: panesReducer } })
+    const layout = store.getState().panes.layouts['tab-1'] as any
+    expect(layout.content.resumeSessionId).toBeUndefined()
+  })
+})
