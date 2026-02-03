@@ -1147,21 +1147,23 @@ describe('buildSpawnSpec WSL paths', () => {
       expect(spec.args).toContain('-l')
     })
 
-    it('uses cmd.exe for cmd shell type in WSL', () => {
+    it('uses full path to cmd.exe for cmd shell type in WSL', () => {
       mockWsl()
 
       const spec = buildSpawnSpec('shell', '/home/user/project', 'cmd')
 
-      expect(spec.file).toBe('cmd.exe')
+      // WSL uses full path since cmd.exe may not be on PATH
+      expect(spec.file).toBe('/mnt/c/Windows/System32/cmd.exe')
       expect(spec.args).toContain('/K')
     })
 
-    it('uses powershell.exe for powershell shell type in WSL', () => {
+    it('uses full path to powershell.exe for powershell shell type in WSL', () => {
       mockWsl()
 
       const spec = buildSpawnSpec('shell', '/home/user/project', 'powershell')
 
-      expect(spec.file.toLowerCase()).toContain('powershell')
+      // WSL uses full path since powershell.exe may not be on PATH
+      expect(spec.file).toBe('/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe')
       expect(spec.args).toContain('-NoLogo')
     })
   })

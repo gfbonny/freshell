@@ -169,6 +169,23 @@ export function isWindowsLike(): boolean {
 }
 
 /**
+ * Get the executable path for cmd.exe or powershell.exe.
+ * On native Windows, uses the simple name (relies on PATH).
+ * On WSL, uses full paths since Windows executables may not be on PATH.
+ */
+function getWindowsExe(exe: 'cmd' | 'powershell'): string {
+  if (isWindows()) {
+    return exe === 'cmd' ? 'cmd.exe' : (process.env.POWERSHELL_EXE || 'powershell.exe')
+  }
+  // On WSL, use explicit paths since Windows PATH may not be available
+  const systemRoot = process.env.WSL_WINDOWS_SYS32 || '/mnt/c/Windows/System32'
+  if (exe === 'cmd') {
+    return `${systemRoot}/cmd.exe`
+  }
+  return process.env.POWERSHELL_EXE || `${systemRoot}/WindowsPowerShell/v1.0/powershell.exe`
+}
+
+/**
  * Resolve the effective shell based on platform and requested shell type.
  * - Windows/WSL: 'system' → platform default, others pass through
  * - macOS/Linux (non-WSL): always normalize to 'system' (use $SHELL or fallback)
@@ -297,7 +314,7 @@ export function buildSpawnSpec(mode: TerminalMode, cwd: string | undefined, shel
     const quote = (s: string) => `"${escapePowershell(s)}"`
 
     if (windowsMode === 'cmd') {
-      const file = 'cmd.exe'
+      const file = getWindowsExe('cmd')
       // Don't use Linux paths as cwd on native Windows
       const winCwd = isLinuxPath(cwd) ? undefined : cwd
       if (mode === 'shell') {
@@ -311,7 +328,7 @@ export function buildSpawnSpec(mode: TerminalMode, cwd: string | undefined, shel
     }
 
     // default to PowerShell
-    const file = process.env.POWERSHELL_EXE || 'powershell.exe'
+    const file = getWindowsExe('powershell')
     // Don't use Linux paths as cwd on native Windows
     const winCwd = isLinuxPath(cwd) ? undefined : cwd
     if (mode === 'shell') {
