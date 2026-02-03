@@ -1,88 +1,15 @@
 import path from 'path'
 import os from 'os'
-import fsp from 'fs/promises'
 import { extractTitleFromMessage } from '../../title-utils.js'
 import type { CodingCliProvider } from '../provider.js'
 import type { NormalizedEvent, ParsedSessionMeta } from '../types.js'
 import { parseClaudeEvent, isMessageEvent, isResultEvent, isToolResultContent, isToolUseContent, isTextContent } from '../../claude-stream-types.js'
 import { looksLikePath } from '../utils.js'
 
-const IS_WINDOWS = process.platform === 'win32'
-const PROJECT_PATH_CACHE_MAX = 2000
-const projectPathCache = new Map<string, string>()
-
-const normalizeProjectDir = (projectDir: string) => {
-  const resolved = path.resolve(projectDir)
-  return IS_WINDOWS ? resolved.toLowerCase() : resolved
-}
-
-function cacheProjectPath(cacheKey: string, projectPath: string) {
-  if (projectPathCache.size >= PROJECT_PATH_CACHE_MAX) {
-    projectPathCache.clear()
-  }
-  projectPathCache.set(cacheKey, projectPath)
-}
-
 export function defaultClaudeHome(): string {
   // Claude Code stores logs in ~/.claude by default (Linux/macOS).
   // On Windows, set CLAUDE_HOME to a path you can access from Node (e.g. \\wsl$\\...).
   return process.env.CLAUDE_HOME || path.join(os.homedir(), '.claude')
-}
-
-async function tryReadJson(filePath: string): Promise<any | null> {
-  try {
-    const raw = await fsp.readFile(filePath, 'utf-8')
-    return JSON.parse(raw)
-  } catch {
-    return null
-  }
-}
-
-async function resolveProjectPath(projectDir: string): Promise<string> {
-  const cacheKey = normalizeProjectDir(projectDir)
-  const cached = projectPathCache.get(cacheKey)
-  if (cached) return cached
-
-  // Try known files first
-  const candidates = ['project.json', 'metadata.json', 'config.json']
-  for (const name of candidates) {
-    const p = path.join(projectDir, name)
-    const json = await tryReadJson(p)
-    if (json) {
-      const possible =
-        json.projectPath || json.path || json.cwd || json.root || json.project_root || json.project_root_path
-      if (typeof possible === 'string' && looksLikePath(possible)) {
-        cacheProjectPath(cacheKey, possible)
-        return possible
-      }
-    }
-  }
-
-  // Heuristic: scan small json files in directory
-  try {
-    const files = await fsp.readdir(projectDir)
-    for (const f of files) {
-      if (!f.endsWith('.json')) continue
-      const p = path.join(projectDir, f)
-      const stat = await fsp.stat(p)
-      if (stat.size > 200_000) continue
-      const json = await tryReadJson(p)
-      if (!json) continue
-      const keys = ['projectPath', 'path', 'cwd', 'root']
-      for (const k of keys) {
-        const v = json[k]
-        if (typeof v === 'string' && looksLikePath(v)) {
-          cacheProjectPath(cacheKey, v)
-          return v
-        }
-      }
-    }
-  } catch {}
-
-  // Fallback to directory name.
-  const fallback = path.basename(projectDir)
-  cacheProjectPath(cacheKey, fallback)
-  return fallback
 }
 
 export type JsonlMeta = {
@@ -213,9 +140,8 @@ export const claudeProvider: CodingCliProvider = {
     return parseSessionContent(content)
   },
 
-  async resolveProjectPath(filePath: string): Promise<string> {
-    const projectDir = path.dirname(filePath)
-    return resolveProjectPath(projectDir)
+  async resolveProjectPath(_filePath: string, meta: ParsedSessionMeta): Promise<string> {
+    return meta.cwd || 'unknown'
   },
 
   extractSessionId(filePath: string): string {

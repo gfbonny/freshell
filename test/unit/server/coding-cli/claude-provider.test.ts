@@ -1,5 +1,4 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
-import fsp from 'fs/promises'
 import path from 'path'
 import os from 'os'
 import { claudeProvider, defaultClaudeHome, parseSessionContent } from '../../../../server/coding-cli/providers/claude'
@@ -7,26 +6,18 @@ import { ClaudeSessionIndexer, applyOverride } from '../../../../server/claude-i
 import { looksLikePath } from '../../../../server/coding-cli/utils'
 
 describe('claudeProvider.resolveProjectPath()', () => {
-  it('memoizes project metadata lookups per directory', async () => {
-    const tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'claude-project-cache-'))
-    const projectDir = path.join(tempDir, 'project-a')
-    const projectPath = '/home/user/project-a'
-    await fsp.mkdir(projectDir, { recursive: true })
-    await fsp.writeFile(path.join(projectDir, 'project.json'), JSON.stringify({ projectPath }))
-
-    const readSpy = vi.spyOn(fsp, 'readFile')
-    try {
-      const first = await claudeProvider.resolveProjectPath(path.join(projectDir, 'session-a.jsonl'), {})
-      const second = await claudeProvider.resolveProjectPath(path.join(projectDir, 'session-b.jsonl'), {})
-
-      expect(first).toBe(projectPath)
-      expect(second).toBe(projectPath)
-      expect(readSpy).toHaveBeenCalledTimes(1)
-    } finally {
-      readSpy.mockRestore()
-      await fsp.rm(tempDir, { recursive: true, force: true })
-    }
+  it('returns cwd from session metadata (like Codex)', async () => {
+    const meta = { cwd: '/home/user/my-project' }
+    const result = await claudeProvider.resolveProjectPath('/some/file.jsonl', meta)
+    expect(result).toBe('/home/user/my-project')
   })
+
+  it('returns "unknown" when cwd is not present', async () => {
+    const meta = {}
+    const result = await claudeProvider.resolveProjectPath('/some/file.jsonl', meta)
+    expect(result).toBe('unknown')
+  })
+
 })
 
 describe('claude provider cross-platform tests', () => {
