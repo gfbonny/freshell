@@ -122,4 +122,125 @@ describe('codex-provider', () => {
 
     expect(args).toEqual(['exec', '--json', '--model', 'gpt-5-codex', '--sandbox', 'read-only', 'Hello'])
   })
+
+  describe('title extraction skips system context', () => {
+    it('skips AGENTS.md instructions and uses actual user prompt', () => {
+      const content = [
+        JSON.stringify({
+          type: 'session_meta',
+          payload: { id: 'session-1', cwd: '/project' },
+        }),
+        // First "user" message is actually AGENTS.md instructions
+        JSON.stringify({
+          type: 'response_item',
+          payload: {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: '# AGENTS.md instructions for /project\n\n<INSTRUCTIONS>\nPrefer bash to powershell...' }],
+          },
+        }),
+        // Second "user" message is environment context
+        JSON.stringify({
+          type: 'response_item',
+          payload: {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: '<environment_context>\n  <cwd>/project</cwd>\n</environment_context>' }],
+          },
+        }),
+        // Third "user" message is the actual prompt
+        JSON.stringify({
+          type: 'response_item',
+          payload: {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'Review the current code changes' }],
+          },
+        }),
+      ].join('\n')
+
+      const meta = parseCodexSessionContent(content)
+
+      expect(meta.title).toBe('Review the current code changes')
+    })
+
+    it('skips messages starting with XML tags like <INSTRUCTIONS>', () => {
+      const content = [
+        JSON.stringify({
+          type: 'session_meta',
+          payload: { id: 'session-2', cwd: '/project' },
+        }),
+        JSON.stringify({
+          type: 'response_item',
+          payload: {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: '<INSTRUCTIONS>\nSystem instructions here\n</INSTRUCTIONS>' }],
+          },
+        }),
+        JSON.stringify({
+          type: 'response_item',
+          payload: {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'Build a new feature' }],
+          },
+        }),
+      ].join('\n')
+
+      const meta = parseCodexSessionContent(content)
+
+      expect(meta.title).toBe('Build a new feature')
+    })
+
+    it('skips messages starting with # System or # Instructions', () => {
+      const content = [
+        JSON.stringify({
+          type: 'session_meta',
+          payload: { id: 'session-3', cwd: '/project' },
+        }),
+        JSON.stringify({
+          type: 'response_item',
+          payload: {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: '# System\nYou are a helpful assistant...' }],
+          },
+        }),
+        JSON.stringify({
+          type: 'response_item',
+          payload: {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'Fix the login bug' }],
+          },
+        }),
+      ].join('\n')
+
+      const meta = parseCodexSessionContent(content)
+
+      expect(meta.title).toBe('Fix the login bug')
+    })
+
+    it('uses first user message if none are system context', () => {
+      const content = [
+        JSON.stringify({
+          type: 'session_meta',
+          payload: { id: 'session-4', cwd: '/project' },
+        }),
+        JSON.stringify({
+          type: 'response_item',
+          payload: {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'Hello, help me debug this' }],
+          },
+        }),
+      ].join('\n')
+
+      const meta = parseCodexSessionContent(content)
+
+      expect(meta.title).toBe('Hello, help me debug this')
+    })
+  })
 })

@@ -18,6 +18,22 @@ function extractTextContent(items: any[] | undefined): string {
     .join('\n')
 }
 
+/**
+ * Check if a "user" message is actually system context injected by Codex.
+ * Codex marks several things as role:"user" that aren't real user prompts:
+ * - AGENTS.md/instruction files (start with "# AGENTS.md" or similar)
+ * - Environment context (wrapped in <environment_context> XML)
+ * - Other XML-wrapped system context (starts with <tag>)
+ */
+function isSystemContext(text: string): boolean {
+  const trimmed = text.trim()
+  // XML-wrapped system context: <environment_context>, <INSTRUCTIONS>, etc.
+  if (/^<[a-zA-Z_][\w_-]*[>\s]/.test(trimmed)) return true
+  // Instruction file headers: "# AGENTS.md instructions for...", "# System", "# Instructions"
+  if (/^#\s*(AGENTS|Instructions?|System)/i.test(trimmed)) return true
+  return false
+}
+
 export function parseCodexSessionContent(content: string): ParsedSessionMeta {
   const lines = content.split(/\r?\n/).filter(Boolean)
   let sessionId: string | undefined
@@ -50,7 +66,7 @@ export function parseCodexSessionContent(content: string): ParsedSessionMeta {
 
     if (!title && obj?.type === 'response_item' && obj?.payload?.type === 'message' && obj?.payload?.role === 'user') {
       const text = extractTextContent(obj.payload.content)
-      if (text.trim()) {
+      if (text.trim() && !isSystemContext(text)) {
         title = extractTitleFromMessage(text, 200)
       }
     }
