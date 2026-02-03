@@ -1,6 +1,7 @@
 import { execSync } from 'child_process'
 
 const IPV4_REGEX = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/
+const NETSH_PATH = '/mnt/c/Windows/System32/netsh.exe'
 
 export type PortProxyRule = {
   connectAddress: string
@@ -49,5 +50,21 @@ export function getWslIp(): string | null {
     return null
   } catch {
     return null
+  }
+}
+
+/**
+ * Query existing Windows port proxy rules.
+ * Returns a Map of listenPort -> { connectAddress, connectPort }.
+ */
+export function getExistingPortProxyRules(): Map<number, PortProxyRule> {
+  try {
+    const output = execSync(
+      `${NETSH_PATH} interface portproxy show v4tov4`,
+      { encoding: 'utf-8', timeout: 10000 }
+    )
+    return parsePortProxyRules(output)
+  } catch {
+    return new Map()
   }
 }

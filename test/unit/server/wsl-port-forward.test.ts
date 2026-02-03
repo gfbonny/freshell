@@ -3,7 +3,7 @@ import { execSync } from 'child_process'
 
 vi.mock('child_process')
 
-import { getWslIp, parsePortProxyRules, type PortProxyRule } from '../../../server/wsl-port-forward.js'
+import { getWslIp, parsePortProxyRules, getExistingPortProxyRules, type PortProxyRule } from '../../../server/wsl-port-forward.js'
 
 describe('wsl-port-forward', () => {
   beforeEach(() => {
@@ -106,6 +106,36 @@ Address         Port        Address         Port
 
       expect(rules.has(8080)).toBe(false)
       expect(rules.get(3001)).toEqual({ connectAddress: '172.30.149.249', connectPort: 3001 })
+    })
+  })
+
+  describe('getExistingPortProxyRules', () => {
+    it('calls netsh with absolute path and parses output', () => {
+      vi.mocked(execSync).mockReturnValue(`
+Listen on ipv4:             Connect to ipv4:
+
+Address         Port        Address         Port
+--------------- ----------  --------------- ----------
+0.0.0.0         3001        172.30.149.249  3001
+`)
+
+      const rules = getExistingPortProxyRules()
+
+      expect(execSync).toHaveBeenCalledWith(
+        '/mnt/c/Windows/System32/netsh.exe interface portproxy show v4tov4',
+        expect.objectContaining({ encoding: 'utf-8' })
+      )
+      expect(rules.get(3001)).toEqual({ connectAddress: '172.30.149.249', connectPort: 3001 })
+    })
+
+    it('returns empty map when netsh fails', () => {
+      vi.mocked(execSync).mockImplementation(() => {
+        throw new Error('Command failed')
+      })
+
+      const rules = getExistingPortProxyRules()
+
+      expect(rules.size).toBe(0)
     })
   })
 })
