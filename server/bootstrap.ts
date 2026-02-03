@@ -7,6 +7,7 @@
  * Usage: import './bootstrap.js' as the first import in server/index.ts
  */
 
+import { execSync } from 'child_process'
 import crypto from 'crypto'
 import fs from 'fs'
 import os from 'os'
@@ -20,22 +21,122 @@ export type BootstrapResult = {
 }
 
 /**
+ * Check if running inside WSL2.
+ */
+function isWSL2(): boolean {
+  try {
+    const version = fs.readFileSync('/proc/version', 'utf-8')
+    return version.toLowerCase().includes('microsoft')
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Get Windows host physical LAN IPs via ipconfig.exe (WSL2 only).
+ * Returns IPs from Ethernet/Wi-Fi adapters, excluding virtual adapters.
+ */
+function getWindowsHostIps(): string[] {
+  try {
+    const output = execSync('/mnt/c/Windows/System32/ipconfig.exe', {
+      encoding: 'utf-8',
+      timeout: 5000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+
+    const ips: string[] = []
+    let inPhysicalAdapter = false
+
+    for (const line of output.split('\n')) {
+      const trimmed = line.trim()
+
+      // Detect adapter sections by looking for "adapter" keyword
+      // Physical adapters: "Ethernet adapter X:", "Wireless LAN adapter X:"
+      // Virtual adapters: contain vEthernet, WSL, Docker, VirtualBox, VMware
+      if (trimmed.match(/adapter/i) && trimmed.endsWith(':')) {
+        const isVirtual = /vEthernet|WSL|Docker|VirtualBox|VMware/i.test(trimmed)
+        inPhysicalAdapter = !isVirtual
+      }
+
+      // Extract IPv4 address if in a physical adapter section
+      if (inPhysicalAdapter) {
+        const ipv4Match = trimmed.match(/IPv4.*?:\s*(\d+\.\d+\.\d+\.\d+)/)
+        if (ipv4Match) {
+          ips.push(ipv4Match[1])
+        }
+      }
+    }
+
+    return ips
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Score an IP address for LAN likelihood.
+ * Higher score = more likely to be the user's actual LAN IP.
+ */
+function scoreLanIp(ip: string, netmask: string): number {
+  const parts = ip.split('.').map(Number)
+
+  // Docker bridge (172.17.0.1) - deprioritize
+  if (ip.startsWith('172.17.')) return 0
+
+  // VPN-style /32 addresses - deprioritize
+  if (netmask === '255.255.255.255') return 1
+
+  // 192.168.x.x - most common home/office LAN
+  if (parts[0] === 192 && parts[1] === 168) return 100
+
+  // 10.x.x.x with typical LAN subnets - common corporate/home
+  if (parts[0] === 10) {
+    // Prefer 10.0.x.x or 10.1.x.x over unusual ranges like 10.255.x.x
+    if (parts[1] <= 10) return 90
+    return 50
+  }
+
+  // 172.16-31.x.x (private range, excluding Docker)
+  if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return 80
+
+  // Other private IPs
+  return 10
+}
+
+/**
  * Detect all non-loopback IPv4 addresses from network interfaces.
+ * Returns IPs sorted by LAN likelihood (most likely first).
+ * In WSL2, queries Windows host for physical LAN IPs.
  */
 export function detectLanIps(): string[] {
+  // In WSL2, get Windows host's physical LAN IPs instead of WSL's virtual IPs
+  if (isWSL2()) {
+    const windowsIps = getWindowsHostIps()
+    if (windowsIps.length > 0) {
+      // Score and sort Windows IPs (using /24 as assumed netmask)
+      const scored = windowsIps.map((ip) => ({ address: ip, netmask: '255.255.255.0' }))
+      scored.sort((a, b) => scoreLanIp(b.address, b.netmask) - scoreLanIp(a.address, a.netmask))
+      return scored.map((ip) => ip.address)
+    }
+    // Fall through to native detection if Windows query fails
+  }
+
   const interfaces = os.networkInterfaces()
-  const ips: string[] = []
+  const ips: Array<{ address: string; netmask: string }> = []
 
   for (const [, addrs] of Object.entries(interfaces)) {
     if (!addrs) continue
     for (const addr of addrs) {
       if (addr.family === 'IPv4' && !addr.internal) {
-        ips.push(addr.address)
+        ips.push({ address: addr.address, netmask: addr.netmask })
       }
     }
   }
 
-  return ips
+  // Sort by LAN score (highest first)
+  ips.sort((a, b) => scoreLanIp(b.address, b.netmask) - scoreLanIp(a.address, a.netmask))
+
+  return ips.map((ip) => ip.address)
 }
 
 /**
