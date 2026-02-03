@@ -4,7 +4,7 @@
 
 **Goal:** Automatically configure Windows port forwarding when running in WSL2 so external LAN devices can reach Freshell.
 
-**Architecture:** New module `server/wsl-port-forward.ts` detects WSL2, reads configured PORT from environment, checks existing port proxy rules via `netsh`, and launches an elevated PowerShell process to add/update rules if needed. Verifies rules were applied after elevation. Called from `bootstrap.ts` after env file setup.
+**Architecture:** New module `server/wsl-port-forward.ts` detects WSL2, reads configured PORT from environment, checks existing port proxy rules via `netsh`, and launches an elevated PowerShell process to add/update rules if needed. Verifies rules were applied after elevation. Called from `server/index.ts` AFTER dotenv loads (not from bootstrap.ts) so that user-configured PORT/NODE_ENV values from .env are available.
 
 **Tech Stack:** Node.js child_process (execSync), Windows netsh, PowerShell elevation via `-Verb RunAs`
 
@@ -14,12 +14,15 @@
 
 This plan addresses all issues from code review:
 
-1. **Dynamic ports** - Reads PORT from process.env (set by bootstrap), dev port (5173) only added when NODE_ENV !== 'production'
+1. **Dynamic ports** - Reads PORT from process.env AFTER dotenv loads, dev port (5173) only added when NODE_ENV !== 'production'
 2. **Complete rule validation** - parsePortProxyRules captures both connectAddress AND connectPort; needsPortForwardingUpdate verifies both match
 3. **Shell escaping** - Uses `\$null` to prevent sh expansion, and absolute PowerShell path
 4. **Verified success** - After elevation, re-queries netsh to verify rules were actually applied
 5. **Secure firewall rule** - Adds `profile=private` to restrict to private networks only
-6. **Full test coverage** - Tests for success path and bootstrap integration included
+6. **Full test coverage** - Tests for success path and integration location verification included
+7. **WSL2-specific detection** - Uses `wsl2` or `microsoft-standard` patterns to avoid false positives on WSL1
+8. **Port validation** - Validates PORT is a valid number (1-65535), deduplicates when PORT=5173
+9. **Proper integration location** - Called from server/index.ts after dotenv/config loads, not from bootstrap.ts
 
 ---
 

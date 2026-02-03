@@ -14,8 +14,6 @@ import os from 'os'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
-import { setupWslPortForwarding } from './wsl-port-forward.js'
-
 export type BootstrapResult = {
   action: 'created' | 'patched' | 'skipped' | 'error'
   token?: string
@@ -312,11 +310,3 @@ if (result.action === 'created') {
   console.error(`[bootstrap] Failed to ensure .env: ${result.error}`)
 }
 
-// --- WSL2 Port Forwarding ---
-// Configure Windows port forwarding for LAN access when running in WSL2
-const portForwardResult = setupWslPortForwarding()
-if (portForwardResult === 'success') {
-  console.log('[bootstrap] WSL2 port forwarding configured')
-} else if (portForwardResult === 'failed') {
-  console.warn('[bootstrap] WSL2 port forwarding failed - LAN access may not work')
-}

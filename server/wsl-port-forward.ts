@@ -77,17 +77,25 @@ export function getExistingPortProxyRules(): Map<number, PortProxyRule> {
  * Get the list of ports that need forwarding.
  * Uses PORT from environment (or default 3001).
  * Includes dev port 5173 unless NODE_ENV is 'production'.
+ * Validates port and deduplicates to avoid invalid/duplicate netsh commands.
  */
 export function getRequiredPorts(): number[] {
-  const serverPort = parseInt(process.env.PORT || String(DEFAULT_PORT), 10)
-  const ports = [serverPort]
+  const portEnv = process.env.PORT
+  const serverPort = portEnv ? parseInt(portEnv, 10) : DEFAULT_PORT
+
+  // Validate parsed port (NaN check, valid range)
+  const validServerPort = Number.isNaN(serverPort) || serverPort < 1 || serverPort > 65535
+    ? DEFAULT_PORT
+    : serverPort
+
+  const ports = new Set<number>([validServerPort])
 
   // Include dev server port unless in production
   if (process.env.NODE_ENV !== 'production') {
-    ports.push(DEV_PORT)
+    ports.add(DEV_PORT)
   }
 
-  return ports
+  return Array.from(ports)
 }
 
 /**

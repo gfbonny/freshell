@@ -194,6 +194,34 @@ Address         Port        Address         Port
 
       expect(ports).not.toContain(5173)
     })
+
+    it('falls back to default port when PORT is invalid (NaN)', () => {
+      process.env.PORT = 'notanumber'
+
+      const ports = getRequiredPorts()
+
+      expect(ports).toContain(3001)
+      expect(ports).not.toContain(NaN)
+    })
+
+    it('falls back to default port when PORT is out of range', () => {
+      process.env.PORT = '99999'
+
+      const ports = getRequiredPorts()
+
+      expect(ports).toContain(3001)
+      expect(ports).not.toContain(99999)
+    })
+
+    it('deduplicates when PORT equals dev port', () => {
+      process.env.PORT = '5173'
+      delete process.env.NODE_ENV
+
+      const ports = getRequiredPorts()
+
+      // Should only contain 5173 once
+      expect(ports).toEqual([5173])
+    })
   })
 
   describe('needsPortForwardingUpdate', () => {
