@@ -33,7 +33,7 @@ export default function Pane({
     <div
       className={cn(
         'relative h-full w-full overflow-hidden flex flex-col',
-        !isActive && 'opacity-70'
+        !isActive && 'opacity-[0.85]'
       )}
       onMouseDown={onFocus}
     >

@@ -113,7 +113,7 @@ describe('Pane', () => {
 
       const paneDiv = container.firstChild as HTMLElement
       expect(paneDiv.className).toContain('relative')
-      expect(paneDiv.className).toContain('opacity-70')
+      expect(paneDiv.className).toContain('opacity-[0.85]')
     })
   })
 
