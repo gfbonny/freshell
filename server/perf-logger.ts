@@ -13,6 +13,7 @@ export type PerfConfig = {
   slowSessionRefreshMs: number
   slowAiSummaryMs: number
   slowTerminalCreateMs: number
+  terminalInputLagMs: number
   rateLimitMs: number
 }
 
@@ -42,6 +43,7 @@ export function resolvePerfConfig(env: NodeJS.ProcessEnv = process.env): PerfCon
     slowSessionRefreshMs: readNumber(env, 'PERF_SESSION_REFRESH_SLOW_MS', 500),
     slowAiSummaryMs: readNumber(env, 'PERF_AI_SUMMARY_SLOW_MS', 750),
     slowTerminalCreateMs: readNumber(env, 'PERF_TERMINAL_CREATE_SLOW_MS', 200),
+    terminalInputLagMs: readNumber(env, 'PERF_TERMINAL_INPUT_LAG_MS', 200),
     rateLimitMs: readNumber(env, 'PERF_RATE_LIMIT_MS', 5000),
   }
 }

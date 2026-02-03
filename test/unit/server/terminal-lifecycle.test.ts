@@ -58,6 +58,8 @@ vi.mock('../../../server/logger', () => {
 
 // Import after mocking
 import { TerminalRegistry, type TerminalRecord, ChunkRingBuffer } from '../../../server/terminal-registry'
+import { getPerfConfig, setPerfLoggingEnabled } from '../../../server/perf-logger'
+import { logger } from '../../../server/logger'
 import type { AppSettings } from '../../../server/config-store'
 
 // Mock WebSocket
@@ -120,6 +122,31 @@ describe('TerminalRegistry Lifecycle', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  describe('terminal input perf logging', () => {
+    afterEach(() => {
+      setPerfLoggingEnabled(false, 'test')
+    })
+
+    it('logs input lag when output follows delayed input', () => {
+      setPerfLoggingEnabled(true, 'test')
+      getPerfConfig().terminalInputLagMs = 100
+
+      const perfRegistry = new TerminalRegistry(settings)
+      const term = perfRegistry.create({ mode: 'shell' })
+      const pty = mockPtyProcess.instances[mockPtyProcess.instances.length - 1]
+
+      logger.debug.mockClear()
+      vi.setSystemTime(10_000)
+      perfRegistry.input(term.terminalId, 'a')
+      vi.advanceTimersByTime(150)
+      pty._emitData('echo')
+
+      const events = logger.debug.mock.calls.map((call) => call[0]?.event)
+      expect(events).toContain('terminal_input_lag')
+
+    })
   })
 
   describe('Terminal created but never attached', () => {

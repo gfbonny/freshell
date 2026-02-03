@@ -98,6 +98,14 @@ export type TerminalRecord = {
     outBytes: number
     outChunks: number
     droppedMessages: number
+    inBytes: number
+    inChunks: number
+    pendingInputAt?: number
+    pendingInputBytes: number
+    pendingInputCount: number
+    lastInputBytes?: number
+    lastInputToOutputMs?: number
+    maxInputToOutputMs: number
   }
 }
 
@@ -325,25 +333,61 @@ export class TerminalRegistry {
     if (!perfConfig.enabled) return
     if (this.perfTimer) clearInterval(this.perfTimer)
     this.perfTimer = setInterval(() => {
+      const now = Date.now()
       for (const term of this.terminals.values()) {
         if (!term.perf) continue
-        if (term.perf.outBytes === 0 && term.perf.droppedMessages === 0) continue
-        logPerfEvent(
-          'terminal_output',
-          {
-            terminalId: term.terminalId,
-            mode: term.mode,
-            status: term.status,
-            clients: term.clients.size,
-            outBytes: term.perf.outBytes,
-            outChunks: term.perf.outChunks,
-            droppedMessages: term.perf.droppedMessages,
-          },
-          term.perf.droppedMessages > 0 ? 'warn' : 'info',
-        )
-        term.perf.outBytes = 0
-        term.perf.outChunks = 0
-        term.perf.droppedMessages = 0
+        if (term.perf.outBytes > 0 || term.perf.droppedMessages > 0) {
+          logPerfEvent(
+            'terminal_output',
+            {
+              terminalId: term.terminalId,
+              mode: term.mode,
+              status: term.status,
+              clients: term.clients.size,
+              outBytes: term.perf.outBytes,
+              outChunks: term.perf.outChunks,
+              droppedMessages: term.perf.droppedMessages,
+            },
+            term.perf.droppedMessages > 0 ? 'warn' : 'info',
+          )
+          term.perf.outBytes = 0
+          term.perf.outChunks = 0
+          term.perf.droppedMessages = 0
+        }
+
+        const pendingInputMs = term.perf.pendingInputAt ? now - term.perf.pendingInputAt : undefined
+        const hasInputMetrics =
+          term.perf.inBytes > 0 ||
+          term.perf.inChunks > 0 ||
+          term.perf.pendingInputAt !== undefined ||
+          term.perf.maxInputToOutputMs > 0
+        if (hasInputMetrics) {
+          const hasLag =
+            (pendingInputMs !== undefined && pendingInputMs >= perfConfig.terminalInputLagMs) ||
+            term.perf.maxInputToOutputMs >= perfConfig.terminalInputLagMs
+          logPerfEvent(
+            'terminal_input',
+            {
+              terminalId: term.terminalId,
+              mode: term.mode,
+              status: term.status,
+              clients: term.clients.size,
+              inBytes: term.perf.inBytes,
+              inChunks: term.perf.inChunks,
+              pendingInputMs,
+              pendingInputBytes: term.perf.pendingInputBytes,
+              pendingInputCount: term.perf.pendingInputCount,
+              lastInputBytes: term.perf.lastInputBytes,
+              lastInputToOutputMs: term.perf.lastInputToOutputMs,
+              maxInputToOutputMs: term.perf.maxInputToOutputMs,
+            },
+            hasLag ? 'warn' : 'info',
+          )
+          term.perf.inBytes = 0
+          term.perf.inChunks = 0
+          term.perf.maxInputToOutputMs = 0
+          term.perf.lastInputToOutputMs = undefined
+        }
       }
     }, perfConfig.terminalSampleMs)
     this.perfTimer.unref?.()
@@ -424,16 +468,53 @@ export class TerminalRegistry {
             outBytes: 0,
             outChunks: 0,
             droppedMessages: 0,
+            inBytes: 0,
+            inChunks: 0,
+            pendingInputAt: undefined,
+            pendingInputBytes: 0,
+            pendingInputCount: 0,
+            lastInputBytes: undefined,
+            lastInputToOutputMs: undefined,
+            maxInputToOutputMs: 0,
           }
         : undefined,
     }
 
     ptyProc.onData((data) => {
-      record.lastActivityAt = Date.now()
+      const now = Date.now()
+      record.lastActivityAt = now
       record.buffer.append(data)
       if (record.perf) {
         record.perf.outBytes += data.length
         record.perf.outChunks += 1
+        if (record.perf.pendingInputAt !== undefined) {
+          const lagMs = now - record.perf.pendingInputAt
+          record.perf.lastInputToOutputMs = lagMs
+          if (lagMs > record.perf.maxInputToOutputMs) {
+            record.perf.maxInputToOutputMs = lagMs
+          }
+          if (lagMs >= perfConfig.terminalInputLagMs) {
+            const key = `terminal_input_lag_${terminalId}`
+            if (shouldLog(key, perfConfig.rateLimitMs)) {
+              logPerfEvent(
+                'terminal_input_lag',
+                {
+                  terminalId,
+                  mode: record.mode,
+                  status: record.status,
+                  lagMs,
+                  pendingInputBytes: record.perf.pendingInputBytes,
+                  pendingInputCount: record.perf.pendingInputCount,
+                  lastInputBytes: record.perf.lastInputBytes,
+                },
+                'warn',
+              )
+            }
+          }
+          record.perf.pendingInputAt = undefined
+          record.perf.pendingInputBytes = 0
+          record.perf.pendingInputCount = 0
+        }
       }
       for (const client of record.clients) {
         this.safeSend(client, { type: 'terminal.output', terminalId, data }, { terminalId, perf: record.perf })
@@ -471,7 +552,18 @@ export class TerminalRegistry {
   input(terminalId: string, data: string): boolean {
     const term = this.terminals.get(terminalId)
     if (!term || term.status !== 'running') return false
-    term.lastActivityAt = Date.now()
+    const now = Date.now()
+    term.lastActivityAt = now
+    if (term.perf) {
+      term.perf.inBytes += data.length
+      term.perf.inChunks += 1
+      term.perf.lastInputBytes = data.length
+      term.perf.pendingInputBytes += data.length
+      term.perf.pendingInputCount += 1
+      if (term.perf.pendingInputAt === undefined) {
+        term.perf.pendingInputAt = now
+      }
+    }
     term.pty.write(data)
     return true
   }

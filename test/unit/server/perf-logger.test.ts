@@ -56,10 +56,12 @@ describe('perf logger config', () => {
       PERF_HTTP_SLOW_MS: '250',
       PERF_WS_SLOW_MS: '75',
       PERF_TERMINAL_SAMPLE_MS: '2000',
+      PERF_TERMINAL_INPUT_LAG_MS: '150',
     } as NodeJS.ProcessEnv)
     expect(cfg.httpSlowMs).toBe(250)
     expect(cfg.wsSlowMs).toBe(75)
     expect(cfg.terminalSampleMs).toBe(2000)
+    expect(cfg.terminalInputLagMs).toBe(150)
 
     const fallback = resolvePerfConfig({ PERF_HTTP_SLOW_MS: 'nope' } as NodeJS.ProcessEnv)
     expect(fallback.httpSlowMs).toBe(500)
