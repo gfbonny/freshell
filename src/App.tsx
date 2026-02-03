@@ -4,7 +4,7 @@ import { setStatus, setError, setPlatform, setAvailableClis } from '@/store/conn
 import { setSettings } from '@/store/settingsSlice'
 import { setProjects } from '@/store/sessionsSlice'
 import { closeTabWithCleanup, createTabWithPane } from '@/store/tabThunks'
-import { setActiveTab } from '@/store/tabsSlice'
+import { setActiveTab, switchToNextTab, switchToPrevTab } from '@/store/tabsSlice'
 import { api } from '@/lib/api'
 import { getAuthToken } from '@/lib/auth'
 import { buildShareUrl } from '@/lib/utils'
@@ -238,20 +238,8 @@ export default function App() {
         }
       })
 
-      const unsubReconnect = ws.onReconnect(async () => {
-        try {
-          const projects = await api.get('/api/sessions')
-          dispatch(setProjects(projects))
-        } catch {}
-        try {
-          const settings = await api.get('/api/settings')
-          dispatch(setSettings(settings))
-        } catch {}
-      })
-
       return () => {
         unsubscribe()
-        unsubReconnect()
       }
     }
 
@@ -282,20 +270,6 @@ export default function App() {
       return false
     }
 
-    function switchToNextTab() {
-      if (tabs.length <= 1) return
-      const currentIndex = tabs.findIndex((t) => t.id === activeTabId)
-      const nextIndex = (currentIndex + 1) % tabs.length
-      dispatch(setActiveTab(tabs[nextIndex].id))
-    }
-
-    function switchToPrevTab() {
-      if (tabs.length <= 1) return
-      const currentIndex = tabs.findIndex((t) => t.id === activeTabId)
-      const prevIndex = (currentIndex - 1 + tabs.length) % tabs.length
-      dispatch(setActiveTab(tabs[prevIndex].id))
-    }
-
     function switchToTabNumber(num: number) {
       if (num < 1 || num > tabs.length) return
       dispatch(setActiveTab(tabs[num - 1].id))
@@ -304,16 +278,31 @@ export default function App() {
     function onKeyDown(e: KeyboardEvent) {
       if (isTextInput(e.target)) return
 
+      // Tab switching: Ctrl+Shift+[ (prev) and Ctrl+Shift+] (next)
+      // Also handled in TerminalView.tsx for when terminal is focused
+      if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey) {
+        if (e.code === 'BracketLeft') {
+          e.preventDefault()
+          dispatch(switchToPrevTab())
+          return
+        }
+        if (e.code === 'BracketRight') {
+          e.preventDefault()
+          dispatch(switchToNextTab())
+          return
+        }
+      }
+
       // Ctrl+PageDown / Ctrl+PageUp for tab switching (VS Code / Chrome style)
       if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
         if (e.key === 'PageDown') {
           e.preventDefault()
-          switchToNextTab()
+          dispatch(switchToNextTab())
           return
         }
         if (e.key === 'PageUp') {
           e.preventDefault()
-          switchToPrevTab()
+          dispatch(switchToPrevTab())
           return
         }
       }
@@ -322,12 +311,12 @@ export default function App() {
       if (e.metaKey && e.altKey && !e.ctrlKey && !e.shiftKey) {
         if (e.key === 'ArrowRight') {
           e.preventDefault()
-          switchToNextTab()
+          dispatch(switchToNextTab())
           return
         }
         if (e.key === 'ArrowLeft') {
           e.preventDefault()
-          switchToPrevTab()
+          dispatch(switchToPrevTab())
           return
         }
       }
@@ -366,10 +355,10 @@ export default function App() {
         toggleSidebarCollapse()
       } else if (key === 'n') {
         e.preventDefault()
-        switchToNextTab()
+        dispatch(switchToNextTab())
       } else if (key === 'p') {
         e.preventDefault()
-        switchToPrevTab()
+        dispatch(switchToPrevTab())
       } else if (key >= '1' && key <= '9') {
         e.preventDefault()
         switchToTabNumber(parseInt(key, 10))

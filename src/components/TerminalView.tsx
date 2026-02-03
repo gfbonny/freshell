@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
+import { switchToNextTab, switchToPrevTab } from '@/store/tabsSlice'
 import { updatePaneContent, updatePaneTitle } from '@/store/panesSlice'
 import { updateSessionActivity } from '@/store/sessionActivitySlice'
 import { getWsClient } from '@/lib/ws-client'
@@ -167,6 +168,21 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       }
       // Paste is handled by xterm.js's internal paste handler, which fires onData.
       // We intentionally do NOT handle Ctrl+Shift+V here to avoid double-paste.
+
+      // Tab switching: Ctrl+Shift+[ (prev) and Ctrl+Shift+] (next)
+      if (event.ctrlKey && event.shiftKey && !event.altKey && !event.metaKey && event.type === 'keydown' && !event.repeat) {
+        if (event.code === 'BracketLeft') {
+          event.preventDefault()
+          dispatch(switchToPrevTab())
+          return false
+        }
+        if (event.code === 'BracketRight') {
+          event.preventDefault()
+          dispatch(switchToNextTab())
+          return false
+        }
+      }
+
       return true
     })
 

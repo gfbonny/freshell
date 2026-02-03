@@ -116,6 +116,18 @@ export const tabsSlice = createSlice({
       const [removed] = state.tabs.splice(fromIndex, 1)
       state.tabs.splice(toIndex, 0, removed)
     },
+    switchToNextTab: (state) => {
+      if (state.tabs.length <= 1) return
+      const currentIndex = state.tabs.findIndex((t) => t.id === state.activeTabId)
+      const nextIndex = (currentIndex + 1) % state.tabs.length
+      state.activeTabId = state.tabs[nextIndex].id
+    },
+    switchToPrevTab: (state) => {
+      if (state.tabs.length <= 1) return
+      const currentIndex = state.tabs.findIndex((t) => t.id === state.activeTabId)
+      const prevIndex = (currentIndex - 1 + state.tabs.length) % state.tabs.length
+      state.activeTabId = state.tabs[prevIndex].id
+    },
   },
 })
 
@@ -128,6 +140,8 @@ export const {
   removeTab,
   hydrateTabs,
   reorderTabs,
+  switchToNextTab,
+  switchToPrevTab,
 } = tabsSlice.actions
 
 export const closeTab = createAsyncThunk(
