@@ -6,6 +6,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { setActiveTab } from '@/store/tabsSlice'
 import { createTabWithPane } from '@/store/tabThunks'
+import { setActivePane } from '@/store/panesSlice'
 import { getWsClient } from '@/lib/ws-client'
 import { searchSessions, type SearchResult } from '@/lib/api'
 import { getProviderLabel } from '@/lib/coding-cli-utils'
@@ -201,6 +202,7 @@ export default function Sidebar({
       const existing = findPaneByTerminalId(panes, item.runningTerminalId)
       if (existing) {
         dispatch(setActiveTab(existing.tabId))
+        dispatch(setActivePane({ tabId: existing.tabId, paneId: existing.paneId }))
       } else {
         // Create new tab to attach to the running terminal
         dispatch(createTabWithPane({
@@ -218,26 +220,32 @@ export default function Sidebar({
     } else {
       // Session not running - check if tab with this session already exists
       let existingTabId: string | null = null
+      let existingPaneId: string | null = null
       for (const [tabId, layout] of Object.entries(panes)) {
         // Check terminal panes
         const terminalPanes = collectTerminalPanes(layout)
-        if (terminalPanes.some((pane) =>
+        const matchingTerminalPane = terminalPanes.find((pane) =>
           pane.content.resumeSessionId === item.sessionId && pane.content.mode === provider
-        )) {
+        )
+        if (matchingTerminalPane) {
           existingTabId = tabId
+          existingPaneId = matchingTerminalPane.paneId
           break
         }
         // Check session panes
         const sessionPanes = collectSessionPanes(layout)
-        if (sessionPanes.some((pane) =>
+        const matchingSessionPane = sessionPanes.find((pane) =>
           pane.content.sessionId === item.sessionId && pane.content.provider === provider
-        )) {
+        )
+        if (matchingSessionPane) {
           existingTabId = tabId
+          existingPaneId = matchingSessionPane.paneId
           break
         }
       }
-      if (existingTabId) {
+      if (existingTabId && existingPaneId) {
         dispatch(setActiveTab(existingTabId))
+        dispatch(setActivePane({ tabId: existingTabId, paneId: existingPaneId }))
       } else {
         // Create new tab to resume the session
         dispatch(createTabWithPane({

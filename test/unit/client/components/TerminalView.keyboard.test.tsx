@@ -276,6 +276,35 @@ describe('TerminalView keyboard handling', () => {
       expect(result).toBe(true)
       expect(clipboardMocks.readText).not.toHaveBeenCalled()
     })
+
+    it('returns false when clipboard is not available (non-secure context)', async () => {
+      // Mock clipboard as unavailable (e.g., non-secure HTTP origin)
+      clipboardMocks.isClipboardReadAvailable.mockReturnValue(false)
+
+      const { store, tabId, paneId, paneContent } = createTestStore('term-1')
+
+      render(
+        <Provider store={store}>
+          <TerminalView tabId={tabId} paneId={paneId} paneContent={paneContent} />
+        </Provider>
+      )
+
+      await waitFor(() => {
+        expect(capturedKeyHandler).not.toBeNull()
+      })
+
+      const event = createKeyboardEvent('v', { ctrlKey: true })
+      const result = capturedKeyHandler!(event)
+
+      // Should return false to prevent xterm from processing Ctrl+V
+      // This allows the browser's native paste event to fire
+      expect(result).toBe(false)
+      // Should not call clipboard API since it's not available
+      expect(clipboardMocks.readText).not.toHaveBeenCalled()
+
+      // Restore mock for other tests
+      clipboardMocks.isClipboardReadAvailable.mockReturnValue(true)
+    })
   })
 
   describe('Ctrl+Shift+C copy', () => {

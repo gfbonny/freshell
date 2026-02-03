@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { reorderTabs, updateTab, setActiveTab, requestTabRename } from '@/store/tabsSlice'
 import { createTabWithPane, closeTabWithCleanup } from '@/store/tabThunks'
-import { closePane, resetLayout, resetSplit, swapSplit, updatePaneTitle } from '@/store/panesSlice'
+import { closePane, resetLayout, resetSplit, swapSplit, updatePaneTitle, setActivePane } from '@/store/panesSlice'
 import { setProjects, setProjectExpanded } from '@/store/sessionsSlice'
 import { cancelCodingCliRequest } from '@/store/codingCliSlice'
 import { getWsClient } from '@/lib/ws-client'
@@ -556,6 +556,7 @@ export function ContextMenuProvider({
     const existing = findPaneByTerminalId(panes, terminalId)
     if (existing) {
       dispatch(setActiveTab(existing.tabId))
+      dispatch(setActivePane({ tabId: existing.tabId, paneId: existing.paneId }))
       return
     }
     void (async () => {

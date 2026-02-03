@@ -210,8 +210,10 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           })
           return false
         }
-        // Non-secure context: let browser handle paste natively
-        return true
+        // Non-secure context: return false to prevent xterm from processing
+        // Ctrl+V (which sends ^V and cancels the event). This allows the
+        // browser's native paste event to fire.
+        return false
       }
 
       // Tab switching: Ctrl+Shift+[ (prev) and Ctrl+Shift+] (next)
