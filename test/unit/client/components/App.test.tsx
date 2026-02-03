@@ -8,12 +8,9 @@ import tabsReducer from '@/store/tabsSlice'
 import connectionReducer from '@/store/connectionSlice'
 import sessionsReducer from '@/store/sessionsSlice'
 import panesReducer from '@/store/panesSlice'
-import idleWarningsReducer from '@/store/idleWarningsSlice'
-
-// Ensure DOM is clean even if another test file forgot cleanup.
-beforeEach(() => {
-  cleanup()
-})
+import terminalActivityReducer from '@/store/terminalActivitySlice'
+import codingCliReducer from '@/store/codingCliSlice'
+import sessionActivityReducer from '@/store/sessionActivitySlice'
 
 // Mock the WebSocket client
 const mockSend = vi.fn()
@@ -80,7 +77,9 @@ function createTestStore() {
       connection: connectionReducer,
       sessions: sessionsReducer,
       panes: panesReducer,
-      idleWarnings: idleWarningsReducer,
+      terminalActivity: terminalActivityReducer,
+      codingCli: codingCliReducer,
+      sessionActivity: sessionActivityReducer,
     },
     middleware: (getDefault) =>
       getDefault({
@@ -95,7 +94,7 @@ function createTestStore() {
         lastSavedAt: undefined,
       },
       tabs: {
-        tabs: [{ id: 'tab-1', mode: 'shell' }],
+        tabs: [{ id: 'tab-1', title: 'Tab 1', createdAt: Date.now() }],
         activeTabId: 'tab-1',
       },
       sessions: {
@@ -111,9 +110,21 @@ function createTestStore() {
       panes: {
         layouts: {},
         activePane: {},
+        paneTitles: {},
+        paneTitleSetByUser: {},
       },
-      idleWarnings: {
-        warnings: {},
+      terminalActivity: {
+        lastOutputAt: {},
+        lastInputAt: {},
+        working: {},
+        finished: {},
+      },
+      codingCli: {
+        sessions: {},
+        pendingRequests: {},
+      },
+      sessionActivity: {
+        sessions: {},
       },
     },
   })
@@ -137,9 +148,6 @@ describe('App Component - Share Button', () => {
     localStorage.setItem('freshell.auth-token', 'test-token-abc123')
     // Mock API responses
     mockApiGet.mockImplementation((url: string) => {
-      if (url === '/api/settings') return Promise.resolve(defaultSettings)
-      if (url === '/api/platform') return Promise.resolve({ platform: 'linux' })
-      if (url === '/api/sessions') return Promise.resolve([])
       if (url === '/api/lan-info') {
         return Promise.resolve({ ips: ['192.168.1.100'] })
       }
@@ -492,9 +500,6 @@ describe('App Component - Share Button', () => {
 
     // Mock specific LAN IP
     mockApiGet.mockImplementation((url: string) => {
-      if (url === '/api/settings') return Promise.resolve(defaultSettings)
-      if (url === '/api/platform') return Promise.resolve({ platform: 'linux' })
-      if (url === '/api/sessions') return Promise.resolve([])
       if (url === '/api/lan-info') {
         return Promise.resolve({ ips: ['10.0.0.50'] })
       }
@@ -526,9 +531,6 @@ describe('App Component - Share Button', () => {
 
     // Mock API failure
     mockApiGet.mockImplementation((url: string) => {
-      if (url === '/api/settings') return Promise.resolve(defaultSettings)
-      if (url === '/api/platform') return Promise.resolve({ platform: 'linux' })
-      if (url === '/api/sessions') return Promise.resolve([])
       if (url === '/api/lan-info') {
         return Promise.reject(new Error('Network error'))
       }
@@ -545,294 +547,6 @@ describe('App Component - Share Button', () => {
       // Should still have called share (with localhost fallback)
       const callArgs = mockShare.mock.calls[0][0]
       expect(callArgs.text).toContain('token=test-token-abc123')
-    })
-  })
-})
-
-describe('App Component - Idle Warnings', () => {
-  let messageHandler: ((msg: any) => void) | null = null
-
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockOnMessage.mockImplementation((cb: (msg: any) => void) => {
-      messageHandler = cb
-      return () => { messageHandler = null }
-    })
-    mockApiGet.mockImplementation((url: string) => {
-      if (url === '/api/settings') return Promise.resolve(defaultSettings)
-      if (url === '/api/platform') return Promise.resolve({ platform: 'linux' })
-      if (url === '/api/sessions') return Promise.resolve([])
-      return Promise.resolve({})
-    })
-  })
-
-  afterEach(() => {
-    cleanup()
-    messageHandler = null
-  })
-
-  it('shows an indicator when the server warns an idle terminal will auto-kill soon', async () => {
-    renderApp()
-
-    await waitFor(() => {
-      expect(messageHandler).not.toBeNull()
-    })
-
-    messageHandler!({
-      type: 'terminal.idle.warning',
-      terminalId: 'term-idle',
-      killMinutes: 10,
-      warnMinutes: 3,
-      lastActivityAt: Date.now(),
-    })
-
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /auto-kill soon/i })).toBeInTheDocument()
-    })
-  })
-})
-
-describe('App Component - Mobile Sidebar', () => {
-  const originalInnerWidth = window.innerWidth
-
-  beforeEach(() => {
-    vi.clearAllMocks()
-    localStorage.clear()
-    mockApiGet.mockImplementation((url: string) => {
-      if (url === '/api/settings') return Promise.resolve(defaultSettings)
-      if (url === '/api/platform') return Promise.resolve({ platform: 'linux' })
-      if (url === '/api/sessions') return Promise.resolve([])
-      return Promise.resolve({})
-    })
-  })
-
-  afterEach(() => {
-    Object.defineProperty(window, 'innerWidth', {
-      value: originalInnerWidth,
-      writable: true,
-    })
-  })
-
-  it('auto-collapses on mobile but does not re-collapse after user opens it', async () => {
-    Object.defineProperty(window, 'innerWidth', { value: 500, writable: true })
-
-    renderApp()
-
-    // After effects settle, it should be collapsed on mobile.
-    await waitFor(() => {
-      expect(screen.getByTitle('Show sidebar')).toBeInTheDocument()
-      expect(screen.queryByTestId('mock-sidebar')).not.toBeInTheDocument()
-    })
-
-    fireEvent.click(screen.getByTitle('Show sidebar'))
-
-    await waitFor(() => {
-      expect(screen.getByTitle('Hide sidebar')).toBeInTheDocument()
-      expect(screen.getByTestId('mock-sidebar')).toBeInTheDocument()
-    })
-
-    // Give effects a chance to run; sidebar should remain open.
-    await new Promise((r) => setTimeout(r, 0))
-    expect(screen.getByTestId('mock-sidebar')).toBeInTheDocument()
-  })
-})
-
-describe('App Bootstrap', () => {
-  const originalSessionStorage = global.sessionStorage
-
-  beforeEach(() => {
-    vi.clearAllMocks()
-    localStorage.clear()
-    const sessionStorageMock: Record<string, string> = {
-      'auth-token': 'test-token-abc123',
-    }
-    Object.defineProperty(global, 'sessionStorage', {
-      value: {
-        getItem: vi.fn((key: string) => sessionStorageMock[key] || null),
-        setItem: vi.fn((key: string, value: string) => {
-          sessionStorageMock[key] = value
-        }),
-        removeItem: vi.fn((key: string) => {
-          delete sessionStorageMock[key]
-        }),
-        clear: vi.fn(),
-      },
-      writable: true,
-    })
-    mockApiGet.mockImplementation((url: string) => {
-      if (url === '/api/settings') return Promise.resolve(defaultSettings)
-      if (url === '/api/platform') return Promise.resolve({ platform: 'linux' })
-      if (url === '/api/sessions') return Promise.resolve([])
-      return Promise.resolve({})
-    })
-  })
-
-  afterEach(() => {
-    cleanup()
-    Object.defineProperty(global, 'sessionStorage', {
-      value: originalSessionStorage,
-      writable: true,
-    })
-  })
-
-  it('does not refetch settings or sessions after websocket connect', async () => {
-    let resolveConnect: () => void
-    const connectPromise = new Promise<void>((resolve) => {
-      resolveConnect = resolve
-    })
-    mockConnect.mockReturnValueOnce(connectPromise)
-
-    renderApp()
-
-    await waitFor(() => {
-      expect(mockConnect).toHaveBeenCalled()
-    })
-
-    await waitFor(() => {
-      const sessionsCalls = mockApiGet.mock.calls.filter(([url]) => url === '/api/sessions')
-      const settingsCalls = mockApiGet.mock.calls.filter(([url]) => url === '/api/settings')
-      expect(sessionsCalls.length).toBe(1)
-      expect(settingsCalls.length).toBe(1)
-    })
-
-    resolveConnect!()
-    await Promise.resolve()
-    await Promise.resolve()
-
-    const sessionsCalls = mockApiGet.mock.calls.filter(([url]) => url === '/api/sessions')
-    const settingsCalls = mockApiGet.mock.calls.filter(([url]) => url === '/api/settings')
-    expect(sessionsCalls.length).toBe(1)
-    expect(settingsCalls.length).toBe(1)
-  })
-})
-
-describe('Tab Switching Keyboard Shortcuts', () => {
-  const originalSessionStorage = global.sessionStorage
-
-  function createStoreWithTabs(tabCount: number, activeIndex: number = 0) {
-    const tabs = Array.from({ length: tabCount }, (_, i) => ({
-      id: `tab-${i + 1}`,
-      createRequestId: `req-${i + 1}`,
-      title: `Tab ${i + 1}`,
-      mode: 'shell' as const,
-      shell: 'system' as const,
-      status: 'running' as const,
-      createdAt: Date.now(),
-    }))
-    return configureStore({
-      reducer: {
-        settings: settingsReducer,
-        tabs: tabsReducer,
-        connection: connectionReducer,
-        sessions: sessionsReducer,
-        panes: panesReducer,
-      },
-      middleware: (getDefault) =>
-        getDefault({
-          serializableCheck: {
-            ignoredPaths: ['sessions.expandedProjects'],
-          },
-        }),
-      preloadedState: {
-        settings: {
-          settings: defaultSettings,
-          loaded: true,
-          lastSavedAt: undefined,
-        },
-        tabs: {
-          tabs,
-          activeTabId: tabs[activeIndex]?.id || null,
-        },
-        sessions: {
-          projects: [],
-          expandedProjects: new Set<string>(),
-          isLoading: false,
-          error: null,
-        },
-        connection: {
-          status: 'ready' as const,
-          lastError: undefined,
-        },
-        panes: {
-          layouts: {},
-          activePane: {},
-        },
-      },
-    })
-  }
-
-  beforeEach(() => {
-    vi.clearAllMocks()
-    localStorage.clear()
-    const sessionStorageMock: Record<string, string> = {
-      'auth-token': 'test-token',
-    }
-    Object.defineProperty(global, 'sessionStorage', {
-      value: {
-        getItem: vi.fn((key: string) => sessionStorageMock[key] || null),
-        setItem: vi.fn(),
-        removeItem: vi.fn(),
-        clear: vi.fn(),
-      },
-      writable: true,
-    })
-    mockApiGet.mockResolvedValue({})
-  })
-
-  afterEach(() => {
-    cleanup()
-    Object.defineProperty(global, 'sessionStorage', {
-      value: originalSessionStorage,
-      writable: true,
-    })
-  })
-
-  describe('Ctrl+Shift+[ and Ctrl+Shift+] (bracket shortcuts)', () => {
-    it('Ctrl+Shift+] switches to next tab', async () => {
-      const store = createStoreWithTabs(3, 0)
-      renderApp(store)
-
-      fireEvent.keyDown(window, { code: 'BracketRight', ctrlKey: true, shiftKey: true })
-
-      expect(store.getState().tabs.activeTabId).toBe('tab-2')
-    })
-
-    it('Ctrl+Shift+[ switches to previous tab', async () => {
-      const store = createStoreWithTabs(3, 1)
-      renderApp(store)
-
-      fireEvent.keyDown(window, { code: 'BracketLeft', ctrlKey: true, shiftKey: true })
-
-      expect(store.getState().tabs.activeTabId).toBe('tab-1')
-    })
-
-    it('Ctrl+Shift+] wraps to first tab when on last tab', async () => {
-      const store = createStoreWithTabs(3, 2)
-      renderApp(store)
-
-      fireEvent.keyDown(window, { code: 'BracketRight', ctrlKey: true, shiftKey: true })
-
-      expect(store.getState().tabs.activeTabId).toBe('tab-1')
-    })
-
-    it('Ctrl+Shift+[ wraps to last tab when on first tab', async () => {
-      const store = createStoreWithTabs(3, 0)
-      renderApp(store)
-
-      fireEvent.keyDown(window, { code: 'BracketLeft', ctrlKey: true, shiftKey: true })
-
-      expect(store.getState().tabs.activeTabId).toBe('tab-3')
-    })
-
-    it('does nothing with single tab', async () => {
-      const store = createStoreWithTabs(1, 0)
-      renderApp(store)
-
-      fireEvent.keyDown(window, { code: 'BracketRight', ctrlKey: true, shiftKey: true })
-      expect(store.getState().tabs.activeTabId).toBe('tab-1')
-
-      fireEvent.keyDown(window, { code: 'BracketLeft', ctrlKey: true, shiftKey: true })
-      expect(store.getState().tabs.activeTabId).toBe('tab-1')
     })
   })
 })

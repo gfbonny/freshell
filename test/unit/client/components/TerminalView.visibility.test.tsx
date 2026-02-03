@@ -68,10 +68,8 @@ function createStore() {
       tabs: {
         tabs: [{
           id: 'tab-1',
-          mode: 'shell' as const,
-          status: 'running' as const,
           title: 'Test',
-          createRequestId: 'req-1',
+          createdAt: Date.now(),
         }],
         activeTabId: 'tab-1',
       },
@@ -79,6 +77,7 @@ function createStore() {
         layouts: {},
         activePane: {},
         paneTitles: {},
+        paneTitleSetByUser: {},
       },
       settings: { settings: defaultSettings, status: 'loaded' as const },
       connection: { status: 'connected' as const, error: null },

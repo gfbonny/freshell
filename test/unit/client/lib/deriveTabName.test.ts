@@ -32,4 +32,21 @@ describe('deriveTabName', () => {
 
     expect(deriveTabName(layout)).toBe('Gemini')
   })
+
+  it('returns file name for editor pane', () => {
+    const layout: PaneNode = {
+      type: 'leaf',
+      id: 'pane-1',
+      content: {
+        kind: 'editor',
+        filePath: '/Users/test/project/index.ts',
+        language: 'typescript',
+        readOnly: false,
+        content: '',
+        viewMode: 'source',
+      },
+    }
+
+    expect(deriveTabName(layout)).toBe('index.ts')
+  })
 })

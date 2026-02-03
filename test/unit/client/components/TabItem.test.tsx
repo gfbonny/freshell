@@ -16,11 +16,7 @@ vi.mock('lucide-react', () => ({
 function createTab(overrides: Partial<Tab> = {}): Tab {
   return {
     id: 'tab-1',
-    createRequestId: 'req-1',
     title: 'Test Tab',
-    status: 'running',
-    mode: 'shell',
-    shell: 'system',
     createdAt: Date.now(),
     ...overrides,
   }
@@ -33,6 +29,7 @@ describe('TabItem', () => {
 
   const defaultProps = {
     tab: createTab(),
+    status: 'running' as const,
     isActive: false,
     isDragging: false,
     isRenaming: false,

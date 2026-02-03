@@ -1,18 +1,19 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Terminal, History, Settings, LayoutGrid, Search, Loader2, X, Archive } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Terminal, History, Settings, LayoutGrid, Search, Play, Loader2, X, Archive } from 'lucide-react'
 import { List, type RowComponentProps } from 'react-window'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { openSessionTab } from '@/store/tabsSlice'
+import { setActiveTab } from '@/store/tabsSlice'
+import { createTabWithPane } from '@/store/tabThunks'
 import { getWsClient } from '@/lib/ws-client'
 import { searchSessions, type SearchResult } from '@/lib/api'
 import { getProviderLabel } from '@/lib/coding-cli-utils'
 import type { BackgroundTerminal, CodingCliProviderName } from '@/store/types'
+import type { PaneNode } from '@/store/paneTypes'
 import { makeSelectSortedSessionItems, type SidebarSessionItem } from '@/store/selectors/sidebarSelectors'
+import { collectTerminalPanes, findPaneByTerminalId } from '@/lib/pane-utils'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
-import { ProviderIcon } from '@/components/icons/provider-icons'
-import { getActiveSessionRefForTab } from '@/lib/session-utils'
 
 export type AppView = 'terminal' | 'sessions' | 'overview' | 'settings'
 
@@ -20,6 +21,7 @@ type SessionItem = SidebarSessionItem
 
 const SESSION_ITEM_HEIGHT = 56
 const SESSION_LIST_MAX_HEIGHT = 600
+const EMPTY_LAYOUTS: Record<string, PaneNode> = {}
 
 function formatRelativeTime(timestamp: number): string {
   const now = Date.now()
@@ -50,16 +52,9 @@ export default function Sidebar({
   width?: number
 }) {
   const dispatch = useAppDispatch()
-  const settings = useAppSelector((s) => s.settings.settings)
-  const tabs = useAppSelector((s) => s.tabs.tabs)
-  const activeTabId = useAppSelector((s) => s.tabs.activeTabId)
-  const activeSessionKeyFromPanes = useAppSelector((s) => {
-    const tabId = s.tabs.activeTabId
-    if (!tabId) return null
-    const ref = getActiveSessionRefForTab(s, tabId)
-    if (!ref) return null
-    return `${ref.provider}:${ref.sessionId}`
-  })
+  const settings = useAppSelector((s) => s.settings?.settings)
+  const activeTabId = useAppSelector((s) => s.tabs?.activeTabId ?? null)
+  const panes = useAppSelector((s) => s.panes?.layouts) ?? EMPTY_LAYOUTS
   const selectSortedItems = useMemo(() => makeSelectSortedSessionItems(), [])
 
   const ws = useMemo(() => getWsClient(), [])
@@ -73,11 +68,11 @@ export default function Sidebar({
   const [listHeight, setListHeight] = useState(0)
 
   // Fetch background terminals
-  const refresh = useCallback(() => {
+  const refresh = () => {
     const requestId = `list-${Date.now()}`
     requestIdRef.current = requestId
     ws.send({ type: 'terminal.list', requestId })
-  }, [ws])
+  }
 
   useEffect(() => {
     ws.connect().catch(() => {})
@@ -98,13 +93,12 @@ export default function Sidebar({
       unsub()
       window.clearInterval(interval)
     }
-  }, [ws, refresh])
+  }, [ws])
 
   // Backend search for non-title tiers
   useEffect(() => {
     if (!filter.trim() || searchTier === 'title') {
       setSearchResults(null)
-      setIsSearching(false)
       return
     }
 
@@ -134,7 +128,6 @@ export default function Sidebar({
     return () => {
       controller.abort()
       clearTimeout(timeoutId)
-      setIsSearching(false)
     }
   }, [filter, searchTier])
 
@@ -169,6 +162,7 @@ export default function Sidebar({
           archived: result.archived,
           cwd: result.cwd,
           hasTab: existing?.hasTab ?? false,
+          tabLastInputAt: existing?.tabLastInputAt,
           ratchetedActivity: existing?.ratchetedActivity,
           isRunning: existing?.isRunning ?? false,
           runningTerminalId: existing?.runningTerminalId,
@@ -199,17 +193,57 @@ export default function Sidebar({
     return () => ro.disconnect()
   }, [])
 
-  const handleItemClick = useCallback((item: SessionItem) => {
+  const handleItemClick = (item: SessionItem) => {
     const provider = item.provider as CodingCliProviderName
-    dispatch(openSessionTab({
-      sessionId: item.sessionId,
-      title: item.title,
-      cwd: item.cwd,
-      provider,
-      terminalId: item.isRunning ? item.runningTerminalId : undefined,
-    }))
+    if (item.isRunning && item.runningTerminalId) {
+      // Session is running - check if tab with this terminal already exists
+      const existing = findPaneByTerminalId(panes, item.runningTerminalId)
+      if (existing) {
+        dispatch(setActiveTab(existing.tabId))
+      } else {
+        // Create new tab to attach to the running terminal
+        dispatch(createTabWithPane({
+          title: item.title,
+          content: {
+            kind: 'terminal',
+            mode: provider,
+            terminalId: item.runningTerminalId,
+            resumeSessionId: item.sessionId,
+            status: 'running',
+            initialCwd: item.cwd,
+          },
+        }))
+      }
+    } else {
+      // Session not running - check if tab with this session already exists
+      let existingTabId: string | null = null
+      for (const [tabId, layout] of Object.entries(panes)) {
+        const terminalPanes = collectTerminalPanes(layout)
+        if (terminalPanes.some((pane) =>
+          pane.content.resumeSessionId === item.sessionId && pane.content.mode === provider
+        )) {
+          existingTabId = tabId
+          break
+        }
+      }
+      if (existingTabId) {
+        dispatch(setActiveTab(existingTabId))
+      } else {
+        // Create new tab to resume the session
+        dispatch(createTabWithPane({
+          title: item.title,
+          content: {
+            kind: 'terminal',
+            mode: provider,
+            resumeSessionId: item.sessionId,
+            status: 'creating',
+            initialCwd: item.cwd,
+          },
+        }))
+      }
+    }
     onNavigate('terminal')
-  }, [dispatch, onNavigate])
+  }
 
   const nav = [
     { id: 'terminal' as const, label: 'Terminal', icon: Terminal, shortcut: 'T' },
@@ -218,26 +252,37 @@ export default function Sidebar({
     { id: 'settings' as const, label: 'Settings', icon: Settings, shortcut: ',' },
   ]
 
-  const activeTab = tabs.find((t) => t.id === activeTabId)
-  const activeSessionKey = activeSessionKeyFromPanes
-  const activeTerminalId = activeTab?.terminalId
+  const activeLayout = activeTabId ? panes[activeTabId] : undefined
+  const activeTerminalIds = new Set(
+    activeLayout ? collectTerminalPanes(activeLayout).map((pane) => pane.content.terminalId).filter(Boolean) as string[] : []
+  )
+  const activeSessionKeys = new Set(
+    activeLayout
+      ? collectTerminalPanes(activeLayout)
+          .map((pane) => {
+            if (!pane.content.resumeSessionId) return null
+            return `${pane.content.mode}:${pane.content.resumeSessionId}`
+          })
+          .filter(Boolean) as string[]
+      : []
+  )
   const effectiveListHeight = listHeight > 0
     ? listHeight
     : Math.min(sortedItems.length * SESSION_ITEM_HEIGHT, SESSION_LIST_MAX_HEIGHT)
 
   const rowProps = useMemo(() => ({
     items: sortedItems,
-    activeSessionKey,
-    activeTerminalId,
-    showProjectBadge: settings.sidebar?.showProjectBadges,
+    activeSessionKeys,
+    activeTerminalIds,
+    showProjectBadge: settings?.sidebar?.showProjectBadges,
     onItemClick: handleItemClick,
-  }), [sortedItems, activeSessionKey, activeTerminalId, settings.sidebar?.showProjectBadges, handleItemClick])
+  }), [sortedItems, activeSessionKeys, activeTerminalIds, settings?.sidebar?.showProjectBadges, handleItemClick])
 
   const Row = ({ index, style, ariaAttributes, ...data }: RowComponentProps<typeof rowProps>) => {
     const item = data.items[index]
     const isActive = item.isRunning
-      ? item.runningTerminalId === data.activeTerminalId
-      : `${item.provider}:${item.sessionId}` === data.activeSessionKey
+      ? (item.runningTerminalId ? data.activeTerminalIds.has(item.runningTerminalId) : false)
+      : data.activeSessionKeys.has(`${item.provider}:${item.sessionId}`)
     return (
       <div style={{ ...style, paddingBottom: 2 }} {...ariaAttributes}>
         <SidebarItem
@@ -367,38 +412,40 @@ function SidebarItem({
   onClick: () => void
 }) {
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          onClick={onClick}
-          className={cn(
-            'w-full flex items-center gap-2 px-2 py-2 rounded-md text-left transition-colors group',
-            isActiveTab
-              ? 'bg-muted'
-              : 'hover:bg-muted/50'
-          )}
-          data-context={ContextIds.SidebarSession}
-          data-session-id={item.sessionId}
-          data-provider={item.provider}
-          data-running-terminal-id={item.runningTerminalId}
-          data-has-tab={item.hasTab ? 'true' : 'false'}
-        >
-          {/* Provider icon */}
-          <div className="flex-shrink-0">
-            <div className={cn('relative', item.hasTab && 'animate-pulse-subtle')}>
-              <ProviderIcon
-                provider={item.provider}
-                className={cn(
-                  'h-3.5 w-3.5',
-                  item.hasTab ? 'text-success' : 'text-muted-foreground'
-                )}
-              />
-            </div>
+    <button
+      onClick={onClick}
+      className={cn(
+        'w-full flex items-center gap-2 px-2 py-2 rounded-md text-left transition-colors group',
+        isActiveTab
+          ? 'bg-muted'
+          : 'hover:bg-muted/50'
+      )}
+      data-context={ContextIds.SidebarSession}
+      data-session-id={item.sessionId}
+      data-provider={item.provider}
+      data-running-terminal-id={item.runningTerminalId}
+      data-has-tab={item.hasTab ? 'true' : 'false'}
+    >
+      {/* Status indicator */}
+      <div className="flex-shrink-0">
+        {item.hasTab ? (
+          <div className="relative">
+            <Play className="h-2.5 w-2.5 fill-success text-success" />
+            <div className="absolute inset-0 h-2.5 w-2.5 rounded-full bg-success/30 animate-pulse-subtle" />
           </div>
+        ) : (
+          <div
+            className="h-2 w-2 rounded-sm"
+            style={{ backgroundColor: item.projectColor || '#6b7280' }}
+          />
+        )}
+      </div>
 
-          {/* Content */}
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
+      {/* Content */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
               <span
                 className={cn(
                   'text-sm truncate',
@@ -407,27 +454,32 @@ function SidebarItem({
               >
                 {item.title}
               </span>
-              {item.archived && (
-                <Archive className="h-3 w-3 text-muted-foreground/70" aria-label="Archived session" />
-              )}
-            </div>
-            {item.subtitle && showProjectBadge && (
+            </TooltipTrigger>
+            <TooltipContent>{item.title}</TooltipContent>
+          </Tooltip>
+          <span className="text-2xs text-muted-foreground bg-muted/60 px-1.5 py-0.5 rounded">
+            {getProviderLabel(item.provider)}
+          </span>
+          {item.archived && (
+            <Archive className="h-3 w-3 text-muted-foreground/70" aria-label="Archived session" />
+          )}
+        </div>
+        {item.subtitle && showProjectBadge && (
+          <Tooltip>
+            <TooltipTrigger asChild>
               <div className="text-2xs text-muted-foreground truncate">
                 {item.subtitle}
               </div>
-            )}
-          </div>
+            </TooltipTrigger>
+            <TooltipContent>{item.subtitle}</TooltipContent>
+          </Tooltip>
+        )}
+      </div>
 
-          {/* Timestamp */}
-          <span className="text-2xs text-muted-foreground/60 flex-shrink-0">
-            {formatRelativeTime(item.timestamp)}
-          </span>
-        </button>
-      </TooltipTrigger>
-      <TooltipContent>
-        <div>{getProviderLabel(item.provider)}: {item.title}</div>
-        <div className="text-muted-foreground">{item.subtitle || item.projectPath || getProviderLabel(item.provider)}</div>
-      </TooltipContent>
-    </Tooltip>
+      {/* Timestamp */}
+      <span className="text-2xs text-muted-foreground/60 flex-shrink-0">
+        {formatRelativeTime(item.timestamp)}
+      </span>
+    </button>
   )
 }

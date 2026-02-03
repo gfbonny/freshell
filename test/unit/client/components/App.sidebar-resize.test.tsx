@@ -8,7 +8,9 @@ import tabsReducer from '@/store/tabsSlice'
 import connectionReducer from '@/store/connectionSlice'
 import sessionsReducer from '@/store/sessionsSlice'
 import panesReducer from '@/store/panesSlice'
-import idleWarningsReducer from '@/store/idleWarningsSlice'
+import terminalActivityReducer from '@/store/terminalActivitySlice'
+import codingCliReducer from '@/store/codingCliSlice'
+import sessionActivityReducer from '@/store/sessionActivitySlice'
 
 // Mock the WebSocket client
 const mockSend = vi.fn()
@@ -79,7 +81,9 @@ function createTestStore(options?: {
       connection: connectionReducer,
       sessions: sessionsReducer,
       panes: panesReducer,
-      idleWarnings: idleWarningsReducer,
+      terminalActivity: terminalActivityReducer,
+      codingCli: codingCliReducer,
+      sessionActivity: sessionActivityReducer,
     },
     middleware: (getDefault) =>
       getDefault({
@@ -101,7 +105,7 @@ function createTestStore(options?: {
         lastSavedAt: undefined,
       },
       tabs: {
-        tabs: [{ id: 'tab-1', mode: 'shell' }],
+        tabs: [{ id: 'tab-1', title: 'Tab 1', createdAt: Date.now() }],
         activeTabId: 'tab-1',
       },
       sessions: {
@@ -117,9 +121,21 @@ function createTestStore(options?: {
       panes: {
         layouts: {},
         activePane: {},
+        paneTitles: {},
+        paneTitleSetByUser: {},
       },
-      idleWarnings: {
-        warnings: {},
+      terminalActivity: {
+        lastOutputAt: {},
+        lastInputAt: {},
+        working: {},
+        finished: {},
+      },
+      codingCli: {
+        sessions: {},
+        pendingRequests: {},
+      },
+      sessionActivity: {
+        sessions: {},
       },
     },
   })
@@ -136,16 +152,8 @@ function renderApp(store = createTestStore()) {
 describe('App Component - Sidebar Resize', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    localStorage.clear()
     // Mock window.innerWidth for desktop
     Object.defineProperty(window, 'innerWidth', { value: 1024, writable: true })
-
-    mockApiGet.mockImplementation((url: string) => {
-      if (url === '/api/settings') return Promise.resolve(defaultSettings)
-      if (url === '/api/platform') return Promise.resolve({ platform: 'linux' })
-      if (url === '/api/sessions') return Promise.resolve([])
-      return Promise.resolve({})
-    })
   })
 
   afterEach(() => {

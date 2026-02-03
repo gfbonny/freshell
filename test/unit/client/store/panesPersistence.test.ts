@@ -49,7 +49,7 @@ describe('Panes Persistence Integration', () => {
     })
 
     // 2. Add a tab
-    store1.dispatch(addTab({ mode: 'shell' }))
+    store1.dispatch(addTab())
     const tabId = store1.getState().tabs.tabs[0].id
 
     // 3. Initialize layout for the tab
@@ -117,7 +117,7 @@ describe('Panes Persistence Integration', () => {
       middleware: (getDefault) => getDefault().concat(persistMiddleware as any),
     })
 
-    store1.dispatch(addTab({ mode: 'shell' }))
+    store1.dispatch(addTab())
     const tabId = store1.getState().tabs.tabs[0].id
 
     store1.dispatch(initLayout({ tabId, content: { kind: 'terminal', mode: 'shell' } }))
@@ -173,7 +173,7 @@ describe('Panes Persistence Integration', () => {
       middleware: (getDefault) => getDefault().concat(persistMiddleware as any),
     })
 
-    store1.dispatch(addTab({ mode: 'shell' }))
+    store1.dispatch(addTab())
     const tabId = store1.getState().tabs.tabs[0].id
 
     store1.dispatch(initLayout({ tabId, content: { kind: 'terminal', mode: 'shell' } }))
@@ -208,7 +208,7 @@ describe('Panes Persistence Integration', () => {
       middleware: (getDefault) => getDefault().concat(persistMiddleware as any),
     })
 
-    store.dispatch(addTab({ mode: 'shell' }))
+    store.dispatch(addTab())
     const tabId = store.getState().tabs.tabs[0].id
 
     store.dispatch(initLayout({
@@ -242,7 +242,7 @@ describe('Panes Persistence Integration', () => {
       middleware: (getDefault) => getDefault().concat(persistMiddleware as any),
     })
 
-    store.dispatch(addTab({ mode: 'shell' }))
+    store.dispatch(addTab())
     const tabId = store.getState().tabs.tabs[0].id
     store.dispatch(initLayout({ tabId, content: { kind: 'terminal', mode: 'shell' } }))
 
@@ -282,7 +282,7 @@ describe('PaneContent migration', () => {
     expect(layout.content.createRequestId).toBeDefined()
     expect(layout.content.status).toBe('creating')
     expect(layout.content.shell).toBe('system')
-    expect(loaded.version).toBe(3) // Migrated version
+    expect(loaded.version).toBe(4) // Migrated version
   })
 
   it('migrates nested split panes recursively', () => {
@@ -386,7 +386,7 @@ describe('PaneContent migration', () => {
   })
 })
 
-describe('version 3 migration', () => {
+describe('version 4 migration', () => {
   beforeEach(() => {
     localStorageMock.clear()
   })
@@ -402,11 +402,12 @@ describe('version 3 migration', () => {
 
     const result = loadPersistedPanes()
 
-    expect(result.version).toBe(3)
+    expect(result.version).toBe(4)
     expect(result.paneTitles).toEqual({})
+    expect(result.paneTitleSetByUser).toEqual({})
   })
 
-  it('preserves existing paneTitles when loading version 3', () => {
+  it('resets paneTitles when loading version 3', () => {
     const v3State = {
       version: 3,
       layouts: {},
@@ -417,7 +418,9 @@ describe('version 3 migration', () => {
 
     const result = loadPersistedPanes()
 
-    expect(result.paneTitles).toEqual({ 'tab-1': { 'pane-1': 'My Title' } })
+    expect(result.version).toBe(4)
+    expect(result.paneTitles).toEqual({})
+    expect(result.paneTitleSetByUser).toEqual({})
   })
 })
 

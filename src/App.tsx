@@ -2,17 +2,16 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { setStatus, setError, setPlatform, setAvailableClis } from '@/store/connectionSlice'
 import { setSettings } from '@/store/settingsSlice'
-import { setProjects, clearProjects, mergeProjects } from '@/store/sessionsSlice'
-import { addTab, switchToNextTab, switchToPrevTab } from '@/store/tabsSlice'
+import { setProjects } from '@/store/sessionsSlice'
+import { closeTabWithCleanup, createTabWithPane } from '@/store/tabThunks'
 import { api } from '@/lib/api'
 import { getAuthToken } from '@/lib/auth'
 import { buildShareUrl } from '@/lib/utils'
 import { getWsClient } from '@/lib/ws-client'
 import { getSessionsForHello } from '@/lib/session-utils'
-import { setClientPerfEnabled } from '@/lib/perf-logger'
-import { applyLocalTerminalFontFamily } from '@/lib/terminal-fonts'
 import { store } from '@/store/store'
 import { useThemeEffect } from '@/hooks/useTheme'
+import { buildDefaultPaneContent } from '@/lib/default-pane'
 import Sidebar, { AppView } from '@/components/Sidebar'
 import TabBar from '@/components/TabBar'
 import TabContent from '@/components/TabContent'
@@ -25,12 +24,10 @@ import { ContextMenuProvider } from '@/components/context-menu/ContextMenuProvid
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
 import { Wifi, WifiOff, Moon, Sun, Share2, X, Copy, Check, PanelLeftClose, PanelLeft } from 'lucide-react'
 import { updateSettingsLocal, markSaved } from '@/store/settingsSlice'
-import { clearIdleWarning, recordIdleWarning } from '@/store/idleWarningsSlice'
 
 const SIDEBAR_MIN_WIDTH = 200
 const SIDEBAR_MAX_WIDTH = 500
 const MOBILE_BREAKPOINT = 768
-const EMPTY_IDLE_WARNINGS: Record<string, unknown> = {}
 
 export default function App() {
   useThemeEffect()
@@ -41,15 +38,12 @@ export default function App() {
   const connection = useAppSelector((s) => s.connection.status)
   const connectionError = useAppSelector((s) => s.connection.lastError)
   const settings = useAppSelector((s) => s.settings.settings)
-  const idleWarnings = useAppSelector((s) => (s as any).idleWarnings?.warnings ?? EMPTY_IDLE_WARNINGS)
-  const idleWarningCount = Object.keys(idleWarnings).length
 
   const [view, setView] = useState<AppView>('terminal')
   const [shareModalUrl, setShareModalUrl] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
   const mainContentRef = useRef<HTMLDivElement>(null)
-  const userOpenedSidebarOnMobileRef = useRef(false)
 
   // Sidebar width from settings (or local state during drag)
   const sidebarWidth = settings.sidebar?.width ?? 288
@@ -67,14 +61,10 @@ export default function App() {
 
   // Auto-collapse sidebar on mobile
   useEffect(() => {
-    if (!isMobile) {
-      userOpenedSidebarOnMobileRef.current = false
-      return
-    }
-    if (!sidebarCollapsed && !userOpenedSidebarOnMobileRef.current) {
+    if (isMobile && !sidebarCollapsed) {
       dispatch(updateSettingsLocal({ sidebar: { ...settings.sidebar, collapsed: true } }))
     }
-  }, [isMobile, sidebarCollapsed, settings.sidebar, dispatch])
+  }, [isMobile])
 
   const handleSidebarResize = useCallback((delta: number) => {
     const newWidth = Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, sidebarWidth + delta))
@@ -85,24 +75,17 @@ export default function App() {
     try {
       await api.patch('/api/settings', { sidebar: settings.sidebar })
       dispatch(markSaved())
-    } catch (err) {
-      console.warn('Failed to save sidebar settings', err)
-    }
+    } catch {}
   }, [settings.sidebar, dispatch])
 
   const toggleSidebarCollapse = useCallback(async () => {
     const newCollapsed = !sidebarCollapsed
-    if (isMobile && !newCollapsed) {
-      userOpenedSidebarOnMobileRef.current = true
-    }
     dispatch(updateSettingsLocal({ sidebar: { ...settings.sidebar, collapsed: newCollapsed } }))
     try {
       await api.patch('/api/settings', { sidebar: { ...settings.sidebar, collapsed: newCollapsed } })
       dispatch(markSaved())
-    } catch (err) {
-      console.warn('Failed to save sidebar settings', err)
-    }
-  }, [isMobile, sidebarCollapsed, settings.sidebar, dispatch])
+    } catch {}
+  }, [sidebarCollapsed, settings.sidebar, dispatch])
 
   const toggleTheme = async () => {
     const newTheme = settings.theme === 'dark' ? 'light' : settings.theme === 'light' ? 'system' : 'dark'
@@ -110,9 +93,7 @@ export default function App() {
     try {
       await api.patch('/api/settings', { theme: newTheme })
       dispatch(markSaved())
-    } catch (err) {
-      console.warn('Failed to save theme setting', err)
-    }
+    } catch {}
   }
 
   const handleShare = async () => {
@@ -180,12 +161,10 @@ export default function App() {
   // Bootstrap: load settings, sessions, and connect websocket.
   useEffect(() => {
     let cancelled = false
-    let cleanedUp = false
-    let cleanup: (() => void) | null = null
     async function bootstrap() {
       try {
         const settings = await api.get('/api/settings')
-        if (!cancelled) dispatch(setSettings(applyLocalTerminalFontFamily(settings)))
+        if (!cancelled) dispatch(setSettings(settings))
       } catch (err: any) {
         console.warn('Failed to load settings', err)
       }
@@ -216,66 +195,6 @@ export default function App() {
         sessions: getSessionsForHello(store.getState()),
       }))
 
-      const unsubscribe = ws.onMessage((msg) => {
-        if (!msg?.type) return
-        if (msg.type === 'ready') {
-          // If the initial connect attempt failed before ready, WsClient may still auto-reconnect.
-          // Treat 'ready' as the source of truth for connection status.
-          dispatch(setError(undefined))
-          dispatch(setStatus('ready'))
-        }
-        if (msg.type === 'sessions.updated') {
-          // Support chunked sessions for mobile browsers with limited WebSocket buffers
-          if (msg.clear) {
-            // First chunk: clear existing, then merge
-            dispatch(clearProjects())
-            dispatch(mergeProjects(msg.projects || []))
-          } else if (msg.append) {
-            // Subsequent chunks: merge with existing
-            dispatch(mergeProjects(msg.projects || []))
-          } else {
-            // Full update (broadcasts, legacy): replace all
-            dispatch(setProjects(msg.projects || []))
-          }
-        }
-        if (msg.type === 'settings.updated') {
-          dispatch(setSettings(applyLocalTerminalFontFamily(msg.settings)))
-        }
-        if (msg.type === 'terminal.exit') {
-          const terminalId = msg.terminalId
-          const code = msg.exitCode
-          if (import.meta.env.MODE === 'development') console.log('terminal exit', terminalId, code)
-          if (terminalId) dispatch(clearIdleWarning(terminalId))
-        }
-        if (msg.type === 'terminal.idle.warning') {
-          if (!msg.terminalId) return
-          dispatch(recordIdleWarning({
-            terminalId: msg.terminalId,
-            killMinutes: Number(msg.killMinutes) || 0,
-            warnMinutes: Number(msg.warnMinutes) || 0,
-            lastActivityAt: typeof msg.lastActivityAt === 'number' ? msg.lastActivityAt : undefined,
-          }))
-        }
-        if (msg.type === 'session.status') {
-          // Log session repair status (silent for healthy/repaired, visible for problems)
-          const { sessionId, status, orphansFixed } = msg
-          if (status === 'missing') {
-            if (import.meta.env.MODE === 'development') console.warn(`Session ${sessionId.slice(0, 8)}... file is missing`)
-          } else if (status === 'repaired') {
-            if (import.meta.env.MODE === 'development') console.log(`Session ${sessionId.slice(0, 8)}... repaired (${orphansFixed} orphans fixed)`)
-          }
-          // For 'healthy' status, no logging needed
-        }
-        if (msg.type === 'perf.logging') {
-          setClientPerfEnabled(!!msg.enabled, 'server')
-        }
-      })
-
-      cleanup = () => {
-        unsubscribe()
-      }
-      if (cleanedUp) cleanup()
-
       dispatch(setError(undefined))
       dispatch(setStatus('connecting'))
       try {
@@ -286,6 +205,48 @@ export default function App() {
           dispatch(setStatus('disconnected'))
           dispatch(setError(err?.message || 'WebSocket connection failed'))
         }
+        return
+      }
+
+      const unsubscribe = ws.onMessage((msg) => {
+        if (!msg?.type) return
+        if (msg.type === 'sessions.updated') {
+          dispatch(setProjects(msg.projects || []))
+        }
+        if (msg.type === 'settings.updated') {
+          dispatch(setSettings(msg.settings))
+        }
+        if (msg.type === 'terminal.exit') {
+          const terminalId = msg.terminalId
+          const code = msg.exitCode
+          console.log('terminal exit', terminalId, code)
+        }
+        if (msg.type === 'session.status') {
+          // Log session repair status (silent for healthy/repaired, visible for problems)
+          const { sessionId, status, orphansFixed } = msg
+          if (status === 'missing') {
+            console.warn(`Session ${sessionId.slice(0, 8)}... file is missing`)
+          } else if (status === 'repaired') {
+            console.log(`Session ${sessionId.slice(0, 8)}... repaired (${orphansFixed} orphans fixed)`)
+          }
+          // For 'healthy' status, no logging needed
+        }
+      })
+
+      const unsubReconnect = ws.onReconnect(async () => {
+        try {
+          const projects = await api.get('/api/sessions')
+          dispatch(setProjects(projects))
+        } catch {}
+        try {
+          const settings = await api.get('/api/settings')
+          dispatch(setSettings(settings))
+        } catch {}
+      })
+
+      return () => {
+        unsubscribe()
+        unsubReconnect()
       }
     }
 
@@ -293,14 +254,21 @@ export default function App() {
 
     return () => {
       cancelled = true
-      cleanedUp = true
-      cleanup?.()
       void cleanupPromise
     }
   }, [dispatch])
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts: Ctrl+B prefix, then a command.
+  const prefixActiveRef = useRef(false)
+  const prefixTimeoutRef = useRef<number | null>(null)
+
   useEffect(() => {
+    function clearPrefix() {
+      prefixActiveRef.current = false
+      if (prefixTimeoutRef.current) window.clearTimeout(prefixTimeoutRef.current)
+      prefixTimeoutRef.current = null
+    }
+
     function isTextInput(el: any): boolean {
       if (!el) return false
       const tag = (el.tagName || '').toLowerCase()
@@ -312,34 +280,54 @@ export default function App() {
     function onKeyDown(e: KeyboardEvent) {
       if (isTextInput(e.target)) return
 
-      // Tab switching: Ctrl+Shift+[ (prev) and Ctrl+Shift+] (next)
-      // Also handled in TerminalView.tsx for when terminal is focused
-      if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey) {
-        if (e.code === 'BracketLeft') {
-          e.preventDefault()
-          dispatch(switchToPrevTab())
-          return
-        }
-        if (e.code === 'BracketRight') {
-          e.preventDefault()
-          dispatch(switchToNextTab())
-          return
-        }
+      if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'b' || e.key === 'B')) {
+        e.preventDefault()
+        prefixActiveRef.current = true
+        if (prefixTimeoutRef.current) window.clearTimeout(prefixTimeoutRef.current)
+        prefixTimeoutRef.current = window.setTimeout(clearPrefix, 1500)
+        return
+      }
+
+      if (!prefixActiveRef.current) return
+
+      const key = e.key.toLowerCase()
+      clearPrefix()
+
+      if (key === 't') {
+        e.preventDefault()
+        dispatch(createTabWithPane({ content: buildDefaultPaneContent(settings) }))
+        setView('terminal')
+      } else if (key === 'w') {
+        e.preventDefault()
+        if (activeTabId) dispatch(closeTabWithCleanup({ tabId: activeTabId }))
+      } else if (key === 's') {
+        e.preventDefault()
+        setView('sessions')
+      } else if (key === 'o') {
+        e.preventDefault()
+        setView('overview')
+      } else if (key === ',') {
+        e.preventDefault()
+        setView('settings')
+      } else if (key === 'b') {
+        e.preventDefault()
+        toggleSidebarCollapse()
       }
     }
 
     window.addEventListener('keydown', onKeyDown)
     return () => {
       window.removeEventListener('keydown', onKeyDown)
+      if (prefixTimeoutRef.current) window.clearTimeout(prefixTimeoutRef.current)
     }
-  }, [dispatch])
+  }, [dispatch, activeTabId, settings])
 
   // Ensure at least one tab exists for first-time users.
   useEffect(() => {
     if (tabs.length === 0) {
-      dispatch(addTab({ mode: 'shell' }))
+      dispatch(createTabWithPane({ content: buildDefaultPaneContent(settings) }))
     }
-  }, [tabs.length, dispatch])
+  }, [tabs.length, settings, dispatch])
 
   const content = (() => {
     if (view === 'sessions') return <HistoryView onOpenSession={() => setView('terminal')} />
@@ -385,16 +373,6 @@ export default function App() {
           <span className="font-mono text-base font-semibold tracking-tight">🐚🔥freshell</span>
         </div>
         <div className="flex items-center gap-1">
-          {idleWarningCount > 0 && (
-            <button
-              onClick={() => setView('overview')}
-              className="px-2 py-1 rounded-md bg-amber-100 text-amber-950 hover:bg-amber-200 transition-colors text-xs font-medium"
-              aria-label={`${idleWarningCount} terminal(s) will auto-kill soon`}
-              title="View idle terminals"
-            >
-              {idleWarningCount} terminal{idleWarningCount === 1 ? '' : 's'} will auto-kill soon
-            </button>
-          )}
           <button
             onClick={toggleTheme}
             className="p-1.5 rounded-md hover:bg-muted transition-colors"
@@ -433,12 +411,7 @@ export default function App() {
         {isMobile && !sidebarCollapsed && (
           <div
             className="absolute inset-0 bg-black/50 z-10"
-            role="presentation"
             onClick={toggleSidebarCollapse}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') toggleSidebarCollapse()
-            }}
-            tabIndex={-1}
           />
         )}
         {/* Sidebar - on mobile it overlays, on desktop it's inline */}
@@ -467,19 +440,10 @@ export default function App() {
       {shareModalUrl && (
         <div
           className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]"
-          role="presentation"
           onClick={() => setShareModalUrl(null)}
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') setShareModalUrl(null)
-          }}
-          tabIndex={-1}
         >
-          {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions */}
           <div
             className="bg-background border border-border rounded-lg shadow-lg max-w-md w-full mx-4 p-6"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Share freshell invitation"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-4">

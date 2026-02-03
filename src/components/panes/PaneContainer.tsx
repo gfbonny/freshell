@@ -1,6 +1,8 @@
 import { useRef, useCallback, useMemo } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { closePane, setActivePane, resizePanes, updatePaneContent } from '@/store/panesSlice'
+import { closePane, setActivePane, resizePanes } from '@/store/panesSlice'
+import { swapPaneContent } from '@/store/paneThunks'
+import { cancelCodingCliRequest } from '@/store/codingCliSlice'
 import type { PaneNode, PaneContent } from '@/store/paneTypes'
 import Pane from './Pane'
 import PaneDivider from './PaneDivider'
@@ -9,6 +11,7 @@ import BrowserPane from './BrowserPane'
 import EditorPane from './EditorPane'
 import PanePicker, { type PanePickerType } from './PanePicker'
 import { isCodingCliProviderName } from '@/lib/coding-cli-utils'
+import SessionView from '../SessionView'
 import { cn } from '@/lib/utils'
 import { getWsClient } from '@/lib/ws-client'
 import { derivePaneTitle } from '@/lib/derivePaneTitle'
@@ -28,6 +31,8 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
   const dispatch = useAppDispatch()
   const activePane = useAppSelector((s) => s.panes.activePane[tabId])
   const paneTitles = useAppSelector((s) => s.panes.paneTitles[tabId] ?? EMPTY_PANE_TITLES)
+  const pendingRequests = useAppSelector((s) => s.codingCli.pendingRequests)
+  const codingCliSessions = useAppSelector((s) => s.codingCli.sessions)
   const containerRef = useRef<HTMLDivElement>(null)
   const ws = useMemo(() => getWsClient(), [])
 
@@ -36,15 +41,22 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
   const isOnlyPane = rootNode?.type === 'leaf'
 
   const handleClose = useCallback((paneId: string, content: PaneContent) => {
-    // Clean up terminal process if this pane has one
-    if (content.kind === 'terminal' && content.terminalId) {
-      ws.send({
-        type: 'terminal.detach',
-        terminalId: content.terminalId,
-      })
+    if (content.kind === 'terminal') {
+      const terminalId = content.terminalId
+      if (terminalId) {
+        ws.send({ type: 'terminal.detach', terminalId })
+      }
+    }
+    if (content.kind === 'session') {
+      const sessionId = content.sessionId
+      if (pendingRequests[sessionId]) {
+        dispatch(cancelCodingCliRequest({ requestId: sessionId }))
+      } else {
+        ws.send({ type: 'codingcli.kill', sessionId })
+      }
     }
     dispatch(closePane({ tabId, paneId }))
-  }, [dispatch, tabId, ws])
+  }, [dispatch, tabId, ws, pendingRequests])
 
   const handleFocus = useCallback((paneId: string) => {
     dispatch(setActivePane({ tabId, paneId }))
@@ -75,7 +87,17 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
   if (node.type === 'leaf') {
     const explicitTitle = paneTitles[node.id]
     const paneTitle = explicitTitle ?? derivePaneTitle(node.content)
-    const paneStatus = node.content.kind === 'terminal' ? node.content.status : 'running'
+    const paneStatus = (() => {
+      if (node.content.kind === 'terminal') return node.content.status
+      if (node.content.kind === 'session') {
+        if (pendingRequests[node.content.sessionId]) return 'creating'
+        const status = codingCliSessions[node.content.sessionId]?.status
+        if (status === 'error') return 'error'
+        if (status === 'completed') return 'exited'
+        if (status === 'running') return 'running'
+      }
+      return 'running'
+    })()
 
     return (
       <Pane
@@ -134,20 +156,20 @@ function PickerWrapper({
   isOnlyPane: boolean
 }) {
   const dispatch = useAppDispatch()
-  const settings = useAppSelector((s) => s.settings?.settings)
+  const settings = useAppSelector((s) => s.settings.settings)
 
   const handleSelect = useCallback((type: PanePickerType) => {
     let newContent: PaneContent
 
     if (isCodingCliProviderName(type)) {
-      const providerCwd = settings?.codingCli?.providers?.[type]?.cwd
+      const providerCwd = settings.codingCli.providers[type]?.cwd
       newContent = {
         kind: 'terminal',
         mode: type,
         shell: 'system',
         createRequestId: nanoid(),
         status: 'creating',
-        ...(providerCwd ? { initialCwd: providerCwd } : {}),
+        initialCwd: providerCwd ?? settings.defaultCwd,
       }
     } else {
       switch (type) {
@@ -158,6 +180,7 @@ function PickerWrapper({
             shell: 'system',
             createRequestId: nanoid(),
             status: 'creating',
+            initialCwd: settings.defaultCwd,
           }
           break
         case 'cmd':
@@ -167,6 +190,7 @@ function PickerWrapper({
             shell: 'cmd',
             createRequestId: nanoid(),
             status: 'creating',
+            initialCwd: settings.defaultCwd,
           }
           break
         case 'powershell':
@@ -176,6 +200,7 @@ function PickerWrapper({
             shell: 'powershell',
             createRequestId: nanoid(),
             status: 'creating',
+            initialCwd: settings.defaultCwd,
           }
           break
         case 'wsl':
@@ -185,6 +210,7 @@ function PickerWrapper({
             shell: 'wsl',
             createRequestId: nanoid(),
             status: 'creating',
+            initialCwd: settings.defaultCwd,
           }
           break
         case 'browser':
@@ -207,7 +233,7 @@ function PickerWrapper({
       }
     }
 
-    dispatch(updatePaneContent({ tabId, paneId, content: newContent }))
+    dispatch(swapPaneContent({ tabId, paneId, content: newContent }))
   }, [dispatch, tabId, paneId, settings])
 
   const handleCancel = useCallback(() => {
@@ -248,6 +274,10 @@ function renderContent(tabId: string, paneId: string, content: PaneContent, isOn
         viewMode={content.viewMode}
       />
     )
+  }
+
+  if (content.kind === 'session') {
+    return <SessionView sessionId={content.sessionId} hidden={hidden} />
   }
 
   if (content.kind === 'picker') {

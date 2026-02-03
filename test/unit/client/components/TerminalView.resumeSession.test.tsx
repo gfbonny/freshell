@@ -8,8 +8,6 @@ import settingsReducer, { defaultSettings } from '@/store/settingsSlice'
 import connectionReducer from '@/store/connectionSlice'
 import type { PaneNode, TerminalPaneContent } from '@/store/paneTypes'
 
-const VALID_CLAUDE_SESSION_ID = '550e8400-e29b-41d4-a716-446655440000'
-
 const wsMocks = vi.hoisted(() => ({
   send: vi.fn(),
   connect: vi.fn().mockResolvedValue(undefined),
@@ -92,7 +90,7 @@ describe('TerminalView resumeSessionId', () => {
       status: 'creating',
       mode: 'claude',
       shell: 'system',
-      resumeSessionId: VALID_CLAUDE_SESSION_ID,
+      resumeSessionId: 'session-123',
       initialCwd: '/tmp',
     }
 
@@ -109,11 +107,8 @@ describe('TerminalView resumeSessionId', () => {
         tabs: {
           tabs: [{
             id: tabId,
-            mode: 'claude',
-            status: 'running',
             title: 'Claude',
-            titleSetByUser: false,
-            createRequestId: 'req-1',
+            createdAt: Date.now(),
           }],
           activeTabId: tabId,
         },
@@ -121,6 +116,7 @@ describe('TerminalView resumeSessionId', () => {
           layouts: { [tabId]: root },
           activePane: { [tabId]: paneId },
           paneTitles: {},
+          paneTitleSetByUser: {},
         },
         settings: { settings: defaultSettings, status: 'loaded' },
         connection: { status: 'connected', error: null },
@@ -137,86 +133,8 @@ describe('TerminalView resumeSessionId', () => {
       expect(wsMocks.send).toHaveBeenCalledWith(expect.objectContaining({
         type: 'terminal.create',
         requestId: 'req-1',
-        resumeSessionId: VALID_CLAUDE_SESSION_ID,
+        resumeSessionId: 'session-123',
       }))
-    })
-  })
-
-  it('updates pane resumeSessionId from effectiveResumeSessionId', async () => {
-    const tabId = 'tab-1'
-    const paneId = 'pane-1'
-    let messageHandler: ((msg: any) => void) | null = null
-
-    wsMocks.onMessage.mockImplementation((handler: (msg: any) => void) => {
-      messageHandler = handler
-      return () => {}
-    })
-
-    const paneContent: TerminalPaneContent = {
-      kind: 'terminal',
-      createRequestId: 'req-1',
-      status: 'creating',
-      mode: 'claude',
-      shell: 'system',
-      initialCwd: '/tmp',
-    }
-
-    const root: PaneNode = { type: 'leaf', id: paneId, content: paneContent }
-
-    const store = configureStore({
-      reducer: {
-        tabs: tabsReducer,
-        panes: panesReducer,
-        settings: settingsReducer,
-        connection: connectionReducer,
-      },
-      preloadedState: {
-        tabs: {
-          tabs: [{
-            id: tabId,
-            mode: 'claude',
-            status: 'running',
-            title: 'Claude',
-            titleSetByUser: false,
-            createRequestId: 'req-1',
-          }],
-          activeTabId: tabId,
-        },
-        panes: {
-          layouts: { [tabId]: root },
-          activePane: { [tabId]: paneId },
-          paneTitles: {},
-        },
-        settings: { settings: defaultSettings, status: 'loaded' },
-        connection: { status: 'connected', error: null },
-      },
-    })
-
-    render(
-      <Provider store={store}>
-        <TerminalView tabId={tabId} paneId={paneId} paneContent={paneContent} />
-      </Provider>
-    )
-
-    await waitFor(() => {
-      expect(wsMocks.send).toHaveBeenCalledWith(expect.objectContaining({
-        type: 'terminal.create',
-        requestId: 'req-1',
-      }))
-    })
-
-    messageHandler?.({
-      type: 'terminal.created',
-      requestId: 'req-1',
-      terminalId: 'term-1',
-      effectiveResumeSessionId: VALID_CLAUDE_SESSION_ID,
-    })
-
-    await waitFor(() => {
-      const content = store.getState().panes.layouts[tabId]
-      if (content?.type !== 'leaf') throw new Error('unexpected layout')
-      if (content.content.kind !== 'terminal') throw new Error('unexpected content')
-      expect(content.content.resumeSessionId).toBe(VALID_CLAUDE_SESSION_ID)
     })
   })
 })

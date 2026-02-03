@@ -1,16 +1,22 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '@/lib/api'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { addTab, setActiveTab, updateTab } from '@/store/tabsSlice'
+import { setActiveTab } from '@/store/tabsSlice'
+import { createTabWithPane } from '@/store/tabThunks'
+import { updatePaneTitle } from '@/store/panesSlice'
 import { getWsClient } from '@/lib/ws-client'
 import { cn } from '@/lib/utils'
+import { collectTerminalPanes, findPaneByTerminalId } from '@/lib/pane-utils'
 import { RefreshCw, Circle, Play, Pencil, Trash2, Sparkles, ExternalLink } from 'lucide-react'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
+import type { TabMode } from '@/store/types'
 
 type TerminalOverview = {
   terminalId: string
   title: string
   description?: string
+  mode?: TabMode
+  resumeSessionId?: string
   createdAt: number
   lastActivityAt: number
   status: 'running' | 'exited'
@@ -43,7 +49,7 @@ function formatDuration(ms: number): string {
 
 export default function OverviewView({ onOpenTab }: { onOpenTab?: () => void }) {
   const dispatch = useAppDispatch()
-  const tabs = useAppSelector((s) => s.tabs.tabs)
+  const paneLayouts = useAppSelector((s) => s.panes.layouts)
 
   const ws = useMemo(() => getWsClient(), [])
 
@@ -138,15 +144,25 @@ export default function OverviewView({ onOpenTab }: { onOpenTab?: () => void }) 
                     <TerminalCard
                       key={t.terminalId}
                       terminal={t}
-                      isOpen={tabs.some((x) => x.terminalId === t.terminalId)}
+                      isOpen={!!findPaneByTerminalId(paneLayouts, t.terminalId)}
                       onOpen={() => {
-                        const existing = tabs.find((x) => x.terminalId === t.terminalId)
+                        const existing = findPaneByTerminalId(paneLayouts, t.terminalId)
                         if (existing) {
-                          dispatch(setActiveTab(existing.id))
+                          dispatch(setActiveTab(existing.tabId))
                           onOpenTab?.()
                           return
                         }
-                        dispatch(addTab({ title: t.title, terminalId: t.terminalId, status: 'running', mode: 'shell' }))
+                        dispatch(createTabWithPane({
+                          title: t.title,
+                          content: {
+                            kind: 'terminal',
+                            mode: t.mode || 'shell',
+                            terminalId: t.terminalId,
+                            resumeSessionId: t.resumeSessionId,
+                            status: 'running',
+                            initialCwd: t.cwd,
+                          },
+                        }))
                         onOpenTab?.()
                       }}
                       onRename={async (title, description) => {
@@ -154,9 +170,15 @@ export default function OverviewView({ onOpenTab }: { onOpenTab?: () => void }) 
                           titleOverride: title || undefined,
                           descriptionOverride: description || undefined,
                         })
-                        const existing = tabs.find((x) => x.terminalId === t.terminalId)
-                        if (existing && title) {
-                          dispatch(updateTab({ id: existing.id, updates: { title } }))
+                        if (title) {
+                          for (const [tabId, layout] of Object.entries(paneLayouts)) {
+                            const terminals = collectTerminalPanes(layout)
+                            for (const terminal of terminals) {
+                              if (terminal.content.terminalId === t.terminalId) {
+                                dispatch(updatePaneTitle({ tabId, paneId: terminal.paneId, title, setByUser: true }))
+                              }
+                            }
+                          }
                         }
                         await refresh()
                       }}
@@ -193,15 +215,25 @@ export default function OverviewView({ onOpenTab }: { onOpenTab?: () => void }) 
                     <TerminalCard
                       key={t.terminalId}
                       terminal={t}
-                      isOpen={tabs.some((x) => x.terminalId === t.terminalId)}
+                      isOpen={!!findPaneByTerminalId(paneLayouts, t.terminalId)}
                       onOpen={() => {
-                        const existing = tabs.find((x) => x.terminalId === t.terminalId)
+                        const existing = findPaneByTerminalId(paneLayouts, t.terminalId)
                         if (existing) {
-                          dispatch(setActiveTab(existing.id))
+                          dispatch(setActiveTab(existing.tabId))
                           onOpenTab?.()
                           return
                         }
-                        dispatch(addTab({ title: t.title, terminalId: t.terminalId, status: 'exited', mode: 'shell' }))
+                        dispatch(createTabWithPane({
+                          title: t.title,
+                          content: {
+                            kind: 'terminal',
+                            mode: t.mode || 'shell',
+                            terminalId: t.terminalId,
+                            resumeSessionId: t.resumeSessionId,
+                            status: 'exited',
+                            initialCwd: t.cwd,
+                          },
+                        }))
                         onOpenTab?.()
                       }}
                       onRename={async (title, description) => {
@@ -331,6 +363,8 @@ function TerminalCard({
       aria-label={`Open terminal ${terminal.title}`}
       data-context={ContextIds.OverviewTerminal}
       data-terminal-id={terminal.terminalId}
+      data-terminal-mode={terminal.mode}
+      data-resume-session-id={terminal.resumeSessionId}
     >
       <div className="flex items-start gap-4">
         {/* Status */}

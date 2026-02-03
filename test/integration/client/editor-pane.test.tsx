@@ -4,7 +4,8 @@ import userEvent from '@testing-library/user-event'
 import { Provider } from 'react-redux'
 import { configureStore } from '@reduxjs/toolkit'
 import panesReducer, { initLayout } from '@/store/panesSlice'
-import settingsReducer from '@/store/settingsSlice'
+import settingsReducer, { defaultSettings } from '@/store/settingsSlice'
+import codingCliReducer from '@/store/codingCliSlice'
 import PaneLayout from '@/components/panes/PaneLayout'
 
 // Mock Monaco to avoid loading issues in tests
@@ -121,6 +122,25 @@ const createTestStore = () =>
     reducer: {
       panes: panesReducer,
       settings: settingsReducer,
+      codingCli: codingCliReducer,
+    },
+    preloadedState: {
+      panes: {
+        layouts: {},
+        activePane: {},
+        paneTitles: {},
+        paneTitleSetByUser: {},
+      },
+      settings: {
+        settings: {
+          ...defaultSettings,
+        },
+        loaded: true,
+      },
+      codingCli: {
+        sessions: {},
+        pendingRequests: {},
+      },
     },
   })
 

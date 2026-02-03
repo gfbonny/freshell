@@ -1,4 +1,5 @@
 import type { TerminalStatus, TabMode, ShellType } from './types'
+import type { CodingCliProviderName } from './types'
 
 /**
  * Terminal pane content with full lifecycle management.
@@ -49,6 +50,16 @@ export type EditorPaneContent = {
 }
 
 /**
+ * Coding CLI session view pane (non-terminal).
+ */
+export type SessionPaneContent = {
+  kind: 'session'
+  sessionId: string
+  provider?: CodingCliProviderName
+  title?: string
+}
+
+/**
  * Picker pane content - shows pane type selection UI.
  */
 export type PickerPaneContent = {
@@ -58,7 +69,12 @@ export type PickerPaneContent = {
 /**
  * Union type for all pane content types.
  */
-export type PaneContent = TerminalPaneContent | BrowserPaneContent | EditorPaneContent | PickerPaneContent
+export type PaneContent =
+  | TerminalPaneContent
+  | BrowserPaneContent
+  | EditorPaneContent
+  | SessionPaneContent
+  | PickerPaneContent
 
 /**
  * Input type for creating terminal panes.
@@ -79,7 +95,12 @@ export type EditorPaneInput = EditorPaneContent
  * Input type for splitPane/initLayout actions.
  * Accepts either full content or partial terminal input.
  */
-export type PaneContentInput = TerminalPaneInput | BrowserPaneContent | EditorPaneInput | PickerPaneContent
+export type PaneContentInput =
+  | TerminalPaneInput
+  | BrowserPaneContent
+  | EditorPaneInput
+  | SessionPaneContent
+  | PickerPaneContent
 
 /**
  * Recursive tree structure for pane layouts.
@@ -98,11 +119,10 @@ export interface PanesState {
   layouts: Record<string, PaneNode>
   /** Map of tabId -> currently focused pane id */
   activePane: Record<string, string>
-  /**
-   * Map of tabId -> paneId -> explicit title override.
-   * Used to keep user-edited or derived titles stable across renders.
-   */
+  /** Map of tabId -> paneId -> title override */
   paneTitles: Record<string, Record<string, string>>
+  /** Map of tabId -> paneId -> user-set title flag */
+  paneTitleSetByUser: Record<string, Record<string, boolean>>
 }
 
 /**
@@ -111,6 +131,6 @@ export interface PanesState {
  * NOTE: This type is only for documentation - not used in runtime code.
  */
 export interface PersistedPanesState extends PanesState {
-  /** Schema version for migrations. */
+  /** Schema version for migrations. Current: 4 */
   version: number
 }

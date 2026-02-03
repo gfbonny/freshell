@@ -1,18 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { updateTab, switchToNextTab, switchToPrevTab } from '@/store/tabsSlice'
 import { updatePaneContent, updatePaneTitle } from '@/store/panesSlice'
 import { updateSessionActivity } from '@/store/sessionActivitySlice'
+import { recordOutput, recordInput } from '@/store/terminalActivitySlice'
 import { getWsClient } from '@/lib/ws-client'
 import { getTerminalTheme } from '@/lib/terminal-themes'
 import { getResumeSessionIdFromRef } from '@/components/terminal-view-utils'
 import { copyText, readText } from '@/lib/clipboard'
 import { registerTerminalActions } from '@/lib/pane-action-registry'
-import { consumeTerminalRestoreRequestId } from '@/lib/terminal-restore'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
-import { resolveTerminalFontFamily } from '@/lib/terminal-fonts'
 import { nanoid } from 'nanoid'
 import { cn } from '@/lib/utils'
+import { isCodingCliMode } from '@/lib/coding-cli-utils'
 import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
 import { Loader2 } from 'lucide-react'
@@ -20,9 +19,6 @@ import type { PaneContent, TerminalPaneContent } from '@/store/paneTypes'
 import 'xterm/css/xterm.css'
 
 const SESSION_ACTIVITY_THROTTLE_MS = 5000
-const RATE_LIMIT_RETRY_MAX_ATTEMPTS = 3
-const RATE_LIMIT_RETRY_BASE_MS = 250
-const RATE_LIMIT_RETRY_MAX_MS = 1000
 
 interface TerminalViewProps {
   tabId: string
@@ -33,7 +29,6 @@ interface TerminalViewProps {
 
 export default function TerminalView({ tabId, paneId, paneContent, hidden }: TerminalViewProps) {
   const dispatch = useAppDispatch()
-  const tab = useAppSelector((s) => s.tabs.tabs.find((t) => t.id === tabId))
   const settings = useAppSelector((s) => s.settings.settings)
 
   // All hooks MUST be called before any conditional returns
@@ -46,9 +41,6 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   const mountedRef = useRef(false)
   const hiddenRef = useRef(hidden)
   const lastSessionActivityAtRef = useRef(0)
-  const rateLimitRetryRef = useRef<{ count: number; timer: ReturnType<typeof setTimeout> | null }>({ count: 0, timer: null })
-  const restoreRequestIdRef = useRef<string | null>(null)
-  const restoreFlagRef = useRef(false)
 
   // Extract terminal-specific fields (safe because we check kind later)
   const isTerminal = paneContent.kind === 'terminal'
@@ -109,7 +101,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       convertEol: true,
       cursorBlink: settings.terminal.cursorBlink,
       fontSize: settings.terminal.fontSize,
-      fontFamily: resolveTerminalFontFamily(settings.terminal.fontFamily),
+      fontFamily: settings.terminal.fontFamily,
       lineHeight: settings.terminal.lineHeight,
       scrollback: settings.terminal.scrollback,
       theme: getTerminalTheme(settings.terminal.theme, settings.theme),
@@ -154,22 +146,16 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       if (!tid) return
       ws.send({ type: 'terminal.input', terminalId: tid, data })
 
-      const currentTab = tabRef.current
-      const currentContent = contentRef.current
-      if (currentTab) {
-        const now = Date.now()
-        dispatch(updateTab({ id: currentTab.id, updates: { lastInputAt: now } }))
-        const resumeSessionId = currentContent?.resumeSessionId
-        if (resumeSessionId && currentContent?.mode && currentContent.mode !== 'shell') {
-          if (now - lastSessionActivityAtRef.current >= SESSION_ACTIVITY_THROTTLE_MS) {
-            lastSessionActivityAtRef.current = now
-            const provider =
-              currentContent.mode ||
-              currentTab.codingCliProvider ||
-              (currentTab.mode !== 'shell' ? currentTab.mode : undefined) ||
-              'claude'
-            dispatch(updateSessionActivity({ sessionId: resumeSessionId, provider, lastInputAt: now }))
-          }
+      // Track input for activity monitoring (to filter out echo)
+      dispatch(recordInput({ paneId }))
+
+      const now = Date.now()
+      const sessionId = contentRef.current?.resumeSessionId
+      const mode = contentRef.current?.mode
+      if (sessionId && mode && isCodingCliMode(mode)) {
+        if (now - lastSessionActivityAtRef.current >= SESSION_ACTIVITY_THROTTLE_MS) {
+          lastSessionActivityAtRef.current = now
+          dispatch(updateSessionActivity({ sessionId, provider: mode, lastInputAt: now }))
         }
       }
     })
@@ -183,33 +169,8 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         }
         return false
       }
-
-      // Ctrl+V or Ctrl+Shift+V to paste
-      // xterm.js does NOT have a built-in paste handler - we must handle it explicitly
-      if (event.ctrlKey && (event.key === 'v' || event.key === 'V') && event.type === 'keydown' && !event.repeat) {
-        void readText().then((text) => {
-          if (!text) return
-          const tid = terminalIdRef.current
-          if (!tid) return
-          ws.send({ type: 'terminal.input', terminalId: tid, data: text })
-        })
-        return false
-      }
-
-      // Tab switching: Ctrl+Shift+[ (prev) and Ctrl+Shift+] (next)
-      if (event.ctrlKey && event.shiftKey && !event.altKey && !event.metaKey && event.type === 'keydown' && !event.repeat) {
-        if (event.code === 'BracketLeft') {
-          event.preventDefault()
-          dispatch(switchToPrevTab())
-          return false
-        }
-        if (event.code === 'BracketRight') {
-          event.preventDefault()
-          dispatch(switchToNextTab())
-          return false
-        }
-      }
-
+      // Paste is handled by xterm.js's internal paste handler, which fires onData.
+      // We intentionally do NOT handle Ctrl+Shift+V here to avoid double-paste.
       return true
     })
 
@@ -237,12 +198,6 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isTerminal])
 
-  // Ref for tab to avoid re-running effects when tab changes
-  const tabRef = useRef(tab)
-  useEffect(() => {
-    tabRef.current = tab
-  }, [tab])
-
   // Ref for paneId to avoid stale closures in title handlers
   const paneIdRef = useRef(paneId)
   useEffect(() => {
@@ -261,9 +216,6 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     if (!term) return
 
     const disposable = term.onTitleChange((rawTitle: string) => {
-      const currentTab = tabRef.current
-      if (!currentTab || currentTab.titleSetByUser) return
-
       // Strip prefix noise (spinners, status chars) - everything before first letter
       const match = rawTitle.match(/[a-zA-Z]/)
       if (!match) return // No letters = all noise, ignore
@@ -280,7 +232,6 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       lastTitleRef.current = cleanTitle
       lastTitleUpdateRef.current = now
 
-      dispatch(updateTab({ id: currentTab.id, updates: { title: cleanTitle } }))
       dispatch(updatePaneTitle({ tabId, paneId: paneIdRef.current, title: cleanTitle }))
     })
 
@@ -294,7 +245,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     if (!term) return
     term.options.cursorBlink = settings.terminal.cursorBlink
     term.options.fontSize = settings.terminal.fontSize
-    term.options.fontFamily = resolveTerminalFontFamily(settings.terminal.fontFamily)
+    term.options.fontFamily = settings.terminal.fontFamily
     term.options.lineHeight = settings.terminal.lineHeight
     term.options.scrollback = settings.terminal.scrollback
     term.options.theme = getTerminalTheme(settings.terminal.theme, settings.theme)
@@ -318,9 +269,8 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   // Create or attach to backend terminal
   useEffect(() => {
     if (!isTerminal || !terminalContent) return
-    const termCandidate = termRef.current
-    if (!termCandidate) return
-    const term = termCandidate
+    const term = termRef.current
+    if (!term) return
 
     // NOTE: We intentionally don't destructure terminalId here.
     // We read it from terminalIdRef.current to avoid stale closures.
@@ -329,54 +279,6 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     let unsub = () => {}
     let unsubReconnect = () => {}
 
-    const clearRateLimitRetry = () => {
-      const retryState = rateLimitRetryRef.current
-      if (retryState.timer) {
-        clearTimeout(retryState.timer)
-        retryState.timer = null
-      }
-      retryState.count = 0
-    }
-
-    const getRestoreFlag = (requestId: string) => {
-      if (restoreRequestIdRef.current !== requestId) {
-        restoreRequestIdRef.current = requestId
-        restoreFlagRef.current = consumeTerminalRestoreRequestId(requestId)
-      }
-      return restoreFlagRef.current
-    }
-
-    const sendCreate = (requestId: string) => {
-      const restore = getRestoreFlag(requestId)
-      ws.send({
-        type: 'terminal.create',
-        requestId,
-        mode,
-        shell: shell || 'system',
-        cwd: initialCwd,
-        resumeSessionId: getResumeSessionIdFromRef(contentRef),
-        ...(restore ? { restore: true } : {}),
-      })
-    }
-
-    const scheduleRateLimitRetry = (requestId: string) => {
-      const retryState = rateLimitRetryRef.current
-      if (retryState.count >= RATE_LIMIT_RETRY_MAX_ATTEMPTS) return false
-      retryState.count += 1
-      const delayMs = Math.min(
-        RATE_LIMIT_RETRY_BASE_MS * (2 ** (retryState.count - 1)),
-        RATE_LIMIT_RETRY_MAX_MS
-      )
-      if (retryState.timer) clearTimeout(retryState.timer)
-      retryState.timer = setTimeout(() => {
-        retryState.timer = null
-        if (requestIdRef.current !== requestId) return
-        sendCreate(requestId)
-      }, delayMs)
-      term.writeln(`\r\n[Rate limited - retrying in ${delayMs}ms]\r\n`)
-      return true
-    }
-
     function attach(tid: string) {
       setIsAttaching(true)
       ws.send({ type: 'terminal.attach', terminalId: tid })
@@ -384,12 +286,9 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     }
 
     async function ensure() {
-      clearRateLimitRetry()
       try {
         await ws.connect()
-      } catch {
-        // handled elsewhere
-      }
+      } catch { /* handled elsewhere */ }
 
       unsub = ws.onMessage((msg) => {
         const tid = terminalIdRef.current
@@ -397,72 +296,42 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
 
         if (msg.type === 'terminal.output' && msg.terminalId === tid) {
           term.write(msg.data || '')
+          // Track output activity for notification system
+          dispatch(recordOutput({ paneId }))
         }
 
         if (msg.type === 'terminal.snapshot' && msg.terminalId === tid) {
-          try { term.clear() } catch { /* disposed */ }
+          try { term.clear() } catch {}
           if (msg.snapshot) {
-            try { term.write(msg.snapshot) } catch { /* disposed */ }
+            try { term.write(msg.snapshot) } catch {}
           }
         }
 
         if (msg.type === 'terminal.created' && msg.requestId === reqId) {
-          clearRateLimitRetry()
           const newId = msg.terminalId as string
           terminalIdRef.current = newId
           updateContent({ terminalId: newId, status: 'running' })
-          // Also update tab for title purposes
-          const currentTab = tabRef.current
-          if (currentTab) {
-            dispatch(updateTab({ id: currentTab.id, updates: { terminalId: newId, status: 'running' } }))
-          }
-          if (msg.effectiveResumeSessionId && msg.effectiveResumeSessionId !== contentRef.current?.resumeSessionId) {
-            updateContent({ resumeSessionId: msg.effectiveResumeSessionId })
-          }
           if (msg.snapshot) {
-            try { term.clear(); term.write(msg.snapshot) } catch { /* disposed */ }
+            try { term.clear(); term.write(msg.snapshot) } catch {}
           }
-          // Creator is already attached server-side for this terminal.
-          // Avoid sending terminal.attach here: it can race with terminal.output and lead to
-          // the later terminal.attached snapshot wiping already-rendered output.
-          ws.send({ type: 'terminal.resize', terminalId: newId, cols: term.cols, rows: term.rows })
-          setIsAttaching(false)
+          attach(newId)
         }
 
         if (msg.type === 'terminal.attached' && msg.terminalId === tid) {
-          clearRateLimitRetry()
           setIsAttaching(false)
           if (msg.snapshot) {
-            try { term.clear(); term.write(msg.snapshot) } catch { /* disposed */ }
+            try { term.clear(); term.write(msg.snapshot) } catch {}
           }
           updateContent({ status: 'running' })
         }
 
         if (msg.type === 'terminal.exit' && msg.terminalId === tid) {
-          // Clear terminalIdRef AND the stored terminalId to prevent any subsequent
-          // operations (resize, input) from sending commands to the dead terminal,
-          // which would trigger INVALID_TERMINAL_ID and cause a reconnection loop.
-          // We must clear both the ref AND the Redux state because the ref sync effect
-          // would otherwise reset the ref from the Redux state on re-render.
-          terminalIdRef.current = undefined
-          updateContent({ terminalId: undefined, status: 'exited' })
-          const exitTab = tabRef.current
-          if (exitTab) {
-            const code = typeof msg.exitCode === 'number' ? msg.exitCode : undefined
-            // Only modify title if user hasn't manually set it
-            const updates: { terminalId: undefined; status: 'exited'; title?: string } = { terminalId: undefined, status: 'exited' }
-            if (!exitTab.titleSetByUser) {
-              updates.title = exitTab.title + (code !== undefined ? ` (exit ${code})` : '')
-            }
-            dispatch(updateTab({ id: exitTab.id, updates }))
-          }
+          updateContent({ status: 'exited' })
         }
 
         // Auto-update title from Claude session (only if user hasn't manually set it)
         if (msg.type === 'terminal.title.updated' && msg.terminalId === tid) {
-          const titleTab = tabRef.current
-          if (titleTab && !titleTab.titleSetByUser && msg.title) {
-            dispatch(updateTab({ id: titleTab.id, updates: { title: msg.title } }))
+          if (msg.title) {
             dispatch(updatePaneTitle({ tabId, paneId: paneIdRef.current, title: msg.title }))
           }
         }
@@ -475,13 +344,6 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         }
 
         if (msg.type === 'error' && msg.requestId === reqId) {
-          if (msg.code === 'RATE_LIMITED') {
-            const scheduled = scheduleRateLimitRetry(reqId)
-            if (scheduled) {
-              return
-            }
-          }
-          clearRateLimitRetry()
           setIsAttaching(false)
           updateContent({ status: 'error' })
           term.writeln(`\r\n[Error] ${msg.message || msg.code || 'Unknown error'}\r\n`)
@@ -489,26 +351,23 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
 
         if (msg.type === 'error' && msg.code === 'INVALID_TERMINAL_ID' && !msg.requestId) {
           const currentTerminalId = terminalIdRef.current
-          const current = contentRef.current
           if (msg.terminalId && msg.terminalId !== currentTerminalId) {
-            // Show feedback if the terminal already exited (the ID was cleared by
-            // the exit handler, so msg.terminalId no longer matches the ref)
-            if (current?.status === 'exited') {
-              term.writeln('\r\n[Terminal exited - use the + button or split to start a new session]\r\n')
-            }
             return
           }
-          // Only auto-reconnect if terminal hasn't already exited.
-          // This prevents an infinite respawn loop when terminals fail immediately
-          // (e.g., due to permission errors on cwd). User must explicitly restart.
-          if (currentTerminalId && current?.status !== 'exited') {
+          if (currentTerminalId) {
             term.writeln('\r\n[Reconnecting...]\r\n')
             const newRequestId = nanoid()
             requestIdRef.current = newRequestId
             terminalIdRef.current = undefined
             updateContent({ terminalId: undefined, createRequestId: newRequestId, status: 'creating' })
-          } else if (current?.status === 'exited') {
-            term.writeln('\r\n[Terminal exited - use the + button or split to start a new session]\r\n')
+            ws.send({
+              type: 'terminal.create',
+              requestId: newRequestId,
+              mode,
+              shell: shell || 'system',
+              cwd: initialCwd,
+              resumeSessionId: getResumeSessionIdFromRef(contentRef),
+            })
           }
         }
       })
@@ -527,14 +386,20 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       if (currentTerminalId) {
         attach(currentTerminalId)
       } else {
-        sendCreate(createRequestId)
+        ws.send({
+          type: 'terminal.create',
+          requestId: createRequestId,
+          mode,
+          shell: shell || 'system',
+          cwd: initialCwd,
+          resumeSessionId: getResumeSessionIdFromRef(contentRef),
+        })
       }
     }
 
     ensure()
 
     return () => {
-      clearRateLimitRetry()
       unsub()
       unsubReconnect()
     }
@@ -552,10 +417,20 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   // - On reconnect: createRequestId changes, effect re-runs, terminalId is undefined, we create
   // We read terminalId from terminalIdRef.current to get the current value without triggering re-runs
   //
-  // NOTE: tab is intentionally NOT in dependencies - we use tabRef to avoid re-attaching
+  // NOTE: No tab dependency - terminal lifecycle is pane-owned
   // when tab properties (like title) change
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isTerminal, paneId, terminalContent?.createRequestId, updateContent, ws, dispatch])
+
+  // Detach when this terminal pane unmounts (tab close or pane swap)
+  useEffect(() => {
+    return () => {
+      const tid = terminalIdRef.current
+      if (tid) {
+        ws.send({ type: 'terminal.detach', terminalId: tid })
+      }
+    }
+  }, [ws])
 
   // NOW we can do the conditional return - after all hooks
   if (!isTerminal || !terminalContent) {
