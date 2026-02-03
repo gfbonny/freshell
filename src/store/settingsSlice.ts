@@ -18,7 +18,7 @@ export const defaultSettings: AppSettings = {
     warnBeforeKillMinutes: 5,
   },
   sidebar: {
-    sortMode: 'activity',
+    sortMode: 'recency-pinned',
     showProjectBadges: true,
     width: 288,
     collapsed: false,
@@ -41,7 +41,11 @@ export function migrateSortMode(mode: string | undefined): SidebarSortMode {
   if (mode === 'recency' || mode === 'activity' || mode === 'project') {
     return mode
   }
-  return 'activity'
+  // Migrate legacy 'hybrid' mode to 'activity' (similar behavior)
+  if (mode === 'hybrid') {
+    return 'activity'
+  }
+  return 'recency-pinned'
 }
 
 export interface SettingsState {

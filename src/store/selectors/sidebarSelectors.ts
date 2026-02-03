@@ -27,9 +27,9 @@ const EMPTY_LAYOUTS: RootState['panes']['layouts'] = {}
 
 const selectProjects = (state: RootState) => state.sessions?.projects ?? EMPTY_PROJECTS
 const selectLayouts = (state: RootState) => state.panes?.layouts ?? EMPTY_LAYOUTS
-const selectSortMode = (state: RootState) => state.settings?.settings?.sidebar?.sortMode || 'activity'
+const selectSortMode = (state: RootState) => state.settings?.settings?.sidebar?.sortMode || 'recency-pinned'
 const selectSessionActivityForSort = (state: RootState) => {
-  const sortMode = state.settings?.settings?.sidebar?.sortMode || 'activity'
+  const sortMode = state.settings?.settings?.sidebar?.sortMode || 'recency-pinned'
   if (sortMode !== 'activity') return EMPTY_ACTIVITY
   return state.sessionActivity?.sessions || EMPTY_ACTIVITY
 }
