@@ -3,7 +3,14 @@ import { execSync } from 'child_process'
 
 vi.mock('child_process')
 
-import { getWslIp, parsePortProxyRules, getExistingPortProxyRules, type PortProxyRule } from '../../../server/wsl-port-forward.js'
+import {
+  getWslIp,
+  parsePortProxyRules,
+  getExistingPortProxyRules,
+  getRequiredPorts,
+  needsPortForwardingUpdate,
+  type PortProxyRule
+} from '../../../server/wsl-port-forward.js'
 
 describe('wsl-port-forward', () => {
   beforeEach(() => {
@@ -136,6 +143,105 @@ Address         Port        Address         Port
       const rules = getExistingPortProxyRules()
 
       expect(rules.size).toBe(0)
+    })
+  })
+
+  describe('getRequiredPorts', () => {
+    const originalEnv = process.env
+
+    beforeEach(() => {
+      process.env = { ...originalEnv }
+    })
+
+    afterEach(() => {
+      process.env = originalEnv
+    })
+
+    it('returns default port 3001 when PORT not set', () => {
+      delete process.env.PORT
+
+      const ports = getRequiredPorts()
+
+      expect(ports).toContain(3001)
+    })
+
+    it('uses PORT from environment', () => {
+      process.env.PORT = '4000'
+
+      const ports = getRequiredPorts()
+
+      expect(ports).toContain(4000)
+      expect(ports).not.toContain(3001)
+    })
+
+    it('includes dev port 5173 when not in production', () => {
+      delete process.env.NODE_ENV
+      delete process.env.PORT
+
+      const ports = getRequiredPorts()
+
+      expect(ports).toContain(5173)
+    })
+
+    it('excludes dev port 5173 in production', () => {
+      process.env.NODE_ENV = 'production'
+
+      const ports = getRequiredPorts()
+
+      expect(ports).not.toContain(5173)
+    })
+  })
+
+  describe('needsPortForwardingUpdate', () => {
+    it('returns true when no rules exist', () => {
+      const rules = new Map<number, PortProxyRule>()
+
+      const needs = needsPortForwardingUpdate('172.30.149.249', [3001, 5173], rules)
+
+      expect(needs).toBe(true)
+    })
+
+    it('returns true when rules point to wrong IP', () => {
+      const rules = new Map<number, PortProxyRule>([
+        [3001, { connectAddress: '172.30.100.100', connectPort: 3001 }],
+        [5173, { connectAddress: '172.30.100.100', connectPort: 5173 }],
+      ])
+
+      const needs = needsPortForwardingUpdate('172.30.149.249', [3001, 5173], rules)
+
+      expect(needs).toBe(true)
+    })
+
+    it('returns true when rules point to wrong port', () => {
+      const rules = new Map<number, PortProxyRule>([
+        [3001, { connectAddress: '172.30.149.249', connectPort: 8080 }], // wrong connect port!
+        [5173, { connectAddress: '172.30.149.249', connectPort: 5173 }],
+      ])
+
+      const needs = needsPortForwardingUpdate('172.30.149.249', [3001, 5173], rules)
+
+      expect(needs).toBe(true)
+    })
+
+    it('returns true when only one port is configured', () => {
+      const rules = new Map<number, PortProxyRule>([
+        [3001, { connectAddress: '172.30.149.249', connectPort: 3001 }],
+      ])
+
+      const needs = needsPortForwardingUpdate('172.30.149.249', [3001, 5173], rules)
+
+      expect(needs).toBe(true)
+    })
+
+    it('returns false when all ports point to correct IP and port', () => {
+      const rules = new Map<number, PortProxyRule>([
+        [3001, { connectAddress: '172.30.149.249', connectPort: 3001 }],
+        [5173, { connectAddress: '172.30.149.249', connectPort: 5173 }],
+      ])
+
+      const needs = needsPortForwardingUpdate('172.30.149.249', [3001, 5173], rules)
+
+      expect(needs).toBe(false)
     })
   })
 })
