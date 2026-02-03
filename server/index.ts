@@ -229,7 +229,7 @@ async function main() {
       {},
       { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
     )
-    wsHandler.broadcast({ type: 'sessions.updated', projects: codingCliIndexer.getProjects() })
+    wsHandler.broadcastSessionsUpdated(codingCliIndexer.getProjects())
     await withPerfSpan(
       'claude_refresh',
       () => claudeIndexer.refresh(),
@@ -253,7 +253,7 @@ async function main() {
       {},
       { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
     )
-    wsHandler.broadcast({ type: 'sessions.updated', projects: codingCliIndexer.getProjects() })
+    wsHandler.broadcastSessionsUpdated(codingCliIndexer.getProjects())
     await withPerfSpan(
       'claude_refresh',
       () => claudeIndexer.refresh(),
@@ -349,7 +349,7 @@ async function main() {
       createdAtOverride,
     })
     await codingCliIndexer.refresh()
-    wsHandler.broadcast({ type: 'sessions.updated', projects: codingCliIndexer.getProjects() })
+    wsHandler.broadcastSessionsUpdated(codingCliIndexer.getProjects())
     await claudeIndexer.refresh()
     res.json(next)
   })
@@ -360,7 +360,7 @@ async function main() {
     const compositeKey = rawId.includes(':') ? rawId : makeSessionKey(provider, rawId)
     await configStore.deleteSession(compositeKey)
     await codingCliIndexer.refresh()
-    wsHandler.broadcast({ type: 'sessions.updated', projects: codingCliIndexer.getProjects() })
+    wsHandler.broadcastSessionsUpdated(codingCliIndexer.getProjects())
     await claudeIndexer.refresh()
     res.json({ ok: true })
   })
@@ -370,7 +370,7 @@ async function main() {
     if (!projectPath || !color) return res.status(400).json({ error: 'projectPath and color required' })
     await configStore.setProjectColor(projectPath, color)
     await codingCliIndexer.refresh()
-    wsHandler.broadcast({ type: 'sessions.updated', projects: codingCliIndexer.getProjects() })
+    wsHandler.broadcastSessionsUpdated(codingCliIndexer.getProjects())
     await claudeIndexer.refresh()
     res.json({ ok: true })
   })
@@ -485,7 +485,7 @@ async function main() {
 
   // Coding CLI watcher hooks
   codingCliIndexer.onUpdate((projects) => {
-    wsHandler.broadcast({ type: 'sessions.updated', projects })
+    wsHandler.broadcastSessionsUpdated(projects)
 
     // Auto-update terminal titles based on session data
     for (const project of projects) {

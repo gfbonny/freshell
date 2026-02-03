@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { enableMapSet } from 'immer'
 import sessionsReducer, {
   setProjects,
+  clearProjects,
+  mergeProjects,
   toggleProjectExpanded,
   setProjectExpanded,
   collapseAll,
@@ -126,6 +128,121 @@ describe('sessionsSlice', () => {
       }
       const state = sessionsReducer(stateWithExpanded, setProjects(mockProjects))
       expect(state.expandedProjects.has('/project/one')).toBe(true)
+    })
+  })
+
+  describe('clearProjects', () => {
+    it('clears all projects', () => {
+      const stateWithProjects = {
+        ...initialState,
+        projects: mockProjects,
+      }
+      const state = sessionsReducer(stateWithProjects, clearProjects())
+      expect(state.projects).toEqual([])
+    })
+
+    it('preserves expandedProjects when clearing', () => {
+      const stateWithExpanded = {
+        projects: mockProjects,
+        expandedProjects: new Set(['/project/one']),
+      }
+      const state = sessionsReducer(stateWithExpanded, clearProjects())
+      expect(state.projects).toEqual([])
+      expect(state.expandedProjects.has('/project/one')).toBe(true)
+    })
+
+    it('does not update lastLoadedAt', () => {
+      const stateWithTimestamp = {
+        ...initialState,
+        projects: mockProjects,
+        lastLoadedAt: 1700000000000,
+      }
+      const state = sessionsReducer(stateWithTimestamp, clearProjects())
+      expect(state.lastLoadedAt).toBe(1700000000000)
+    })
+  })
+
+  describe('mergeProjects', () => {
+    it('adds new projects to empty state', () => {
+      const state = sessionsReducer(initialState, mergeProjects(mockProjects))
+      expect(state.projects.length).toBe(3)
+    })
+
+    it('merges projects with existing by projectPath', () => {
+      const existingProjects: ProjectGroup[] = [
+        {
+          projectPath: '/project/one',
+          sessions: [{ sessionId: 'old-session', projectPath: '/project/one', updatedAt: 1600000000000 }],
+        },
+        {
+          projectPath: '/project/existing',
+          sessions: [],
+        },
+      ]
+      const stateWithProjects = {
+        ...initialState,
+        projects: existingProjects,
+      }
+
+      const newProjects: ProjectGroup[] = [
+        {
+          projectPath: '/project/one',
+          sessions: [{ sessionId: 'new-session', projectPath: '/project/one', updatedAt: 1700000000000 }],
+          color: '#ff0000',
+        },
+        {
+          projectPath: '/project/new',
+          sessions: [],
+        },
+      ]
+
+      const state = sessionsReducer(stateWithProjects, mergeProjects(newProjects))
+      expect(state.projects.length).toBe(3)
+      // /project/one should be updated with new data
+      const projectOne = state.projects.find(p => p.projectPath === '/project/one')
+      expect(projectOne?.sessions[0].sessionId).toBe('new-session')
+      expect(projectOne?.color).toBe('#ff0000')
+      // /project/existing should still be there
+      expect(state.projects.some(p => p.projectPath === '/project/existing')).toBe(true)
+      // /project/new should be added
+      expect(state.projects.some(p => p.projectPath === '/project/new')).toBe(true)
+    })
+
+    it('sets lastLoadedAt timestamp', () => {
+      const beforeTime = Date.now()
+      const state = sessionsReducer(initialState, mergeProjects(mockProjects))
+      const afterTime = Date.now()
+      expect(state.lastLoadedAt).toBeGreaterThanOrEqual(beforeTime)
+      expect(state.lastLoadedAt).toBeLessThanOrEqual(afterTime)
+    })
+
+    it('handles empty merge array', () => {
+      const stateWithProjects = {
+        ...initialState,
+        projects: mockProjects,
+      }
+      const state = sessionsReducer(stateWithProjects, mergeProjects([]))
+      expect(state.projects.length).toBe(3)
+    })
+
+    it('supports chunked loading workflow', () => {
+      // First chunk with clear
+      let state = sessionsReducer(initialState, clearProjects())
+      state = sessionsReducer(state, mergeProjects([mockProjects[0]]))
+      expect(state.projects.length).toBe(1)
+
+      // Second chunk with append
+      state = sessionsReducer(state, mergeProjects([mockProjects[1]]))
+      expect(state.projects.length).toBe(2)
+
+      // Third chunk with append
+      state = sessionsReducer(state, mergeProjects([mockProjects[2]]))
+      expect(state.projects.length).toBe(3)
+      expect(state.projects.map(p => p.projectPath)).toEqual([
+        '/project/one',
+        '/project/two',
+        '/project/three',
+      ])
     })
   })
 

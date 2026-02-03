@@ -16,6 +16,8 @@ const MAX_CONNECTIONS = Number(process.env.MAX_CONNECTIONS || 10)
 const HELLO_TIMEOUT_MS = Number(process.env.HELLO_TIMEOUT_MS || 5_000)
 const PING_INTERVAL_MS = Number(process.env.PING_INTERVAL_MS || 30_000)
 const MAX_WS_BUFFERED_AMOUNT = Number(process.env.MAX_WS_BUFFERED_AMOUNT || 2 * 1024 * 1024)
+// Max payload size per WebSocket message for mobile browser compatibility (500KB)
+const MAX_CHUNK_BYTES = Number(process.env.MAX_WS_CHUNK_BYTES || 500 * 1024)
 
 const log = logger.child({ component: 'ws' })
 const perfConfig = getPerfConfig()
@@ -25,6 +27,8 @@ interface LiveWebSocket extends WebSocket {
   isAlive?: boolean
   connectionId?: string
   connectedAt?: number
+  // Generation counter for chunked session updates to prevent interleaving
+  sessionUpdateGeneration?: number
 }
 
 const CLOSE_CODES = {
@@ -49,6 +53,43 @@ const ErrorCode = z.enum([
 
 function nowIso() {
   return new Date().toISOString()
+}
+
+/**
+ * Chunk projects array into batches that fit within MAX_CHUNK_BYTES when serialized.
+ * This ensures mobile browsers with limited WebSocket buffers can receive the data.
+ * Uses Buffer.byteLength for accurate UTF-8 byte counting (not UTF-16 code units).
+ */
+export function chunkProjects(projects: ProjectGroup[], maxBytes: number): ProjectGroup[][] {
+  if (projects.length === 0) return [[]]
+
+  const chunks: ProjectGroup[][] = []
+  let currentChunk: ProjectGroup[] = []
+  let currentSize = 0
+  // Base overhead for message wrapper, plus max flag length ('"append":true' is longer than '"clear":true')
+  const baseOverhead = Buffer.byteLength(JSON.stringify({ type: 'sessions.updated', projects: [] }))
+  const flagOverhead = Buffer.byteLength(',"append":true')
+  const overhead = baseOverhead + flagOverhead
+
+  for (const project of projects) {
+    const projectJson = JSON.stringify(project)
+    const projectSize = Buffer.byteLength(projectJson)
+    // Account for comma separator between array elements (except first element)
+    const separatorSize = currentChunk.length > 0 ? 1 : 0
+    if (currentChunk.length > 0 && currentSize + separatorSize + projectSize + overhead > maxBytes) {
+      chunks.push(currentChunk)
+      currentChunk = []
+      currentSize = 0
+    }
+    currentChunk.push(project)
+    currentSize += (currentChunk.length > 1 ? 1 : 0) + projectSize // Add comma for non-first elements
+  }
+
+  if (currentChunk.length > 0) {
+    chunks.push(currentChunk)
+  }
+
+  return chunks
 }
 
 const HelloSchema = z.object({
@@ -520,13 +561,51 @@ export class WsHandler {
         this.safeSend(ws, { type: 'settings.updated', settings: snapshot.settings })
       }
       if (snapshot.projects) {
-        this.safeSend(ws, { type: 'sessions.updated', projects: snapshot.projects })
+        await this.sendChunkedSessions(ws, snapshot.projects)
       }
       if (typeof snapshot.perfLogging === 'boolean') {
         this.safeSend(ws, { type: 'perf.logging', enabled: snapshot.perfLogging })
       }
     } catch (err) {
       logger.warn({ err }, 'Failed to send handshake snapshot')
+    }
+  }
+
+  /**
+   * Send chunked sessions to a single WebSocket client with interleave protection.
+   * Uses a generation counter to cancel in-flight sends when a new update arrives.
+   */
+  private async sendChunkedSessions(ws: LiveWebSocket, projects: ProjectGroup[]): Promise<void> {
+    // Increment generation to cancel any in-flight sends for this connection
+    const generation = (ws.sessionUpdateGeneration = (ws.sessionUpdateGeneration || 0) + 1)
+    const chunks = chunkProjects(projects, MAX_CHUNK_BYTES)
+
+    for (let i = 0; i < chunks.length; i++) {
+      // Bail out if connection closed or a newer update has started
+      if (ws.readyState !== WebSocket.OPEN) return
+      if (ws.sessionUpdateGeneration !== generation) return
+
+      const isFirst = i === 0
+      let msg: { type: 'sessions.updated'; projects: ProjectGroup[]; clear?: true; append?: true }
+
+      if (chunks.length === 1) {
+        // Single chunk: no flags needed (backwards compatible)
+        msg = { type: 'sessions.updated', projects: chunks[i] }
+      } else if (isFirst) {
+        // First chunk: clear existing data
+        msg = { type: 'sessions.updated', projects: chunks[i], clear: true }
+      } else {
+        // Subsequent chunks: append to existing
+        msg = { type: 'sessions.updated', projects: chunks[i], append: true }
+      }
+
+      this.safeSend(ws, msg)
+
+      // Yield to event loop between chunks to allow other processing
+      // This helps prevent blocking and allows the buffer to flush
+      if (i < chunks.length - 1) {
+        await new Promise<void>((resolve) => setImmediate(resolve))
+      }
     }
   }
 
@@ -922,6 +1001,19 @@ export class WsHandler {
     for (const ws of this.connections) {
       if (ws.readyState === WebSocket.OPEN) {
         this.send(ws, msg)
+      }
+    }
+  }
+
+  /**
+   * Broadcast sessions.updated to all connected clients with chunking for mobile compatibility.
+   * This handles backpressure per-client to avoid overwhelming mobile WebSocket buffers.
+   */
+  broadcastSessionsUpdated(projects: ProjectGroup[]): void {
+    for (const ws of this.connections) {
+      if (ws.readyState === WebSocket.OPEN) {
+        // Fire and forget - each client handles its own backpressure
+        void this.sendChunkedSessions(ws, projects)
       }
     }
   }

@@ -59,6 +59,48 @@ function waitForMessage(ws: WebSocket, predicate: (msg: any) => boolean, timeout
   })
 }
 
+function collectAllMessages(
+  ws: WebSocket,
+  predicate: (msg: any) => boolean,
+  idleTimeoutMs = 500,
+  maxTimeoutMs = 5000
+): Promise<any[]> {
+  return new Promise((resolve, reject) => {
+    const messages: any[] = []
+    let idleTimeout: ReturnType<typeof setTimeout>
+
+    const maxTimeout = setTimeout(() => {
+      clearTimeout(idleTimeout)
+      ws.off('message', handler)
+      if (messages.length > 0) {
+        resolve(messages)
+      } else {
+        reject(new Error('Timeout waiting for messages'))
+      }
+    }, maxTimeoutMs)
+
+    const resetIdleTimeout = () => {
+      clearTimeout(idleTimeout)
+      idleTimeout = setTimeout(() => {
+        clearTimeout(maxTimeout)
+        ws.off('message', handler)
+        resolve(messages)
+      }, idleTimeoutMs)
+    }
+
+    const handler = (data: WebSocket.Data) => {
+      const msg = JSON.parse(data.toString())
+      if (predicate(msg)) {
+        messages.push(msg)
+        resetIdleTimeout()
+      }
+    }
+
+    ws.on('message', handler)
+    resetIdleTimeout()
+  })
+}
+
 describe('ws handshake snapshot', () => {
   let server: http.Server | undefined
   let port: number
@@ -162,6 +204,105 @@ describe('ws handshake snapshot', () => {
 
       expect(settingsMsg.settings).toEqual(snapshot.settings)
       expect(sessionsMsg.projects).toEqual(snapshot.projects)
+    } finally {
+      await closeWs()
+    }
+  })
+})
+
+describe('ws handshake snapshot with chunking', () => {
+  let server: http.Server | undefined
+  let port: number
+  let largeSnapshot: Snapshot
+
+  beforeAll(async () => {
+    process.env.NODE_ENV = 'test'
+    process.env.AUTH_TOKEN = 'testtoken-testtoken'
+    process.env.HELLO_TIMEOUT_MS = '100'
+    // Set a very small chunk size to force multiple chunks
+    process.env.MAX_WS_CHUNK_BYTES = '500'
+
+    // Need to re-import WsHandler to pick up the new env var
+    vi.resetModules()
+    const { WsHandler } = await import('../../server/ws-handler')
+
+    // Create many projects to force chunking
+    const projects = Array.from({ length: 20 }, (_, i) => ({
+      projectPath: `/tmp/project-${i}`,
+      sessions: Array.from({ length: 5 }, (_, j) => ({
+        provider: 'claude' as const,
+        sessionId: `sess-${i}-${j}`,
+        projectPath: `/tmp/project-${i}`,
+        updatedAt: Date.now(),
+      })),
+    }))
+
+    largeSnapshot = {
+      settings: { theme: 'dark' },
+      projects,
+    }
+
+    server = http.createServer((_req, res) => {
+      res.statusCode = 404
+      res.end()
+    })
+
+    new (WsHandler as any)(
+      server,
+      new FakeRegistry() as any,
+      undefined,
+      undefined,
+      async () => largeSnapshot
+    )
+
+    const info = await listen(server)
+    port = info.port
+  }, HOOK_TIMEOUT_MS)
+
+  afterAll(async () => {
+    delete process.env.MAX_WS_CHUNK_BYTES
+    if (!server) return
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }, HOOK_TIMEOUT_MS)
+
+  it('sends chunked sessions with clear/append flags for large data', async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`)
+    const closeWs = async () => {
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        ws.terminate()
+      }
+      await new Promise<void>((resolve) => ws.on('close', () => resolve()))
+    }
+
+    try {
+      await new Promise<void>((resolve) => ws.on('open', () => resolve()))
+
+      const readyPromise = waitForMessage(ws, (m) => m.type === 'ready')
+      // Collect all sessions.updated messages (wait for idle to detect end of stream)
+      const sessionsPromise = collectAllMessages(ws, (m) => m.type === 'sessions.updated', 500, 5000)
+
+      ws.send(JSON.stringify({ type: 'hello', token: 'testtoken-testtoken' }))
+
+      await readyPromise
+
+      const sessionsMsgs = await sessionsPromise
+
+      // Verify we got multiple chunks
+      expect(sessionsMsgs.length).toBeGreaterThanOrEqual(2)
+
+      // First chunk should have clear: true
+      expect(sessionsMsgs[0].clear).toBe(true)
+      expect(sessionsMsgs[0].append).toBeUndefined()
+
+      // Subsequent chunks should have append: true
+      for (let i = 1; i < sessionsMsgs.length; i++) {
+        expect(sessionsMsgs[i].append).toBe(true)
+        expect(sessionsMsgs[i].clear).toBeUndefined()
+      }
+
+      // Verify all projects are included across chunks
+      const allProjects = sessionsMsgs.flatMap((m) => m.projects)
+      expect(allProjects.length).toBe(largeSnapshot.projects.length)
     } finally {
       await closeWs()
     }

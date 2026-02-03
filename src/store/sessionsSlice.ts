@@ -20,6 +20,18 @@ export const sessionsSlice = createSlice({
       state.projects = action.payload
       state.lastLoadedAt = Date.now()
     },
+    clearProjects: (state) => {
+      state.projects = []
+    },
+    mergeProjects: (state, action: PayloadAction<ProjectGroup[]>) => {
+      // Merge incoming projects with existing ones by projectPath
+      const projectMap = new Map(state.projects.map((p) => [p.projectPath, p]))
+      for (const project of action.payload) {
+        projectMap.set(project.projectPath, project)
+      }
+      state.projects = Array.from(projectMap.values())
+      state.lastLoadedAt = Date.now()
+    },
     toggleProjectExpanded: (state, action: PayloadAction<string>) => {
       const key = action.payload
       if (state.expandedProjects.has(key)) state.expandedProjects.delete(key)
@@ -39,7 +51,7 @@ export const sessionsSlice = createSlice({
   },
 })
 
-export const { setProjects, toggleProjectExpanded, setProjectExpanded, collapseAll, expandAll } =
+export const { setProjects, clearProjects, mergeProjects, toggleProjectExpanded, setProjectExpanded, collapseAll, expandAll } =
   sessionsSlice.actions
 
 export default sessionsSlice.reducer

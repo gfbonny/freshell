@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { setStatus, setError, setPlatform } from '@/store/connectionSlice'
 import { setSettings } from '@/store/settingsSlice'
-import { setProjects } from '@/store/sessionsSlice'
+import { setProjects, clearProjects, mergeProjects } from '@/store/sessionsSlice'
 import { addTab, removeTab, switchToNextTab, switchToPrevTab } from '@/store/tabsSlice'
 import { api } from '@/lib/api'
 import { buildShareUrl } from '@/lib/utils'
@@ -205,7 +205,18 @@ export default function App() {
       const unsubscribe = ws.onMessage((msg) => {
         if (!msg?.type) return
         if (msg.type === 'sessions.updated') {
-          dispatch(setProjects(msg.projects || []))
+          // Support chunked sessions for mobile browsers with limited WebSocket buffers
+          if (msg.clear) {
+            // First chunk: clear existing, then merge
+            dispatch(clearProjects())
+            dispatch(mergeProjects(msg.projects || []))
+          } else if (msg.append) {
+            // Subsequent chunks: merge with existing
+            dispatch(mergeProjects(msg.projects || []))
+          } else {
+            // Full update (broadcasts, legacy): replace all
+            dispatch(setProjects(msg.projects || []))
+          }
         }
         if (msg.type === 'settings.updated') {
           dispatch(setSettings(applyLocalTerminalFontFamily(msg.settings)))
