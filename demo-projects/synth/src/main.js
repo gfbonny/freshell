@@ -1,8 +1,8 @@
 import './style.css';
 
-// ===========================================
+// ===========================================================================
 // CONSTANTS
-// ===========================================
+// ===========================================================================
 
 const NOTES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 const BLACK_INDICES = new Set([1, 3, 6, 8, 10]);
@@ -10,6 +10,8 @@ const BLACK_INDICES = new Set([1, 3, 6, 8, 10]);
 function midiToFreq(m) { return 440 * Math.pow(2, (m - 69) / 12); }
 function midiToName(m) { return NOTES[m % 12] + (Math.floor(m / 12) - 1); }
 
+// Computer keyboard → MIDI note mapping
+// Lower octave (Z row): C3-B3   Upper octave (Q row): C4-B4
 const KEY_MAP = {
   'z':48,'s':49,'x':50,'d':51,'c':52,'v':53,
   'g':54,'b':55,'h':56,'n':57,'j':58,'m':59,
@@ -19,15 +21,16 @@ const KEY_MAP = {
 const MIDI_LABEL = {};
 Object.entries(KEY_MAP).forEach(([k, v]) => { MIDI_LABEL[v] = k.toUpperCase(); });
 
-// Black key offsets within one octave (in white-key-width units)
+// Black key visual offsets (in white-key-width units) within one octave
 const BLACK_OFFSETS = [
-  { semi: 1, pos: 0.6 },
-  { semi: 3, pos: 1.6 },
-  { semi: 6, pos: 3.55 },
-  { semi: 8, pos: 4.55 },
-  { semi: 10, pos: 5.55 },
+  { semi: 1, pos: 0.62 },
+  { semi: 3, pos: 1.62 },
+  { semi: 6, pos: 3.58 },
+  { semi: 8, pos: 4.58 },
+  { semi: 10, pos: 5.58 },
 ];
 
+// SVG paths for waveform icons
 const WAVE_PATHS = {
   sine:     'M2,12 C6,2 14,2 20,12 C26,22 34,22 38,12',
   square:   'M2,20 V4 H11 V20 H20 V4 H29 V20 H38',
@@ -35,20 +38,26 @@ const WAVE_PATHS = {
   triangle: 'M2,20 L11,4 L20,20 L29,4 L38,20',
 };
 
-// ===========================================
+// Sequencer note rows (high to low): C4 down to C3
+const SEQ_NOTES = [60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50, 49, 48];
+const SEQ_ROWS = SEQ_NOTES.length;
+
+// ===========================================================================
 // STATE
-// ===========================================
+// ===========================================================================
 
 let audioCtx = null;
+let analyser = null;
 const voices = new Map();
 const activeEnvelopes = [];
 let waveform = 'sawtooth';
 const adsr = { attack: 0.05, decay: 0.2, sustain: 0.6, release: 0.3 };
 
-// Effects
+// Effects state
 let reverbMix = 0.25;
 let delayTime = 0.3;
 let delayFeedback = 0.35;
+let masterVolume = 0.5;
 
 // Audio nodes
 let masterGain, dryGain, reverbWet, convolver, delayNode, delayFbGain, delayOut;
@@ -60,7 +69,7 @@ let seqStep = 0;
 let nextStepTime = 0;
 let seqTimerId = null;
 let drawStep = -1;
-const seqData = Array.from({ length: 12 }, () => Array(16).fill(false));
+const seqData = Array.from({ length: SEQ_ROWS }, () => Array(16).fill(false));
 
 // Interaction
 const keyboardHeld = new Set();
@@ -70,17 +79,19 @@ let mouseIsDown = false;
 // DOM refs
 const keyEls = new Map();
 let adsrCanvas, adsrCtx;
-const seqCells = []; // [row][col] -> element
+let vizCanvas, vizCtx;
+const seqCells = [];
 let playBtn;
+let bpmValEl;
 
-// ===========================================
+// ===========================================================================
 // AUDIO ENGINE
-// ===========================================
+// ===========================================================================
 
 function ensureAudio() {
   if (!audioCtx) {
     audioCtx = new AudioContext();
-    initEffects();
+    initAudio();
   }
   if (audioCtx.state === 'suspended') audioCtx.resume();
 }
@@ -97,24 +108,28 @@ function createImpulse(dur, decay) {
   return buf;
 }
 
-function initEffects() {
+function initAudio() {
+  // Master gain
   masterGain = audioCtx.createGain();
-  masterGain.gain.value = 0.4;
+  masterGain.gain.value = masterVolume;
 
-  // Dry
+  // Analyser for visualizer
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 2048;
+  analyser.smoothingTimeConstant = 0.8;
+
+  // Dry path
   dryGain = audioCtx.createGain();
   dryGain.gain.value = 1 - reverbMix;
   masterGain.connect(dryGain);
-  dryGain.connect(audioCtx.destination);
 
-  // Reverb
+  // Reverb (ConvolverNode)
   convolver = audioCtx.createConvolver();
   convolver.buffer = createImpulse(2.5, 3);
   reverbWet = audioCtx.createGain();
   reverbWet.gain.value = reverbMix;
   masterGain.connect(convolver);
   convolver.connect(reverbWet);
-  reverbWet.connect(audioCtx.destination);
 
   // Delay
   delayNode = audioCtx.createDelay(2.0);
@@ -122,12 +137,17 @@ function initEffects() {
   delayFbGain = audioCtx.createGain();
   delayFbGain.gain.value = delayFeedback;
   delayOut = audioCtx.createGain();
-  delayOut.gain.value = 0.5;
+  delayOut.gain.value = 0.4;
   masterGain.connect(delayNode);
   delayNode.connect(delayOut);
-  delayOut.connect(audioCtx.destination);
   delayNode.connect(delayFbGain);
   delayFbGain.connect(delayNode);
+
+  // Route all through analyser → destination
+  dryGain.connect(analyser);
+  reverbWet.connect(analyser);
+  delayOut.connect(analyser);
+  analyser.connect(audioCtx.destination);
 }
 
 function noteOn(midi) {
@@ -190,51 +210,77 @@ function scheduleSeqNote(midi, time, gate) {
   osc.stop(time + gate + adsr.release + 0.05);
 }
 
-// ===========================================
-// BUILD UI
-// ===========================================
+// ===========================================================================
+// DOM HELPERS
+// ===========================================================================
 
-function el(tag, cls, parent) {
+function mk(tag, cls, parent) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
   if (parent) parent.appendChild(e);
   return e;
 }
 
+function svgEl(tag, attrs) {
+  const e = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  if (attrs) Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v));
+  return e;
+}
+
+// ===========================================================================
+// BUILD UI
+// ===========================================================================
+
 function buildUI() {
   const app = document.getElementById('app');
 
   // Header
-  const header = el('header', 'header', app);
-  const h1 = el('h1', null, header);
+  const header = mk('header', 'header', app);
+  const h1 = mk('h1', null, header);
   h1.textContent = 'SYNTHWAVE';
-  const sub = el('span', 'subtitle', header);
+  const sub = mk('span', 'subtitle', header);
   sub.textContent = 'web audio synthesizer';
 
+  // Visualizer
+  buildVisualizer(app);
+
   // Controls row
-  const row = el('div', 'controls-row', app);
+  const row = mk('div', 'controls-row', app);
   buildOscPanel(row);
   buildEnvelopePanel(row);
   buildEffectsPanel(row);
 
   // Keyboard
-  const kbSection = el('div', 'keyboard-section', app);
+  const kbSection = mk('div', 'keyboard-section', app);
   buildKeyboard(kbSection);
 
   // Sequencer
   buildSequencer(app);
 }
 
+// ---------- Visualizer ----------
+function buildVisualizer(parent) {
+  const panel = mk('section', 'panel visualizer-panel', parent);
+  const h2 = mk('h2', null, panel);
+  h2.textContent = 'Analyser';
+  vizCanvas = mk('canvas', null, panel);
+  vizCanvas.id = 'visualizer-canvas';
+  vizCanvas.width = 1100;
+  vizCanvas.height = 130;
+  vizCtx = vizCanvas.getContext('2d');
+}
+
 // ---------- Oscillator ----------
 function buildOscPanel(parent) {
-  const panel = el('section', 'panel', parent);
-  const h2 = el('h2', null, panel); h2.textContent = 'Oscillator';
-  const sel = el('div', 'waveform-selector', panel);
+  const panel = mk('section', 'panel', parent);
+  const h2 = mk('h2', null, panel);
+  h2.textContent = 'Oscillator';
+  const sel = mk('div', 'waveform-selector', panel);
 
   Object.entries(WAVE_PATHS).forEach(([type, path]) => {
-    const btn = el('div', 'wave-btn', sel);
+    const btn = mk('div', 'wave-btn', sel);
     if (type === waveform) btn.classList.add('active');
-    btn.innerHTML = `<svg viewBox="0 0 40 24"><path d="${path}"/></svg>`;
+    btn.innerHTML = `<svg viewBox="0 0 40 24"><path d="${path}"/></svg><span class="wave-name">${type}</span>`;
     btn.addEventListener('click', () => {
       waveform = type;
       sel.querySelectorAll('.wave-btn').forEach(b => b.classList.remove('active'));
@@ -245,10 +291,11 @@ function buildOscPanel(parent) {
 
 // ---------- Envelope ----------
 function buildEnvelopePanel(parent) {
-  const panel = el('section', 'panel', parent);
-  const h2 = el('h2', null, panel); h2.textContent = 'Envelope';
-  const inner = el('div', 'envelope-inner', panel);
-  const sliders = el('div', 'adsr-sliders', inner);
+  const panel = mk('section', 'panel', parent);
+  const h2 = mk('h2', null, panel);
+  h2.textContent = 'Envelope';
+  const inner = mk('div', 'envelope-inner', panel);
+  const sliders = mk('div', 'adsr-sliders', inner);
 
   const params = [
     { key: 'attack',  label: 'A', min: 0.005, max: 2,   fmt: v => v < 1 ? (v * 1000).toFixed(0) + 'ms' : v.toFixed(1) + 's' },
@@ -258,13 +305,13 @@ function buildEnvelopePanel(parent) {
   ];
 
   params.forEach(p => {
-    const grp = el('div', 'slider-group', sliders);
-    const valSpan = el('span', 'slider-val', grp);
+    const grp = mk('div', 'slider-group', sliders);
+    const valSpan = mk('span', 'slider-val', grp);
     valSpan.textContent = p.fmt(adsr[p.key]);
-    const track = el('div', 'slider-track', grp);
-    const fill = el('div', 'slider-fill', track);
-    const thumb = el('div', 'slider-thumb', track);
-    const lbl = el('label', null, grp);
+    const track = mk('div', 'slider-track', grp);
+    const fill = mk('div', 'slider-fill', track);
+    const thumb = mk('div', 'slider-thumb', track);
+    const lbl = mk('label', null, grp);
     lbl.textContent = p.label;
 
     function setVal(v) {
@@ -277,12 +324,12 @@ function buildEnvelopePanel(parent) {
     }
     setVal(adsr[p.key]);
 
-    setupVerticalDrag(track, (pct) => {
+    setupVerticalDrag(track, pct => {
       setVal(p.min + pct * (p.max - p.min));
     });
   });
 
-  adsrCanvas = el('canvas', null, inner);
+  adsrCanvas = mk('canvas', null, inner);
   adsrCanvas.id = 'adsr-canvas';
   adsrCanvas.width = 240;
   adsrCanvas.height = 120;
@@ -310,24 +357,23 @@ function setupVerticalDrag(track, onChange) {
 
 // ---------- Effects ----------
 function buildEffectsPanel(parent) {
-  const panel = el('section', 'panel', parent);
-  const h2 = el('h2', null, panel); h2.textContent = 'Effects';
-  const inner = el('div', 'effects-inner', panel);
+  const panel = mk('section', 'panel', parent);
+  const h2 = mk('h2', null, panel);
+  h2.textContent = 'Effects';
+  const inner = mk('div', 'effects-inner', panel);
 
   // Reverb
-  const revGrp = el('div', 'fx-group', inner);
-  const revLabel = el('span', 'fx-group-label', revGrp);
-  revLabel.textContent = 'REVERB';
+  const revGrp = mk('div', 'fx-group', inner);
+  mk('span', 'fx-group-label', revGrp).textContent = 'REVERB';
   buildKnob(revGrp, 'Mix', reverbMix, 0, 1, v => {
     reverbMix = v;
     if (dryGain) { dryGain.gain.value = 1 - v; reverbWet.gain.value = v; }
   });
 
   // Delay
-  const delGrp = el('div', 'fx-group', inner);
-  const delLabel = el('span', 'fx-group-label', delGrp);
-  delLabel.textContent = 'DELAY';
-  const delKnobs = el('div', 'knobs-row', delGrp);
+  const delGrp = mk('div', 'fx-group', inner);
+  mk('span', 'fx-group-label', delGrp).textContent = 'DELAY';
+  const delKnobs = mk('div', 'knobs-row', delGrp);
   buildKnob(delKnobs, 'Time', delayTime, 0.01, 1.0, v => {
     delayTime = v;
     if (delayNode) delayNode.delayTime.value = v;
@@ -336,39 +382,41 @@ function buildEffectsPanel(parent) {
     delayFeedback = v;
     if (delayFbGain) delayFbGain.gain.value = v;
   });
+
+  // Master Volume
+  const volGrp = mk('div', 'fx-group', inner);
+  mk('span', 'fx-group-label', volGrp).textContent = 'MASTER';
+  buildKnob(volGrp, 'Vol', masterVolume, 0, 1, v => {
+    masterVolume = v;
+    if (masterGain) masterGain.gain.value = v;
+  }, 'vol-knob');
 }
 
 // ---------- Knob ----------
-function buildKnob(parent, label, initial, min, max, onChange) {
-  const R = 22;
+function buildKnob(parent, label, initial, min, max, onChange, extraClass) {
+  const R = 20;
   const C = 2 * Math.PI * R;
   const ARC = C * 0.75;
 
-  const container = el('div', 'knob-container', parent);
-  const ring = el('div', 'knob-ring', container);
+  const container = mk('div', 'knob-container' + (extraClass ? ' ' + extraClass : ''), parent);
+  const ring = mk('div', 'knob-ring', container);
 
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('viewBox', '0 0 56 56');
+  const svg = svgEl('svg', { viewBox: '0 0 52 52' });
   svg.classList.add('knob-svg');
-  const bgCirc = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-  bgCirc.setAttribute('cx', '28'); bgCirc.setAttribute('cy', '28');
-  bgCirc.setAttribute('r', String(R));
+  const bgCirc = svgEl('circle', { cx: '26', cy: '26', r: String(R), 'stroke-dasharray': `${ARC} ${C}` });
   bgCirc.classList.add('track-bg');
-  bgCirc.setAttribute('stroke-dasharray', `${ARC} ${C}`);
-  const fillCirc = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-  fillCirc.setAttribute('cx', '28'); fillCirc.setAttribute('cy', '28');
-  fillCirc.setAttribute('r', String(R));
+  const fillCirc = svgEl('circle', { cx: '26', cy: '26', r: String(R) });
   fillCirc.classList.add('track-fill');
   svg.appendChild(bgCirc);
   svg.appendChild(fillCirc);
   ring.appendChild(svg);
 
-  const body = el('div', 'knob-body', ring);
-  const ind = el('div', 'knob-indicator', body);
+  const body = mk('div', 'knob-body', ring);
+  mk('div', 'knob-indicator', body);
 
-  const lblEl = el('span', 'knob-label', container);
+  const lblEl = mk('span', 'knob-label', container);
   lblEl.textContent = label;
-  const valEl = el('span', 'knob-value', container);
+  const valEl = mk('span', 'knob-value', container);
 
   let value = initial;
   function update(v) {
@@ -382,7 +430,6 @@ function buildKnob(parent, label, initial, min, max, onChange) {
   }
   update(initial);
 
-  // Drag interaction
   let startY, startVal;
   body.addEventListener('pointerdown', e => {
     e.preventDefault();
@@ -391,8 +438,7 @@ function buildKnob(parent, label, initial, min, max, onChange) {
     startVal = value;
     function onMove(ev) {
       const dy = startY - ev.clientY;
-      const range = max - min;
-      update(startVal + (dy / 150) * range);
+      update(startVal + (dy / 150) * (max - min));
     }
     function onUp() {
       body.removeEventListener('pointermove', onMove);
@@ -401,42 +447,44 @@ function buildKnob(parent, label, initial, min, max, onChange) {
     body.addEventListener('pointermove', onMove);
     body.addEventListener('pointerup', onUp);
   });
+
+  return { update, getValue: () => value };
 }
 
 // ---------- Keyboard ----------
 function buildKeyboard(parent) {
-  const kb = el('div', 'keyboard', parent);
+  const kb = mk('div', 'keyboard', parent);
   const W = 42;
   const whiteNotes = [0, 2, 4, 5, 7, 9, 11];
 
   // White keys
   for (let oct = 0; oct < 2; oct++) {
     const base = 48 + oct * 12;
-    whiteNotes.forEach((semi, i) => {
+    whiteNotes.forEach((semi) => {
       const midi = base + semi;
-      const key = el('div', 'key white', kb);
+      const key = mk('div', 'key white', kb);
       key.dataset.midi = midi;
       key.style.position = 'relative';
       key.style.width = W + 'px';
       key.style.flexShrink = '0';
-      const note = el('span', 'key-note', key);
+      const note = mk('span', 'key-note', key);
       note.textContent = midiToName(midi);
-      const lbl = el('span', 'key-label', key);
+      const lbl = mk('span', 'key-label', key);
       lbl.textContent = MIDI_LABEL[midi] || '';
       keyEls.set(midi, key);
     });
   }
 
-  // Black keys
+  // Black keys (absolute positioned)
   for (let oct = 0; oct < 2; oct++) {
     const base = 48 + oct * 12;
     BLACK_OFFSETS.forEach(({ semi, pos }) => {
       const midi = base + semi;
-      const key = el('div', 'key black', kb);
+      const key = mk('div', 'key black', kb);
       key.dataset.midi = midi;
       const leftPx = (oct * 7 + pos) * W + (oct * 7 + Math.floor(pos)) * 1;
       key.style.left = leftPx + 'px';
-      const lbl = el('span', 'key-label', key);
+      const lbl = mk('span', 'key-label', key);
       lbl.textContent = MIDI_LABEL[midi] || '';
       keyEls.set(midi, key);
     });
@@ -475,49 +523,53 @@ function buildKeyboard(parent) {
 
 // ---------- Sequencer ----------
 function buildSequencer(parent) {
-  const panel = el('section', 'panel seq-panel', parent);
-  const hdr = el('div', 'seq-header', panel);
-  const h2 = el('h2', null, hdr); h2.textContent = 'Step Sequencer';
+  const panel = mk('section', 'panel seq-panel', parent);
+  const hdr = mk('div', 'seq-header', panel);
+  const h2 = mk('h2', null, hdr);
+  h2.textContent = 'Step Sequencer';
 
-  const ctrls = el('div', 'seq-controls', hdr);
-  playBtn = el('button', 'seq-btn', ctrls);
+  const ctrls = mk('div', 'seq-controls', hdr);
+  playBtn = mk('button', 'seq-btn', ctrls);
   playBtn.textContent = 'PLAY';
   playBtn.addEventListener('click', toggleSeq);
 
-  const bpmGrp = el('div', 'bpm-group', ctrls);
-  const bpmLbl = el('label', null, bpmGrp);
-  bpmLbl.textContent = 'BPM';
-  const bpmIn = el('input', 'bpm-input', bpmGrp);
-  bpmIn.type = 'number';
-  bpmIn.min = 40;
-  bpmIn.max = 300;
-  bpmIn.value = bpm;
-  bpmIn.addEventListener('input', () => {
-    const v = parseInt(bpmIn.value, 10);
-    if (v >= 40 && v <= 300) bpm = v;
+  // BPM with knob
+  const bpmGrp = mk('div', 'bpm-group', ctrls);
+  mk('label', null, bpmGrp).textContent = 'BPM';
+  bpmValEl = mk('span', 'knob-value', bpmGrp);
+  bpmValEl.textContent = bpm;
+  buildKnob(bpmGrp, '', bpm, 60, 200, v => {
+    bpm = Math.round(v);
+    bpmValEl.textContent = bpm;
   });
 
-  const wrapper = el('div', 'seq-grid-wrapper', panel);
+  // Step numbers
+  const stepNums = mk('div', 'step-numbers', panel);
+  for (let c = 0; c < 16; c++) {
+    const sn = mk('span', 'step-num', stepNums);
+    sn.textContent = c + 1;
+    if (c % 4 === 0) sn.classList.add('beat');
+  }
+
+  const wrapper = mk('div', 'seq-grid-wrapper', panel);
 
   // Labels
-  const labels = el('div', 'seq-labels', wrapper);
-  for (let r = 0; r < 12; r++) {
-    const noteIdx = 11 - r; // B3 at top
-    const name = NOTES[noteIdx] + '3';
-    const lbl = el('div', 'seq-label', labels);
+  const labels = mk('div', 'seq-labels', wrapper);
+  for (let r = 0; r < SEQ_ROWS; r++) {
+    const midi = SEQ_NOTES[r];
+    const name = midiToName(midi);
+    const lbl = mk('div', 'seq-label', labels);
     lbl.textContent = name;
-    if (BLACK_INDICES.has(noteIdx)) lbl.classList.add('sharp');
+    if (BLACK_INDICES.has(midi % 12)) lbl.classList.add('sharp');
   }
 
   // Grid
-  const grid = el('div', 'seq-grid', wrapper);
-  for (let r = 0; r < 12; r++) {
+  const grid = mk('div', 'seq-grid', wrapper);
+  grid.style.gridTemplateRows = `repeat(${SEQ_ROWS}, 22px)`;
+  for (let r = 0; r < SEQ_ROWS; r++) {
     seqCells[r] = [];
-    const noteIdx = 11 - r;
-    const isSharp = BLACK_INDICES.has(noteIdx);
     for (let c = 0; c < 16; c++) {
-      const cell = el('div', 'seq-cell', grid);
-      if (isSharp) cell.classList.add('sharp-row');
+      const cell = mk('div', 'seq-cell', grid);
       if (c % 4 === 0 && c > 0) cell.classList.add('beat-start');
       cell.addEventListener('click', () => {
         seqData[r][c] = !seqData[r][c];
@@ -528,9 +580,9 @@ function buildSequencer(parent) {
   }
 }
 
-// ===========================================
+// ===========================================================================
 // SEQUENCER PLAYBACK
-// ===========================================
+// ===========================================================================
 
 function toggleSeq() {
   if (seqPlaying) stopSeq(); else startSeq();
@@ -557,18 +609,17 @@ function stopSeq() {
 
 function seqScheduler() {
   while (nextStepTime < audioCtx.currentTime + 0.1) {
-    playStep(seqStep, nextStepTime);
+    playStepAt(seqStep, nextStepTime);
     nextStepTime += 60 / bpm / 4;
     seqStep = (seqStep + 1) % 16;
   }
 }
 
-function playStep(step, time) {
+function playStepAt(step, time) {
   const gate = (60 / bpm / 4) * 0.8;
-  for (let r = 0; r < 12; r++) {
+  for (let r = 0; r < SEQ_ROWS; r++) {
     if (seqData[r][step]) {
-      const noteIdx = 11 - r;
-      scheduleSeqNote(48 + noteIdx, time, gate);
+      scheduleSeqNote(SEQ_NOTES[r], time, gate);
     }
   }
   const ms = Math.max(0, (time - audioCtx.currentTime) * 1000);
@@ -577,7 +628,7 @@ function playStep(step, time) {
 
 function highlightStep(step) {
   clearStepHighlight();
-  for (let r = 0; r < 12; r++) {
+  for (let r = 0; r < SEQ_ROWS; r++) {
     seqCells[r][step].classList.add('step-active');
   }
   drawStep = step;
@@ -585,15 +636,15 @@ function highlightStep(step) {
 
 function clearStepHighlight() {
   if (drawStep >= 0) {
-    for (let r = 0; r < 12; r++) {
+    for (let r = 0; r < SEQ_ROWS; r++) {
       seqCells[r][drawStep].classList.remove('step-active');
     }
   }
 }
 
-// ===========================================
+// ===========================================================================
 // ADSR VISUALIZER
-// ===========================================
+// ===========================================================================
 
 function drawADSR() {
   if (!adsrCtx) return;
@@ -604,14 +655,14 @@ function drawADSR() {
   const dh = h - 2 * pad;
   adsrCtx.clearRect(0, 0, w, h);
 
-  // Proportional widths
-  const total = adsr.attack + adsr.decay + 0.25 + adsr.release;
+  // Proportional segment widths
+  const total = adsr.attack + adsr.decay + 0.3 + adsr.release;
   const aW = (adsr.attack / total) * dw;
   const decW = (adsr.decay / total) * dw;
-  const sW = (0.25 / total) * dw;
+  const sW = (0.3 / total) * dw;
   const rW = (adsr.release / total) * dw;
 
-  // Envelope points
+  // Envelope keypoints
   const pts = [
     [pad, pad + dh],
     [pad + aW, pad],
@@ -622,34 +673,34 @@ function drawADSR() {
 
   // Phase labels
   adsrCtx.font = '8px sans-serif';
-  adsrCtx.fillStyle = '#55557a';
+  adsrCtx.fillStyle = '#666680';
   adsrCtx.textAlign = 'center';
   adsrCtx.fillText('A', pad + aW / 2, h - 2);
   adsrCtx.fillText('D', pad + aW + decW / 2, h - 2);
   adsrCtx.fillText('S', pad + aW + decW + sW / 2, h - 2);
   adsrCtx.fillText('R', pad + aW + decW + sW + rW / 2, h - 2);
 
-  // Fill
+  // Gradient fill under curve
   adsrCtx.beginPath();
   pts.forEach(([x, y], i) => (i === 0 ? adsrCtx.moveTo(x, y) : adsrCtx.lineTo(x, y)));
   adsrCtx.lineTo(pts[4][0], pad + dh);
   adsrCtx.lineTo(pad, pad + dh);
   adsrCtx.closePath();
   const grad = adsrCtx.createLinearGradient(0, pad, 0, pad + dh);
-  grad.addColorStop(0, '#00e5ff25');
-  grad.addColorStop(1, '#00e5ff05');
+  grad.addColorStop(0, 'rgba(0, 240, 255, 0.15)');
+  grad.addColorStop(1, 'rgba(0, 240, 255, 0.02)');
   adsrCtx.fillStyle = grad;
   adsrCtx.fill();
 
-  // Stroke
+  // Cyan envelope line
   adsrCtx.beginPath();
   pts.forEach(([x, y], i) => (i === 0 ? adsrCtx.moveTo(x, y) : adsrCtx.lineTo(x, y)));
-  adsrCtx.strokeStyle = '#00e5ff';
+  adsrCtx.strokeStyle = '#00f0ff';
   adsrCtx.lineWidth = 2;
   adsrCtx.lineJoin = 'round';
   adsrCtx.stroke();
 
-  // Playhead
+  // Animated playhead dot on the most recent voice
   const voice = activeEnvelopes.length > 0 ? activeEnvelopes[activeEnvelopes.length - 1] : null;
   if (voice && audioCtx) {
     const now = audioCtx.currentTime;
@@ -669,38 +720,99 @@ function drawADSR() {
       } else if (elapsed < adsr.attack + adsr.decay) {
         const p = (elapsed - adsr.attack) / adsr.decay;
         x = pad + aW + p * decW;
-        y = pad + dh * (1 - adsr.sustain) * p;
+        y = pad + (1 - adsr.sustain) * dh * p;
       } else {
-        const p = Math.min((elapsed - adsr.attack - adsr.decay) / 0.25, 1);
+        const p = Math.min((elapsed - adsr.attack - adsr.decay) / 0.3, 1);
         x = pad + aW + decW + p * sW;
         y = pad + dh * (1 - adsr.sustain);
       }
     }
 
-    // Playhead line
+    // Playhead vertical line
     adsrCtx.beginPath();
     adsrCtx.moveTo(x, pad);
     adsrCtx.lineTo(x, pad + dh);
-    adsrCtx.strokeStyle = '#e040fb50';
+    adsrCtx.strokeStyle = 'rgba(255, 0, 170, 0.35)';
     adsrCtx.lineWidth = 1;
     adsrCtx.stroke();
 
     // Dot
     adsrCtx.beginPath();
     adsrCtx.arc(x, y, 4, 0, Math.PI * 2);
-    adsrCtx.fillStyle = '#e040fb';
+    adsrCtx.fillStyle = '#ff00aa';
     adsrCtx.fill();
     adsrCtx.beginPath();
-    adsrCtx.arc(x, y, 6, 0, Math.PI * 2);
-    adsrCtx.strokeStyle = '#e040fb40';
+    adsrCtx.arc(x, y, 7, 0, Math.PI * 2);
+    adsrCtx.strokeStyle = 'rgba(255, 0, 170, 0.3)';
     adsrCtx.lineWidth = 2;
     adsrCtx.stroke();
   }
 }
 
-// ===========================================
+// ===========================================================================
+// WAVEFORM / SPECTRUM VISUALIZER
+// ===========================================================================
+
+function drawVisualizer() {
+  if (!vizCtx) return;
+  const w = vizCanvas.width;
+  const h = vizCanvas.height;
+  vizCtx.clearRect(0, 0, w, h);
+
+  if (!analyser) {
+    // Draw idle state - flat line
+    vizCtx.beginPath();
+    vizCtx.moveTo(0, h / 2);
+    vizCtx.lineTo(w, h / 2);
+    vizCtx.strokeStyle = 'rgba(0, 240, 255, 0.15)';
+    vizCtx.lineWidth = 1;
+    vizCtx.stroke();
+    return;
+  }
+
+  // Frequency spectrum bars (background)
+  const freqData = new Uint8Array(analyser.frequencyBinCount);
+  analyser.getByteFrequencyData(freqData);
+  const barCount = 64;
+  const barW = w / barCount;
+  const step = Math.floor(freqData.length / barCount);
+
+  for (let i = 0; i < barCount; i++) {
+    const val = freqData[i * step] / 255;
+    const barH = val * h * 0.85;
+    const x = i * barW;
+
+    const grd = vizCtx.createLinearGradient(x, h, x, h - barH);
+    grd.addColorStop(0, 'rgba(0, 240, 255, 0.12)');
+    grd.addColorStop(0.5, 'rgba(0, 240, 255, 0.06)');
+    grd.addColorStop(1, 'rgba(255, 0, 170, 0.04)');
+    vizCtx.fillStyle = grd;
+    vizCtx.fillRect(x + 1, h - barH, barW - 2, barH);
+  }
+
+  // Waveform line (foreground)
+  const waveData = new Uint8Array(analyser.frequencyBinCount);
+  analyser.getByteTimeDomainData(waveData);
+
+  vizCtx.beginPath();
+  const sliceW = w / waveData.length;
+  for (let i = 0; i < waveData.length; i++) {
+    const v = waveData[i] / 128.0;
+    const y = (v * h) / 2;
+    if (i === 0) vizCtx.moveTo(0, y);
+    else vizCtx.lineTo(i * sliceW, y);
+  }
+  vizCtx.strokeStyle = '#00f0ff';
+  vizCtx.lineWidth = 1.5;
+  vizCtx.shadowColor = 'rgba(0, 240, 255, 0.5)';
+  vizCtx.shadowBlur = 6;
+  vizCtx.stroke();
+  vizCtx.shadowBlur = 0;
+}
+
+// ===========================================================================
 // KEYBOARD INPUT
-// ===========================================
+// ===========================================================================
 
 document.addEventListener('keydown', e => {
   if (e.repeat || e.target.tagName === 'INPUT') return;
@@ -709,6 +821,11 @@ document.addEventListener('keydown', e => {
     e.preventDefault();
     keyboardHeld.add(midi);
     noteOn(midi);
+  }
+  // Space toggles sequencer
+  if (e.code === 'Space' && e.target.tagName !== 'INPUT') {
+    e.preventDefault();
+    toggleSeq();
   }
 });
 
@@ -720,7 +837,6 @@ document.addEventListener('keyup', e => {
   }
 });
 
-// Release all on blur
 window.addEventListener('blur', () => {
   keyboardHeld.forEach(midi => noteOff(midi));
   keyboardHeld.clear();
@@ -728,18 +844,19 @@ window.addEventListener('blur', () => {
   mouseIsDown = false;
 });
 
-// ===========================================
+// ===========================================================================
 // ANIMATION LOOP
-// ===========================================
+// ===========================================================================
 
 function tick() {
   drawADSR();
+  drawVisualizer();
   requestAnimationFrame(tick);
 }
 
-// ===========================================
+// ===========================================================================
 // INIT
-// ===========================================
+// ===========================================================================
 
 buildUI();
 requestAnimationFrame(tick);
