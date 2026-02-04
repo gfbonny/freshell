@@ -21,8 +21,7 @@
 ## Features
 
 - **Multi-tab terminal sessions** — Run shell, Claude Code, Codex, and other coding CLIs in parallel tabs
-- **Split panes** — Divide any tab into independent terminal, browser, or editor panes (horizontal/vertical)
-- **Browser & editor panes** — Embedded browser (iframe) and Monaco code editor with 20+ languages, right inside your tabs
+- **Flexible workspaces** — Arrange terminals, browsers, and code editors side by side in split panes within each tab
 - **Detach/reattach** — Background terminals persist across browser sessions; reconnect from any device
 - **Search & browse** — Three-tier search across coding CLI sessions: titles, user messages, and full transcript text
 - **Speak with the dead** — Invoke the spirits of ancient Claudes and ask them what they were thinking
