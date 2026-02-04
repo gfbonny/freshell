@@ -124,6 +124,11 @@ export class LayoutStore {
     }))
   }
 
+  hasTab(target: string): boolean {
+    if (!this.snapshot) return false
+    return this.snapshot.tabs.some((t) => t.id === target || t.title === target)
+  }
+
   listPanes(tabId?: string) {
     if (!this.snapshot) return []
     const resolvedTabId = tabId || this.snapshot.activeTabId || this.snapshot.tabs[0]?.id
@@ -245,6 +250,37 @@ export class LayoutStore {
     const tab = this.snapshot.tabs.find((t) => t.id === tabId)
     if (!tab) return { message: 'tab not found' as const }
     tab.title = title
+    return { tabId }
+  }
+
+  closeTab(tabId: string) {
+    if (!this.snapshot) return { message: 'no layout snapshot' as const }
+    const nextTabs = this.snapshot.tabs.filter((t) => t.id !== tabId)
+    if (nextTabs.length === this.snapshot.tabs.length) return { message: 'tab not found' as const }
+    delete this.snapshot.layouts[tabId]
+    delete this.snapshot.activePane[tabId]
+    this.snapshot.tabs = nextTabs
+    this.snapshot.activeTabId = nextTabs[0]?.id || null
+    return { tabId }
+  }
+
+  selectNextTab() {
+    if (!this.snapshot || this.snapshot.tabs.length === 0) return { message: 'no tabs' as const }
+    const currentIndex = this.snapshot.tabs.findIndex((t) => t.id === this.snapshot?.activeTabId)
+    const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % this.snapshot.tabs.length : 0
+    const tabId = this.snapshot.tabs[nextIndex].id
+    this.snapshot.activeTabId = tabId
+    return { tabId }
+  }
+
+  selectPrevTab() {
+    if (!this.snapshot || this.snapshot.tabs.length === 0) return { message: 'no tabs' as const }
+    const currentIndex = this.snapshot.tabs.findIndex((t) => t.id === this.snapshot?.activeTabId)
+    const prevIndex = currentIndex >= 0
+      ? (currentIndex - 1 + this.snapshot.tabs.length) % this.snapshot.tabs.length
+      : 0
+    const tabId = this.snapshot.tabs[prevIndex].id
+    this.snapshot.activeTabId = tabId
     return { tabId }
   }
 

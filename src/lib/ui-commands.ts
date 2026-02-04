@@ -5,7 +5,16 @@ export function handleUiCommand(msg: any, dispatch: (action: any) => void) {
   if (msg?.type !== 'ui.command') return
   switch (msg.command) {
     case 'tab.create':
-      return dispatch(addTab({ id: msg.payload.id, title: msg.payload.title, mode: msg.payload.mode, shell: msg.payload.shell }))
+      return dispatch(addTab({
+        id: msg.payload.id,
+        title: msg.payload.title,
+        mode: msg.payload.mode,
+        shell: msg.payload.shell,
+        terminalId: msg.payload.terminalId,
+        initialCwd: msg.payload.initialCwd,
+        resumeSessionId: msg.payload.resumeSessionId,
+        status: msg.payload.status,
+      }))
     case 'tab.select':
       return dispatch(setActiveTab(msg.payload.id))
     case 'tab.rename':
