@@ -191,5 +191,19 @@ export function createAgentApiRouter({ layoutStore, registry, wsHandler }: { lay
     res.json(ok(undefined, 'navigate requested'))
   })
 
+  router.post('/panes/:id/send-keys', (req, res) => {
+    const paneId = req.params.id
+    const payload = req.body || {}
+    const data = payload.data ?? payload.keys ?? payload.text ?? ''
+    let terminalId = layoutStore.resolvePaneToTerminal?.(paneId)
+    if (!terminalId && layoutStore.resolveTarget) {
+      const target = layoutStore.resolveTarget(paneId)
+      if (target?.paneId) terminalId = layoutStore.resolvePaneToTerminal?.(target.paneId)
+    }
+    if (!terminalId) return res.status(404).json(fail('terminal not found'))
+    const okInput = registry.input(terminalId, data)
+    res.json(ok({ terminalId }, okInput ? 'input sent' : 'terminal not running'))
+  })
+
   return router
 }
