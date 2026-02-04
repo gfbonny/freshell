@@ -19,7 +19,7 @@ const MAX_WS_BUFFERED_AMOUNT = Number(process.env.MAX_WS_BUFFERED_AMOUNT || 2 * 
 // Max payload size per WebSocket message for mobile browser compatibility (500KB)
 const MAX_CHUNK_BYTES = Number(process.env.MAX_WS_CHUNK_BYTES || 500 * 1024)
 // Rate limit: max terminal.create requests per client within a sliding window
-const TERMINAL_CREATE_RATE_LIMIT = Number(process.env.TERMINAL_CREATE_RATE_LIMIT || 5)
+const TERMINAL_CREATE_RATE_LIMIT = Number(process.env.TERMINAL_CREATE_RATE_LIMIT || 10)
 const TERMINAL_CREATE_RATE_WINDOW_MS = Number(process.env.TERMINAL_CREATE_RATE_WINDOW_MS || 10_000)
 
 const log = logger.child({ component: 'ws' })
@@ -119,6 +119,7 @@ const TerminalCreateSchema = z.object({
   shell: ShellSchema.default('system'),
   cwd: z.string().optional(),
   resumeSessionId: z.string().optional(),
+  restore: z.boolean().optional(),
 })
 
 const TerminalAttachSchema = z.object({
@@ -719,17 +720,19 @@ export class WsHandler {
           }
 
           // Rate limit: prevent runaway terminal creation (e.g., infinite respawn loops)
-          const now = Date.now()
-          state.terminalCreateTimestamps = state.terminalCreateTimestamps.filter(
-            (t) => now - t < TERMINAL_CREATE_RATE_WINDOW_MS
-          )
-          if (state.terminalCreateTimestamps.length >= TERMINAL_CREATE_RATE_LIMIT) {
-            rateLimited = true
-            log.warn({ connectionId: ws.connectionId, count: state.terminalCreateTimestamps.length }, 'terminal.create rate limited')
-            this.sendError(ws, { code: 'RATE_LIMITED', message: 'Too many terminal.create requests', requestId: m.requestId })
-            return
+          if (!m.restore) {
+            const now = Date.now()
+            state.terminalCreateTimestamps = state.terminalCreateTimestamps.filter(
+              (t) => now - t < TERMINAL_CREATE_RATE_WINDOW_MS
+            )
+            if (state.terminalCreateTimestamps.length >= TERMINAL_CREATE_RATE_LIMIT) {
+              rateLimited = true
+              log.warn({ connectionId: ws.connectionId, count: state.terminalCreateTimestamps.length }, 'terminal.create rate limited')
+              this.sendError(ws, { code: 'RATE_LIMITED', message: 'Too many terminal.create requests', requestId: m.requestId })
+              return
+            }
+            state.terminalCreateTimestamps.push(now)
           }
-          state.terminalCreateTimestamps.push(now)
 
           // Kick off session repair without blocking terminal creation.
           let effectiveResumeSessionId = m.resumeSessionId

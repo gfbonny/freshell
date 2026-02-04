@@ -122,6 +122,39 @@ class FakeRegistry {
   }
 }
 
+function countCreateResponses(messages: any[], prefix?: string) {
+  return messages.filter((m) => {
+    const isCreateResponse =
+      m.type === 'terminal.created' || (m.type === 'error' && m.code === 'RATE_LIMITED')
+    if (!isCreateResponse) return false
+    if (!prefix) return true
+    return typeof m.requestId === 'string' && m.requestId.startsWith(prefix)
+  }).length
+}
+
+function waitForCreateResponses(
+  messages: any[],
+  expected: number,
+  prefix?: string,
+  timeoutMs = 1000
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const start = Date.now()
+    const tick = () => {
+      if (countCreateResponses(messages, prefix) >= expected) {
+        resolve()
+        return
+      }
+      if (Date.now() - start > timeoutMs) {
+        reject(new Error(`Timed out waiting for ${expected} create responses`))
+        return
+      }
+      setTimeout(tick, 5)
+    }
+    tick()
+  })
+}
+
 describe('ws protocol', () => {
   let server: http.Server | undefined
   let port: number
@@ -132,6 +165,8 @@ describe('ws protocol', () => {
     process.env.NODE_ENV = 'test'
     process.env.AUTH_TOKEN = 'testtoken-testtoken'
     process.env.HELLO_TIMEOUT_MS = '100'
+    process.env.TERMINAL_CREATE_RATE_LIMIT = '10'
+    process.env.TERMINAL_CREATE_RATE_WINDOW_MS = '10000'
 
     ;({ WsHandler } = await import('../../server/ws-handler'))
     server = http.createServer((_req, res) => {
@@ -665,20 +700,61 @@ describe('ws protocol', () => {
       messages.push(JSON.parse(data.toString()))
     })
 
-    // Send 6 terminal.create requests rapidly (default limit is 5 per 10s)
-    for (let i = 0; i < 6; i++) {
+    // Send 11 terminal.create requests rapidly (default limit is 10 per 10s)
+    for (let i = 0; i < 11; i++) {
       ws.send(JSON.stringify({ type: 'terminal.create', requestId: `rate-test-${i}`, mode: 'shell' }))
     }
 
-    // Wait for all responses
-    await new Promise(resolve => setTimeout(resolve, 200))
+    await waitForCreateResponses(messages, 11, 'rate-test-')
 
-    const created = messages.filter((m) => m.type === 'terminal.created')
-    const rateLimited = messages.filter((m) => m.type === 'error' && m.code === 'RATE_LIMITED')
+    const created = messages.filter((m) =>
+      m.type === 'terminal.created' && typeof m.requestId === 'string' && m.requestId.startsWith('rate-test-')
+    )
+    const rateLimited = messages.filter((m) =>
+      m.type === 'error' && m.code === 'RATE_LIMITED' && typeof m.requestId === 'string' && m.requestId.startsWith('rate-test-')
+    )
 
-    expect(created).toHaveLength(5)
+    expect(created).toHaveLength(10)
     expect(rateLimited).toHaveLength(1)
-    expect(rateLimited[0].requestId).toBe('rate-test-5')
+    expect(rateLimited[0].requestId).toBe('rate-test-10')
+
+    ws.close()
+  })
+
+  it('does not rate limit restored terminal.create requests', async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`)
+    await new Promise<void>((resolve) => ws.on('open', () => resolve()))
+    ws.send(JSON.stringify({ type: 'hello', token: 'testtoken-testtoken' }))
+
+    await new Promise<void>((resolve) => {
+      ws.on('message', (data) => {
+        const msg = JSON.parse(data.toString())
+        if (msg.type === 'ready') resolve()
+      })
+    })
+
+    const messages: any[] = []
+    ws.on('message', (data) => {
+      messages.push(JSON.parse(data.toString()))
+    })
+
+    // Restore requests should bypass rate limiting even when bursting.
+    for (let i = 0; i < 10; i++) {
+      ws.send(JSON.stringify({ type: 'terminal.create', requestId: `restore-test-${i}`, mode: 'shell', restore: true }))
+    }
+    ws.send(JSON.stringify({ type: 'terminal.create', requestId: 'restore-test-extra', mode: 'shell' }))
+
+    await waitForCreateResponses(messages, 11, 'restore-test-')
+
+    const created = messages.filter((m) =>
+      m.type === 'terminal.created' && typeof m.requestId === 'string' && m.requestId.startsWith('restore-test-')
+    )
+    const rateLimited = messages.filter((m) =>
+      m.type === 'error' && m.code === 'RATE_LIMITED' && typeof m.requestId === 'string' && m.requestId.startsWith('restore-test-')
+    )
+
+    expect(created).toHaveLength(11)
+    expect(rateLimited).toHaveLength(0)
 
     ws.close()
   })
@@ -700,17 +776,15 @@ describe('ws protocol', () => {
       messages.push(JSON.parse(data.toString()))
     })
 
-    // Send the same requestId multiple times — deduped requests bypass rate counting
+    // Send the same requestId multiple times - deduped requests bypass rate counting
     const requestId = 'dedup-rate-test'
     ws.send(JSON.stringify({ type: 'terminal.create', requestId, mode: 'shell' }))
-    await new Promise(resolve => setTimeout(resolve, 50))
-
-    // Same requestId again — should be deduped, not rate-counted
     ws.send(JSON.stringify({ type: 'terminal.create', requestId, mode: 'shell' }))
-    await new Promise(resolve => setTimeout(resolve, 50))
 
-    const created = messages.filter((m) => m.type === 'terminal.created')
-    const rateLimited = messages.filter((m) => m.type === 'error' && m.code === 'RATE_LIMITED')
+    await waitForCreateResponses(messages, 2, requestId)
+
+    const created = messages.filter((m) => m.type === 'terminal.created' && m.requestId === requestId)
+    const rateLimited = messages.filter((m) => m.type === 'error' && m.code === 'RATE_LIMITED' && m.requestId === requestId)
 
     // Both should succeed (first creates, second dedupes)
     expect(created).toHaveLength(2)

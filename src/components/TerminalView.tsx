@@ -8,6 +8,7 @@ import { getTerminalTheme } from '@/lib/terminal-themes'
 import { getResumeSessionIdFromRef } from '@/components/terminal-view-utils'
 import { copyText, readText } from '@/lib/clipboard'
 import { registerTerminalActions } from '@/lib/pane-action-registry'
+import { consumeTerminalRestoreRequestId } from '@/lib/terminal-restore'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
 import { resolveTerminalFontFamily } from '@/lib/terminal-fonts'
 import { nanoid } from 'nanoid'
@@ -19,6 +20,9 @@ import type { PaneContent, TerminalPaneContent } from '@/store/paneTypes'
 import 'xterm/css/xterm.css'
 
 const SESSION_ACTIVITY_THROTTLE_MS = 5000
+const RATE_LIMIT_RETRY_MAX_ATTEMPTS = 3
+const RATE_LIMIT_RETRY_BASE_MS = 250
+const RATE_LIMIT_RETRY_MAX_MS = 1000
 
 interface TerminalViewProps {
   tabId: string
@@ -42,6 +46,9 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   const mountedRef = useRef(false)
   const hiddenRef = useRef(hidden)
   const lastSessionActivityAtRef = useRef(0)
+  const rateLimitRetryRef = useRef<{ count: number; timer: ReturnType<typeof setTimeout> | null }>({ count: 0, timer: null })
+  const restoreRequestIdRef = useRef<string | null>(null)
+  const restoreFlagRef = useRef(false)
 
   // Extract terminal-specific fields (safe because we check kind later)
   const isTerminal = paneContent.kind === 'terminal'
@@ -317,6 +324,54 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     let unsub = () => {}
     let unsubReconnect = () => {}
 
+    const clearRateLimitRetry = () => {
+      const retryState = rateLimitRetryRef.current
+      if (retryState.timer) {
+        clearTimeout(retryState.timer)
+        retryState.timer = null
+      }
+      retryState.count = 0
+    }
+
+    const getRestoreFlag = (requestId: string) => {
+      if (restoreRequestIdRef.current !== requestId) {
+        restoreRequestIdRef.current = requestId
+        restoreFlagRef.current = consumeTerminalRestoreRequestId(requestId)
+      }
+      return restoreFlagRef.current
+    }
+
+    const sendCreate = (requestId: string) => {
+      const restore = getRestoreFlag(requestId)
+      ws.send({
+        type: 'terminal.create',
+        requestId,
+        mode,
+        shell: shell || 'system',
+        cwd: initialCwd,
+        resumeSessionId: getResumeSessionIdFromRef(contentRef),
+        ...(restore ? { restore: true } : {}),
+      })
+    }
+
+    const scheduleRateLimitRetry = (requestId: string) => {
+      const retryState = rateLimitRetryRef.current
+      if (retryState.count >= RATE_LIMIT_RETRY_MAX_ATTEMPTS) return false
+      retryState.count += 1
+      const delayMs = Math.min(
+        RATE_LIMIT_RETRY_BASE_MS * (2 ** (retryState.count - 1)),
+        RATE_LIMIT_RETRY_MAX_MS
+      )
+      if (retryState.timer) clearTimeout(retryState.timer)
+      retryState.timer = setTimeout(() => {
+        retryState.timer = null
+        if (requestIdRef.current !== requestId) return
+        sendCreate(requestId)
+      }, delayMs)
+      term.writeln(`\r\n[Rate limited - retrying in ${delayMs}ms]\r\n`)
+      return true
+    }
+
     function attach(tid: string) {
       setIsAttaching(true)
       ws.send({ type: 'terminal.attach', terminalId: tid })
@@ -324,6 +379,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     }
 
     async function ensure() {
+      clearRateLimitRetry()
       try {
         await ws.connect()
       } catch { /* handled elsewhere */ }
@@ -344,6 +400,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         }
 
         if (msg.type === 'terminal.created' && msg.requestId === reqId) {
+          clearRateLimitRetry()
           const newId = msg.terminalId as string
           terminalIdRef.current = newId
           updateContent({ terminalId: newId, status: 'running' })
@@ -359,6 +416,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         }
 
         if (msg.type === 'terminal.attached' && msg.terminalId === tid) {
+          clearRateLimitRetry()
           setIsAttaching(false)
           if (msg.snapshot) {
             try { term.clear(); term.write(msg.snapshot) } catch {}
@@ -408,6 +466,13 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         }
 
         if (msg.type === 'error' && msg.requestId === reqId) {
+          if (msg.code === 'RATE_LIMITED') {
+            const scheduled = scheduleRateLimitRetry(reqId)
+            if (scheduled) {
+              return
+            }
+          }
+          clearRateLimitRetry()
           setIsAttaching(false)
           updateContent({ status: 'error' })
           term.writeln(`\r\n[Error] ${msg.message || msg.code || 'Unknown error'}\r\n`)
@@ -420,7 +485,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
             // Show feedback if the terminal already exited (the ID was cleared by
             // the exit handler, so msg.terminalId no longer matches the ref)
             if (current?.status === 'exited') {
-              term.writeln('\r\n[Terminal exited — use the + button or split to start a new session]\r\n')
+              term.writeln('\r\n[Terminal exited - use the + button or split to start a new session]\r\n')
             }
             return
           }
@@ -434,7 +499,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
             terminalIdRef.current = undefined
             updateContent({ terminalId: undefined, createRequestId: newRequestId, status: 'creating' })
           } else if (current?.status === 'exited') {
-            term.writeln('\r\n[Terminal exited — use the + button or split to start a new session]\r\n')
+            term.writeln('\r\n[Terminal exited - use the + button or split to start a new session]\r\n')
           }
         }
       })
@@ -453,20 +518,14 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       if (currentTerminalId) {
         attach(currentTerminalId)
       } else {
-        ws.send({
-          type: 'terminal.create',
-          requestId: createRequestId,
-          mode,
-          shell: shell || 'system',
-          cwd: initialCwd,
-          resumeSessionId: getResumeSessionIdFromRef(contentRef),
-        })
+        sendCreate(createRequestId)
       }
     }
 
     ensure()
 
     return () => {
+      clearRateLimitRetry()
       unsub()
       unsubReconnect()
     }
