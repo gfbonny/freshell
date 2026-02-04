@@ -32,7 +32,7 @@ export default defineConfig(({ mode }) => {
       host: true,
       port: vitePort,
       watch: {
-        ignored: ['**/.worktrees/**'],
+        ignored: ['**/.worktrees/**', '**/demo-projects/**'],
       },
       proxy: {
         '/api': backendUrl,
