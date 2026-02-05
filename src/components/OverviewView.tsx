@@ -95,12 +95,13 @@ export default function OverviewView({ onOpenTab }: { onOpenTab?: () => void }) 
           <button
             onClick={refresh}
             disabled={loading}
+            aria-label={loading ? 'Loading...' : 'Refresh terminals'}
             className={cn(
               'p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors',
               loading && 'animate-spin'
             )}
           >
-            <RefreshCw className="h-4 w-4" />
+            <RefreshCw className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
       </div>
@@ -279,13 +280,14 @@ function TerminalCard({
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Title"
-          autoFocus
+          aria-label="Terminal title"
         />
         <textarea
           className="w-full h-20 px-3 py-2 text-sm bg-background border border-border rounded-md focus:outline-none focus:ring-1 focus:ring-border resize-none"
           value={desc}
           onChange={(e) => setDesc(e.target.value)}
           placeholder="Description"
+          aria-label="Terminal description"
         />
         <div className="flex items-center gap-2">
           <button
@@ -313,8 +315,8 @@ function TerminalCard({
   }
 
   return (
-    <div
-      className="group rounded-lg border border-border/50 bg-card p-4 hover:border-border transition-colors cursor-pointer"
+    <button
+      className="group w-full text-left rounded-lg border border-border/50 bg-card p-4 hover:border-border transition-colors cursor-pointer"
       onClick={onOpen}
       onMouseEnter={() => setShowActions(true)}
       onMouseLeave={() => setShowActions(false)}
@@ -376,20 +378,21 @@ function TerminalCard({
             showActions ? 'opacity-100' : 'opacity-0'
           )}
           onClick={(e) => e.stopPropagation()}
+          role="presentation"
         >
           <button
             onClick={onOpen}
             className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-            title={isOpen ? 'Focus' : 'Open'}
+            aria-label={isOpen ? 'Focus terminal' : 'Open terminal'}
           >
-            {isOpen ? <ExternalLink className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+            {isOpen ? <ExternalLink className="h-4 w-4" aria-hidden="true" /> : <Play className="h-4 w-4" aria-hidden="true" />}
           </button>
           <button
             onClick={() => setEditing(true)}
             className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-            title="Edit"
+            aria-label="Edit terminal"
           >
-            <Pencil className="h-4 w-4" />
+            <Pencil className="h-4 w-4" aria-hidden="true" />
           </button>
           <button
             onClick={handleGenerateSummary}
@@ -398,19 +401,19 @@ function TerminalCard({
               'p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors',
               generating && 'animate-pulse'
             )}
-            title="Generate summary with AI"
+            aria-label={generating ? 'Generating summary...' : 'Generate summary with AI'}
           >
-            <Sparkles className="h-4 w-4" />
+            <Sparkles className="h-4 w-4" aria-hidden="true" />
           </button>
           <button
             onClick={onDelete}
             className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-            title="Delete"
+            aria-label="Delete terminal"
           >
-            <Trash2 className="h-4 w-4" />
+            <Trash2 className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
       </div>
-    </div>
+    </button>
   )
 }

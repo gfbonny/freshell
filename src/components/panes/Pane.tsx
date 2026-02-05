@@ -35,7 +35,16 @@ export default function Pane({
         'relative h-full w-full overflow-hidden flex flex-col',
         !isActive && 'opacity-[0.85]'
       )}
+      role="button"
+      aria-label={`Focus pane ${title || 'untitled'}`}
+      tabIndex={0}
       onMouseDown={onFocus}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onFocus()
+        }
+      }}
     >
       {/* Pane header - shown when multiple panes and title available */}
       {showHeader && (

@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import React, { forwardRef, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { clampToViewport } from './context-menu-utils'
 import type { MenuItem } from './context-menu-types'

@@ -820,6 +820,8 @@ function Toggle({
   return (
     <button
       onClick={() => onChange(!checked)}
+      aria-label={checked ? 'Toggle off' : 'Toggle on'}
+      aria-pressed={checked}
       className={cn(
         'relative w-9 h-5 rounded-full transition-colors',
         checked ? 'bg-foreground' : 'bg-muted'
@@ -830,6 +832,7 @@ function Toggle({
           'absolute top-0.5 h-4 w-4 rounded-full transition-all',
           checked ? 'left-[1.125rem] bg-background' : 'left-0.5 bg-muted-foreground'
         )}
+        aria-hidden="true"
       />
     </button>
   )

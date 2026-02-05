@@ -378,7 +378,12 @@ export default function App() {
         {isMobile && !sidebarCollapsed && (
           <div
             className="absolute inset-0 bg-black/50 z-10"
+            role="presentation"
             onClick={toggleSidebarCollapse}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') toggleSidebarCollapse()
+            }}
+            tabIndex={-1}
           />
         )}
         {/* Sidebar - on mobile it overlays, on desktop it's inline */}
@@ -407,10 +412,19 @@ export default function App() {
       {shareModalUrl && (
         <div
           className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]"
+          role="presentation"
           onClick={() => setShareModalUrl(null)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setShareModalUrl(null)
+          }}
+          tabIndex={-1}
         >
+          {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions */}
           <div
             className="bg-background border border-border rounded-lg shadow-lg max-w-md w-full mx-4 p-6"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Share freshell invitation"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-4">

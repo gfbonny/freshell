@@ -111,12 +111,13 @@ export default function HistoryView({ onOpenSession }: { onOpenSession?: () => v
           <button
             onClick={refresh}
             disabled={loading}
+            aria-label={loading ? 'Loading...' : 'Refresh sessions'}
             className={cn(
               'p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors',
               loading && 'animate-spin'
             )}
           >
-            <RefreshCw className="h-4 w-4" />
+            <RefreshCw className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
 
@@ -227,6 +228,7 @@ function ProjectCard({
                 onClick={() => setShowColorPicker(!showColorPicker)}
                 className="h-5 w-8 rounded border border-border/50"
                 style={{ backgroundColor: color }}
+                aria-label="Open color picker"
               />
               {showColorPicker && (
                 <input
@@ -237,8 +239,8 @@ function ProjectCard({
                     setShowColorPicker(false)
                   }}
                   className="absolute top-full left-0 mt-1"
-                  autoFocus
                   onBlur={() => setShowColorPicker(false)}
+                  aria-label="Project color picker"
                 />
               )}
             </div>
@@ -289,13 +291,14 @@ function SessionRow({
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Title"
-          autoFocus
+          aria-label="Session title"
         />
         <input
           className="w-full h-8 px-3 text-sm bg-background border border-border rounded-md focus:outline-none focus:ring-1 focus:ring-border"
           value={summary}
           onChange={(e) => setSummary(e.target.value)}
           placeholder="Summary"
+          aria-label="Session summary"
         />
         <div className="flex items-center gap-2">
           <button
@@ -323,8 +326,8 @@ function SessionRow({
   }
 
   return (
-    <div
-      className="group px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer"
+    <button
+      className="group w-full text-left px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer rounded-md"
       onClick={onOpen}
       onMouseEnter={() => setShowActions(true)}
       onMouseLeave={() => setShowActions(false)}
@@ -364,30 +367,31 @@ function SessionRow({
             showActions ? 'opacity-100' : 'opacity-0'
           )}
           onClick={(e) => e.stopPropagation()}
+          role="presentation"
         >
           <button
             onClick={onOpen}
             className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-            title="Open"
+            aria-label="Open session"
           >
-            <Play className="h-3.5 w-3.5" />
+            <Play className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
           <button
             onClick={() => setEditing(true)}
             className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-            title="Edit"
+            aria-label="Edit session"
           >
-            <Pencil className="h-3.5 w-3.5" />
+            <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
           <button
             onClick={onDelete}
             className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-            title="Delete"
+            aria-label="Delete session"
           >
-            <Trash2 className="h-3.5 w-3.5" />
+            <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
         </div>
       </div>
-    </div>
+    </button>
   )
 }
