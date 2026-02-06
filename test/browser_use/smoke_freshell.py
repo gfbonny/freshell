@@ -168,28 +168,31 @@ Requirements:
 2) Wait until the page is fully loaded and the top bar is visible.
 3) Verify the app header contains the text "freshell".
 4) Verify the connection indicator shows the app is connected (not disconnected).
-5) Stress pane creation in the current tab:
+5) Pane stress test (do this once):
    - Use the UI control(s) for adding/splitting panes (floating action button, split buttons, etc).
    - Try to add panes until the UI prevents adding more (button disabled, no new pane appears, or explicit limit message).
    - If you can still add panes indefinitely, stop once you have created at least {args.pane_target} panes total (this is a "good enough" stress level for this smoke test).
-6) After you hit the limit (or the stress target), close extra panes until there are only 3-4 panes visible and the panes are large enough to interact with.
-7) Choose exactly one pane of each type and do a trivial verification:
+   - IMPORTANT: Don't try to verify pane types on this stress-test tab. Just create many panes and then stop.
+6) Create a new shell tab (click the plus button in the tab bar with the tooltip/title "New shell tab"). Do not open new windows.
+7) On that new tab, create a few panes and verify one of each type:
    - Editor pane:
      - Choose the "Editor" pane type for a pane.
      - Open this file path: {known_text_file}
      - Verify the editor shows content from that file (any recognizable text from README).
    - Terminal pane:
      - Choose the "Terminal"/shell pane type for a different pane (WSL/system shell is fine).
-     - Run `node -v` (or `git --version` if node is unavailable).
-     - Verify the command output looks like a version string.
+      - Run `node -v` (or `git --version` if node is unavailable).
+     - Verify visually the command output looks like a version string.
    - Browser pane:
      - Choose the "Browser" pane type for a different pane.
      - Navigate to https://example.com
      - Verify the page shows "Example Domain".
-8) Open the sidebar (if it is collapsed) using the top-left toggle button.
-9) Click "Settings" in the sidebar.
-10) On the Settings page, confirm "Terminal preview" is visible.
-11) Navigate back to the terminal view.
+8) Create one more new shell tab (again, the plus button in the tab bar).
+9) On that tab, open the sidebar (if it is collapsed) using the top-left toggle button.
+10) Click "Settings" in the sidebar.
+11) On the Settings page, confirm "Terminal preview" is visible.
+12) Navigate back to the terminal view.
+13) Click through each tab in the tab bar to confirm they still render (stress tab, types tab, settings tab).
 
 Output:
 At the end, output exactly one line:
