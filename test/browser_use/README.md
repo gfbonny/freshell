@@ -54,3 +54,4 @@ Useful flags:
 - `--headless`
 - `--width 1024 --height 768`
 - `--max-steps 120` (the default is tuned for the multi-pane smoke)
+- `--pane-target 24` (stop pane stress after N panes if no hard limit is reached)

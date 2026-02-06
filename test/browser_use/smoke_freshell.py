@@ -69,7 +69,8 @@ async def _run(args: argparse.Namespace) -> int:
   model = env_or(args.model, "BROWSER_USE_MODEL") or "bu-latest"
   target_url = build_target_url(base_url, token)
   redacted_target_url = redact_url(target_url)
-  known_text_file = (repo_root / "README.md").resolve()
+  preferred_readme = Path("/home/user/code/freshell/README.md")
+  known_text_file = (preferred_readme if preferred_readme.exists() else (repo_root / "README.md")).resolve()
 
   # Configure browser_use logging and redact tokens from any log messages.
   # This keeps the console usable while avoiding accidental token leakage.
@@ -128,6 +129,7 @@ async def _run(args: argparse.Namespace) -> int:
     height=args.height,
     cdpUrl=args.cdp_url,
     maxSteps=args.max_steps,
+    paneTarget=args.pane_target,
   )
 
   if args.preflight:
@@ -157,14 +159,18 @@ You are running a browser smoke test for a local Freshell dev instance.
 
 Target URL: {target_url}
 
+Important constraints:
+- Do not create or write any files during this run.
+
 Requirements:
 1) Navigate to the Target URL.
 2) Wait until the page is fully loaded and the top bar is visible.
 3) Verify the app header contains the text "freshell".
 4) Verify the connection indicator shows the app is connected (not disconnected).
-5) Create panes until you can no longer create any more panes in the current tab.
+5) Stress pane creation in the current tab:
    - Use the UI control(s) for adding/splitting panes (floating action button, split buttons, etc).
-   - Stop only when the UI prevents adding more (button disabled, no new pane appears, or explicit limit message).
+   - Try to add panes until the UI prevents adding more (button disabled, no new pane appears, or explicit limit message).
+   - If you can still add panes indefinitely, stop once you have created at least {args.pane_target} panes total (this is a "good enough" stress level for this smoke test).
 6) After you hit the limit, choose exactly one pane of each type and do a trivial verification:
    - Editor pane:
      - Choose the "Editor" pane type for a pane.
@@ -290,6 +296,7 @@ def main(argv: list[str]) -> int:
   p.add_argument("--width", type=int, default=1024, help="Browser viewport width")
   p.add_argument("--height", type=int, default=768, help="Browser viewport height")
   p.add_argument("--max-steps", type=int, default=120, help="Max agent steps")
+  p.add_argument("--pane-target", type=int, default=24, help="Stop pane stress after this many panes if no limit is reached")
   p.add_argument("--preflight", action="store_true", help="Fail fast if /api/health is unreachable")
   p.add_argument("--debug", action="store_true", help="Enable debug logging")
   p.add_argument(
