@@ -209,7 +209,7 @@ Requirements:
 6) On that new tab, create a few panes and set up EXACTLY one of each type: Editor, Terminal, Browser (keep this tab multi-pane for quick review).
    - In the Editor pane: open this file path: {known_text_file}. Verify visually the editor shows content (not an empty placeholder).
    - In the Terminal pane: run `node -v` (or `git --version` if node is unavailable). Verify visually the output looks like a version string.
-   - In the Browser pane: navigate to https://example.com and verify visually it shows "Example Domain".
+   - In the Browser pane: open the Example Domain website (domain: example.com) and verify visually it shows "Example Domain".
    - Keep terminal creation minimal: do not create extra terminal panes beyond this one.
 7) Create one more new shell tab for Settings verification.
 8) On that tab, open the sidebar (if it is collapsed) using the top-left toggle button.
