@@ -65,7 +65,15 @@ describe('CodingCliSession (Claude provider)', () => {
 
   beforeEach(() => {
     mockProcess = createMockProcess()
-    mockSpawn = vi.fn().mockReturnValue(mockProcess)
+    mockSpawn = vi.fn().mockImplementation((_cmd: string, _args: string[], options: any) => {
+      const stdinMode = options?.stdio?.[0]
+      if (stdinMode === 'ignore') {
+        mockProcess.stdin = null
+      } else {
+        mockProcess.stdin = { write: vi.fn(), end: vi.fn() }
+      }
+      return mockProcess
+    })
     idCounter = 0
   })
 
@@ -91,9 +99,10 @@ describe('CodingCliSession (Claude provider)', () => {
 
     expect(mockSpawn).toHaveBeenCalledWith(
       'claude',
-      ['-p', 'hello', '--output-format', 'stream-json'],
+      ['-p', 'hello', '--output-format', 'stream-json', '--verbose'],
       expect.objectContaining({
         cwd: '/test',
+        stdio: ['ignore', 'pipe', 'pipe'],
       })
     )
   })
@@ -174,10 +183,10 @@ describe('CodingCliSession (Claude provider)', () => {
   })
 
   it('can send input to stdin', () => {
-    const session = createSession()
+    const session = createSession({ keepStdinOpen: true })
     session.sendInput('user input')
 
-    expect(mockProcess.stdin.write).toHaveBeenCalledWith('user input')
+    expect(mockProcess.stdin?.write).toHaveBeenCalledWith('user input')
   })
 
   it('can kill the process', () => {

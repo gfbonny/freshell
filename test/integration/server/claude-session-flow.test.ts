@@ -125,7 +125,7 @@ describe.skipIf(!runClaudeIntegration)('Claude Session Flow Integration', () => 
     expect(hasInit || hasResult).toBe(true)
 
     ws.close()
-  }, 30000)
+  }, 60 * 1000)
 
   it('resumes a known claude session via terminal.create', async () => {
     const originalClaudeHome = process.env.CLAUDE_HOME

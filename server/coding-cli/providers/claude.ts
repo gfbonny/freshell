@@ -165,7 +165,10 @@ export const claudeProvider: CodingCliProvider = {
   },
 
   getStreamArgs(options) {
-    const args = ['-p', options.prompt, '--output-format', 'stream-json']
+    // Claude Code requires verbose mode for stream-json output. Enable it explicitly so
+    // behavior doesn't depend on the user's local Claude config (which can otherwise
+    // cause silent hangs / missing output in our integration test and UI).
+    const args = ['-p', options.prompt, '--output-format', 'stream-json', '--verbose']
     if (options.resumeSessionId && isValidClaudeSessionId(options.resumeSessionId)) {
       args.push('--resume', options.resumeSessionId)
     }

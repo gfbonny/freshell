@@ -39,6 +39,12 @@ export interface CodingCliSessionOptions {
   disallowedTools?: string[]
   permissionMode?: string
   sandbox?: string
+  /**
+   * Keep stdin open for incremental input. Default is false because many CLIs
+   * (including Claude Code in --print mode) will wait for stdin EOF when stdin
+   * is a pipe, causing silent hangs.
+   */
+  keepStdinOpen?: boolean
   // Test injection points
   _spawn?: SpawnFn
   _nanoid?: () => string
@@ -76,10 +82,13 @@ export class CodingCliSession extends EventEmitter {
 
     logger.info({ id: this.id, provider: this.provider.name, cmd, args, cwd: options.cwd }, 'Spawning coding CLI session')
 
+    // Many CLIs treat non-TTY stdin as input and will wait until EOF even when
+    // the main prompt is passed via args. Close stdin by default to avoid hangs.
+    const stdinMode: 'pipe' | 'ignore' = options.keepStdinOpen ? 'pipe' : 'ignore'
     this.process = spawnFn(cmd, args, {
       cwd: options.cwd || process.cwd(),
       env: { ...process.env },
-      stdio: ['pipe', 'pipe', 'pipe'],
+      stdio: [stdinMode, 'pipe', 'pipe'],
     })
 
     this.process.stdout?.on('data', (data: Buffer) => {
