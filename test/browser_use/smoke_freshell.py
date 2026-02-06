@@ -178,7 +178,7 @@ Requirements:
 8) Create a new shell tab for a single-pane Editor verification:
    - Create an Editor pane.
    - Open this file path: {known_text_file}
-   - Verify the editor shows content from that file by using `find_text` to scroll to "Quick Start".
+   - Verify visually the editor shows content from that file (not the empty scratch-pad placeholder). Do not rely on DOM text search for this.
 9) Create a new shell tab for a single-pane Terminal verification:
    - Create a WSL (or other shell) terminal pane.
    - Run `node -v` (or `git --version` if node is unavailable).
