@@ -315,11 +315,20 @@ function TerminalCard({
   }
 
   return (
-    <button
+    <div
       className="group w-full text-left rounded-lg border border-border/50 bg-card p-4 hover:border-border transition-colors cursor-pointer"
       onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onOpen()
+        }
+      }}
       onMouseEnter={() => setShowActions(true)}
       onMouseLeave={() => setShowActions(false)}
+      role="button"
+      tabIndex={0}
+      aria-label={`Open terminal ${terminal.title}`}
       data-context={ContextIds.OverviewTerminal}
       data-terminal-id={terminal.terminalId}
     >
@@ -414,6 +423,6 @@ function TerminalCard({
           </button>
         </div>
       </div>
-    </button>
+    </div>
   )
 }
