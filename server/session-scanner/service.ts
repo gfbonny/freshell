@@ -164,15 +164,21 @@ export class SessionRepairService extends EventEmitter {
     const fileSessionId = path.basename(filePath, '.jsonl')
     const legacyResult = this.queue.getResult(fileSessionId)
     if (legacyResult) {
+      const normalized = legacyResult.sessionId === sessionId
+        ? legacyResult
+        : { ...legacyResult, sessionId }
       if (fileSessionId !== sessionId) {
-        this.queue.seedResult(sessionId, legacyResult)
+        this.queue.seedResult(sessionId, normalized)
       }
-      return legacyResult
+      return normalized
     }
     if (fileSessionId !== sessionId && this.queue.has(fileSessionId)) {
       const result = await this.queue.waitFor(fileSessionId, timeoutMs)
-      this.queue.seedResult(sessionId, result)
-      return result
+      const normalized = result.sessionId === sessionId
+        ? result
+        : { ...result, sessionId }
+      this.queue.seedResult(sessionId, normalized)
+      return normalized
     }
 
     // Check cache for recent result
@@ -181,8 +187,11 @@ export class SessionRepairService extends EventEmitter {
       if (cached.status === 'missing') {
         this.sessionPathIndex.delete(sessionId)
       }
-      this.queue.seedResult(sessionId, cached)
-      return cached
+      const normalized = cached.sessionId === sessionId
+        ? cached
+        : { ...cached, sessionId }
+      this.queue.seedResult(sessionId, normalized)
+      return normalized
     }
 
     // Enqueue and wait (avoid duplicate work if legacy ID is already queued)

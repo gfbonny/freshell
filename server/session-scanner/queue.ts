@@ -185,9 +185,12 @@ export class SessionRepairQueue extends EventEmitter {
         allowStaleMs: item.priority === 'active' ? ACTIVE_CACHE_GRACE_MS : undefined,
       })
       if (cached) {
-        this.setProcessed(item.sessionId, cached)
-        this.emit('scanned', cached)
-        this.resolveWaiting(item.sessionId, cached)
+        const normalized = cached.sessionId === item.sessionId
+          ? cached
+          : { ...cached, sessionId: item.sessionId }
+        this.setProcessed(item.sessionId, normalized)
+        this.emit('scanned', normalized)
+        this.resolveWaiting(item.sessionId, normalized)
         this.processing.delete(item.sessionId)
         setImmediate(() => this.processNext())
         return
@@ -196,21 +199,27 @@ export class SessionRepairQueue extends EventEmitter {
       // Scan the session
       const scanResult = await this.scanner.scan(item.filePath)
       await this.cache.set(item.filePath, scanResult)
-      this.emit('scanned', scanResult)
+      const normalizedScan = scanResult.sessionId === item.sessionId
+        ? scanResult
+        : { ...scanResult, sessionId: item.sessionId }
+      this.emit('scanned', normalizedScan)
 
       // Repair if corrupted
-      if (scanResult.status === 'corrupted') {
+      if (normalizedScan.status === 'corrupted') {
         const repairResult = await this.scanner.repair(item.filePath)
         this.emit('repaired', repairResult)
 
         // Re-scan to get updated result
         const newResult = await this.scanner.scan(item.filePath)
         await this.cache.set(item.filePath, newResult)
-        this.setProcessed(item.sessionId, newResult)
-        this.resolveWaiting(item.sessionId, newResult)
+        const normalizedNew = newResult.sessionId === item.sessionId
+          ? newResult
+          : { ...newResult, sessionId: item.sessionId }
+        this.setProcessed(item.sessionId, normalizedNew)
+        this.resolveWaiting(item.sessionId, normalizedNew)
       } else {
-        this.setProcessed(item.sessionId, scanResult)
-        this.resolveWaiting(item.sessionId, scanResult)
+        this.setProcessed(item.sessionId, normalizedScan)
+        this.resolveWaiting(item.sessionId, normalizedScan)
       }
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err))
@@ -270,8 +279,11 @@ export class SessionRepairQueue extends EventEmitter {
    * Store a result and resolve any waiters without queueing work.
    */
   seedResult(sessionId: string, result: SessionScanResult): void {
-    this.setProcessed(sessionId, result)
-    this.resolveWaiting(sessionId, result)
+    const normalized = result.sessionId === sessionId
+      ? result
+      : { ...result, sessionId }
+    this.setProcessed(sessionId, normalized)
+    this.resolveWaiting(sessionId, normalized)
   }
 
   /**

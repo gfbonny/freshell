@@ -157,6 +157,7 @@ describe('SessionRepairService Integration', () => {
 
       const result = await service.waitForSession(canonicalId, 5000)
       expect(result.status).toBe('healthy')
+      expect(result.sessionId).toBe(canonicalId)
       expect(result.filePath).toBe(sessionFile)
     })
 
@@ -173,10 +174,12 @@ describe('SessionRepairService Integration', () => {
 
       const result = await service.waitForSession(canonicalId, 5000)
       expect(result.status).toBe('healthy')
+      expect(result.sessionId).toBe(canonicalId)
 
       const cached = service.getResult(canonicalId)
       expect(cached?.filePath).toBe(sessionFile)
       expect(cached?.status).toBe('healthy')
+      expect(cached?.sessionId).toBe(canonicalId)
     })
   })
 
