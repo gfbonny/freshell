@@ -578,6 +578,10 @@ describe('TerminalRegistry Lifecycle', () => {
 
   describe('Buffer overflow with rapid output', () => {
     it('should handle rapid output without memory leak', () => {
+      // Force a small server-side reattach buffer so this test validates eviction behavior.
+      settings.terminal.scrollback = 1
+      registry.setSettings(settings)
+
       const term = registry.create({ mode: 'shell' })
       const pty = mockPtyProcess.instances[0]
       const client = createMockWebSocket()
@@ -595,6 +599,9 @@ describe('TerminalRegistry Lifecycle', () => {
     })
 
     it('should drop old data when buffer overflows', () => {
+      settings.terminal.scrollback = 1
+      registry.setSettings(settings)
+
       const term = registry.create({ mode: 'shell' })
       const pty = mockPtyProcess.instances[0]
 

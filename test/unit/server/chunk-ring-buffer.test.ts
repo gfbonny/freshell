@@ -167,6 +167,15 @@ describe('ChunkRingBuffer', () => {
     })
   })
 
+  describe('setMaxChars', () => {
+    it('can shrink max size and truncates to the newest characters', () => {
+      const buffer = new ChunkRingBuffer(10)
+      buffer.append('1234567890')
+      buffer.setMaxChars(5)
+      expect(buffer.snapshot()).toBe('67890')
+    })
+  })
+
   describe('edge cases', () => {
     it('handles maxChars of 1', () => {
       const buffer = new ChunkRingBuffer(1)

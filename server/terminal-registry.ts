@@ -11,6 +11,9 @@ import { isReachableDirectorySync } from './path-utils.js'
 
 const MAX_WS_BUFFERED_AMOUNT = Number(process.env.MAX_WS_BUFFERED_AMOUNT || 2 * 1024 * 1024)
 const DEFAULT_MAX_SCROLLBACK_CHARS = Number(process.env.MAX_SCROLLBACK_CHARS || 64 * 1024)
+const MIN_SCROLLBACK_CHARS = 64 * 1024
+const MAX_SCROLLBACK_CHARS = 2 * 1024 * 1024
+const APPROX_CHARS_PER_LINE = 200
 const MAX_TERMINALS = Number(process.env.MAX_TERMINALS || 50)
 const perfConfig = getPerfConfig()
 
@@ -117,20 +120,34 @@ export class ChunkRingBuffer {
   private size = 0
   constructor(private maxChars: number) {}
 
-  append(chunk: string) {
-    if (!chunk) return
-    this.chunks.push(chunk)
-    this.size += chunk.length
-    while (this.size > this.maxChars && this.chunks.length > 1) {
+  private trimToMax() {
+    const max = this.maxChars
+    if (max <= 0) {
+      this.clear()
+      return
+    }
+    while (this.size > max && this.chunks.length > 1) {
       const removed = this.chunks.shift()!
       this.size -= removed.length
     }
     // If a single chunk is enormous, truncate it.
-    if (this.size > this.maxChars && this.chunks.length === 1) {
+    if (this.size > max && this.chunks.length === 1) {
       const only = this.chunks[0]
-      this.chunks[0] = only.slice(-this.maxChars)
+      this.chunks[0] = only.slice(-max)
       this.size = this.chunks[0].length
     }
+  }
+
+  append(chunk: string) {
+    if (!chunk) return
+    this.chunks.push(chunk)
+    this.size += chunk.length
+    this.trimToMax()
+  }
+
+  setMaxChars(next: number) {
+    this.maxChars = Math.max(0, next)
+    this.trimToMax()
   }
 
   snapshot(): string {
@@ -462,17 +479,30 @@ export class TerminalRegistry {
   private perfTimer: NodeJS.Timeout | null = null
   private maxTerminals: number
   private maxExitedTerminals: number
+  private scrollbackMaxChars: number
 
   constructor(settings?: AppSettings, maxTerminals?: number, maxExitedTerminals?: number) {
     this.settings = settings
     this.maxTerminals = maxTerminals ?? MAX_TERMINALS
     this.maxExitedTerminals = maxExitedTerminals ?? Number(process.env.MAX_EXITED_TERMINALS || 200)
+    this.scrollbackMaxChars = this.computeScrollbackMaxChars(settings)
     this.startIdleMonitor()
     this.startPerfMonitor()
   }
 
   setSettings(settings: AppSettings) {
     this.settings = settings
+    this.scrollbackMaxChars = this.computeScrollbackMaxChars(settings)
+    for (const t of this.terminals.values()) {
+      t.buffer.setMaxChars(this.scrollbackMaxChars)
+    }
+  }
+
+  private computeScrollbackMaxChars(settings?: AppSettings): number {
+    const lines = settings?.terminal?.scrollback
+    if (typeof lines !== 'number' || !Number.isFinite(lines)) return DEFAULT_MAX_SCROLLBACK_CHARS
+    const computed = Math.floor(lines * APPROX_CHARS_PER_LINE)
+    return Math.min(MAX_SCROLLBACK_CHARS, Math.max(MIN_SCROLLBACK_CHARS, computed))
   }
 
   private startIdleMonitor() {
@@ -639,7 +669,7 @@ export class TerminalRegistry {
       rows,
       clients: new Set(),
       pendingSnapshotClients: new Map(),
-      buffer: new ChunkRingBuffer(DEFAULT_MAX_SCROLLBACK_CHARS),
+      buffer: new ChunkRingBuffer(this.scrollbackMaxChars),
       pty: ptyProc,
       perf: perfConfig.enabled
         ? {
