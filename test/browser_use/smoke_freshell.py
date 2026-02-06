@@ -225,13 +225,10 @@ Requirements:
    - Use the UI control(s) for adding/splitting panes (floating action button, split buttons, etc).
    - Try to add panes until the UI prevents adding more (button disabled, no new pane appears, or explicit limit message).
    - If you can still add panes indefinitely, stop once you have created at least {args.pane_target} panes total (this is a "good enough" stress level for this smoke test).
-   - IMPORTANT: This is ONLY a pane-count stress. Do not create any actual Terminal/Editor/Browser content on this tab.
-     - If the UI prompts you to choose a pane type for a new pane, do NOT select any option. Dismiss the chooser (Escape / click outside) so the new pane remains an empty "picker" pane.
-      - Specifically: do not click CMD/WSL/PowerShell during pane stress, since that creates real terminal sessions and can hit terminal limits.
-      - To avoid accidental pane-type selection, always do this exact sequence, repeated:
-        1. Click "Add pane" once.
-        2. Immediately press Escape once (even if you aren't sure a chooser opened).
-        Never click "Add pane" multiple times in a row without pressing Escape in between.
+   - IMPORTANT: This is ONLY a pane-count/layout stress. Do NOT create Terminal panes on this stress-test tab.
+     - When the pane type chooser appears for a new pane, always choose **Editor** (not CMD/WSL/PowerShell).
+     - Do not open any files in those Editor panes during the stress test; just leave them at the "Enter file path..." prompt.
+     - Reason: Terminal panes consume backend terminal slots and can hit the server's terminal limit, which would break the rest of the smoke test.
 5) Create a new *Freshell shell tab* using the in-app tab bar (NOT a new browser tab):
    - In the Freshell UI at the top, there is an in-app tab bar with tabs like "New Tab".
    - Click the plus button with tooltip/title "New shell tab".
