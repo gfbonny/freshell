@@ -86,6 +86,36 @@ const createMockResponse = (body: object, ok = true, statusText = 'OK') => ({
   json: () => Promise.resolve(body),
 })
 
+function createRoutedFetch(opts?: {
+  terminals?: any
+  complete?: any
+  read?: any
+  readOk?: boolean
+  readStatusText?: string
+}) {
+  const terminalsBody = opts?.terminals ?? []
+  const completeBody = opts?.complete ?? { suggestions: [] }
+  const readBody = opts?.read ?? { content: '' }
+  const readOk = opts?.readOk ?? true
+  const readStatusText = opts?.readStatusText ?? 'OK'
+
+  return async (input: any) => {
+    const url = String(input)
+
+    if (url.startsWith('/api/terminals')) {
+      return createMockResponse(terminalsBody)
+    }
+    if (url.startsWith('/api/files/complete')) {
+      return createMockResponse(completeBody)
+    }
+    if (url.startsWith('/api/files/read')) {
+      return createMockResponse(readBody, readOk, readStatusText)
+    }
+
+    return createMockResponse({})
+  }
+}
+
 const createTestStore = () =>
   configureStore({
     reducer: {
@@ -96,6 +126,7 @@ const createTestStore = () =>
 
 describe('Editor Pane Integration', () => {
   let store: ReturnType<typeof createTestStore>
+  let fetchRouter: ReturnType<typeof createRoutedFetch>
 
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
@@ -104,6 +135,9 @@ describe('Editor Pane Integration', () => {
     mockFetch.mockReset()
     mockSend.mockReset()
     sessionStorage.clear()
+
+    fetchRouter = createRoutedFetch()
+    mockFetch.mockImplementation(fetchRouter as any)
 
     // Mock getBoundingClientRect for split direction calculation
     Element.prototype.getBoundingClientRect = vi.fn(() => ({
@@ -199,12 +233,14 @@ describe('Editor Pane Integration', () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
     sessionStorage.setItem('auth-token', 'test-token')
 
-    mockFetch.mockResolvedValue(
-      createMockResponse({
-        content: '# Hello',
-        size: 7,
-        modifiedAt: new Date().toISOString(),
-      })
+    mockFetch.mockImplementation(
+      createRoutedFetch({
+        read: {
+          content: '# Hello',
+          size: 7,
+          modifiedAt: new Date().toISOString(),
+        },
+      }) as any
     )
 
     store.dispatch(
@@ -252,12 +288,14 @@ describe('Editor Pane Integration', () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
     sessionStorage.setItem('auth-token', 'test-token')
 
-    mockFetch.mockResolvedValue(
-      createMockResponse({
-        content: 'const x = 1',
-        size: 11,
-        modifiedAt: new Date().toISOString(),
-      })
+    mockFetch.mockImplementation(
+      createRoutedFetch({
+        read: {
+          content: 'const x = 1',
+          size: 11,
+          modifiedAt: new Date().toISOString(),
+        },
+      }) as any
     )
 
     store.dispatch(
@@ -301,12 +339,14 @@ describe('Editor Pane Integration', () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
     sessionStorage.setItem('auth-token', 'test-token')
 
-    mockFetch.mockResolvedValue(
-      createMockResponse({
-        content: '# Hello World',
-        size: 13,
-        modifiedAt: new Date().toISOString(),
-      })
+    mockFetch.mockImplementation(
+      createRoutedFetch({
+        read: {
+          content: '# Hello World',
+          size: 13,
+          modifiedAt: new Date().toISOString(),
+        },
+      }) as any
     )
 
     store.dispatch(
@@ -351,12 +391,14 @@ describe('Editor Pane Integration', () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
     sessionStorage.setItem('auth-token', 'test-token')
 
-    mockFetch.mockResolvedValue(
-      createMockResponse({
-        content: '# Hello World',
-        size: 13,
-        modifiedAt: new Date().toISOString(),
-      })
+    mockFetch.mockImplementation(
+      createRoutedFetch({
+        read: {
+          content: '# Hello World',
+          size: 13,
+          modifiedAt: new Date().toISOString(),
+        },
+      }) as any
     )
 
     store.dispatch(
@@ -457,11 +499,13 @@ describe('Editor Pane Integration', () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-    mockFetch.mockResolvedValue({
-      ok: false,
-      statusText: 'Not Found',
-      text: () => Promise.resolve(''),
-    } as unknown as Response)
+    mockFetch.mockImplementation(
+      createRoutedFetch({
+        read: {},
+        readOk: false,
+        readStatusText: 'Not Found',
+      }) as any
+    )
 
     store.dispatch(
       initLayout({

@@ -33,6 +33,39 @@ const createMockResponse = (body: object, ok = true, statusText = 'OK') => ({
   json: () => Promise.resolve(body),
 })
 
+function createRoutedFetch(opts?: {
+  terminals?: any
+  complete?: any
+  read?: any
+  readOk?: boolean
+  readStatusText?: string
+  throwOnRead?: Error
+}) {
+  const terminalsBody = opts?.terminals ?? []
+  const completeBody = opts?.complete ?? { suggestions: [] }
+  const readBody = opts?.read ?? { content: '' }
+  const readOk = opts?.readOk ?? true
+  const readStatusText = opts?.readStatusText ?? 'OK'
+  const throwOnRead = opts?.throwOnRead
+
+  return async (input: any) => {
+    const url = String(input)
+
+    if (url.startsWith('/api/terminals')) {
+      return createMockResponse(terminalsBody)
+    }
+    if (url.startsWith('/api/files/complete')) {
+      return createMockResponse(completeBody)
+    }
+    if (url.startsWith('/api/files/read')) {
+      if (throwOnRead) throw throwOnRead
+      return createMockResponse(readBody, readOk, readStatusText)
+    }
+
+    return createMockResponse({})
+  }
+}
+
 const createMockStore = () =>
   configureStore({
     reducer: {
@@ -47,13 +80,14 @@ describe('EditorPane', () => {
   beforeEach(() => {
     store = createMockStore()
     vi.stubGlobal('fetch', mockFetch)
+    mockFetch.mockReset()
+    mockFetch.mockImplementation(createRoutedFetch() as any)
     sessionStorage.clear()
   })
 
   afterEach(() => {
     cleanup()
     vi.unstubAllGlobals()
-    mockFetch.mockReset()
   })
 
   it('renders empty state with Open File button', () => {
@@ -188,9 +222,7 @@ describe('EditorPane', () => {
     it('loads file content from server when path is entered', async () => {
       const user = userEvent.setup()
       sessionStorage.setItem('auth-token', 'test-token')
-      mockFetch.mockResolvedValueOnce(
-        createMockResponse({ content: 'const x = 42' })
-      )
+      mockFetch.mockImplementation(createRoutedFetch({ read: { content: 'const x = 42' } }) as any)
 
       render(
         <Provider store={store}>
@@ -221,9 +253,7 @@ describe('EditorPane', () => {
     it('sends file read request when path is entered', async () => {
       const user = userEvent.setup()
       sessionStorage.setItem('auth-token', 'my-secret-token')
-      mockFetch.mockResolvedValueOnce(
-        createMockResponse({ content: 'file content' })
-      )
+      mockFetch.mockImplementation(createRoutedFetch({ read: { content: 'file content' } }) as any)
 
       render(
         <Provider store={store}>
@@ -254,9 +284,7 @@ describe('EditorPane', () => {
     it('handles empty auth token gracefully', async () => {
       const user = userEvent.setup()
       // No token in sessionStorage
-      mockFetch.mockResolvedValueOnce(
-        createMockResponse({ content: 'content' })
-      )
+      mockFetch.mockImplementation(createRoutedFetch({ read: { content: 'content' } }) as any)
 
       render(
         <Provider store={store}>
@@ -288,8 +316,8 @@ describe('EditorPane', () => {
     it('logs error when file load fails', async () => {
       const user = userEvent.setup()
       const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-      mockFetch.mockResolvedValueOnce(
-        createMockResponse({}, false, 'Not Found')
+      mockFetch.mockImplementation(
+        createRoutedFetch({ read: {}, readOk: false, readStatusText: 'Not Found' }) as any
       )
 
       render(
@@ -323,7 +351,9 @@ describe('EditorPane', () => {
     it('logs error when fetch throws', async () => {
       const user = userEvent.setup()
       const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-      mockFetch.mockRejectedValueOnce(new Error('Network error'))
+      mockFetch.mockImplementation(
+        createRoutedFetch({ throwOnRead: new Error('Network error') }) as any
+      )
 
       render(
         <Provider store={store}>
@@ -355,8 +385,8 @@ describe('EditorPane', () => {
 
     it('determines language from file extension', async () => {
       const user = userEvent.setup()
-      mockFetch.mockResolvedValueOnce(
-        createMockResponse({ content: 'print("hello")' })
+      mockFetch.mockImplementation(
+        createRoutedFetch({ read: { content: 'print("hello")' } }) as any
       )
 
       render(
@@ -390,9 +420,7 @@ describe('EditorPane', () => {
 
     it('sets preview mode as default for markdown files', async () => {
       const user = userEvent.setup()
-      mockFetch.mockResolvedValueOnce(
-        createMockResponse({ content: '# Hello' })
-      )
+      mockFetch.mockImplementation(createRoutedFetch({ read: { content: '# Hello' } }) as any)
 
       render(
         <Provider store={store}>
@@ -419,8 +447,8 @@ describe('EditorPane', () => {
 
     it('sets preview mode as default for html files', async () => {
       const user = userEvent.setup()
-      mockFetch.mockResolvedValueOnce(
-        createMockResponse({ content: '<h1>Hello</h1>' })
+      mockFetch.mockImplementation(
+        createRoutedFetch({ read: { content: '<h1>Hello</h1>' } }) as any
       )
 
       render(
@@ -478,8 +506,10 @@ describe('EditorPane', () => {
     it('auto-fetches file content on mount when filePath is set but content is empty (restoration)', async () => {
       // This simulates restoration from localStorage where content is stripped
       sessionStorage.setItem('auth-token', 'test-token')
-      mockFetch.mockResolvedValueOnce(
-        createMockResponse({ content: 'restored file content', language: 'typescript' })
+      mockFetch.mockImplementation(
+        createRoutedFetch({
+          read: { content: 'restored file content', language: 'typescript' },
+        }) as any
       )
 
       render(
