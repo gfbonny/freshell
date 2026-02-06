@@ -24,7 +24,9 @@ function loadInitialTabsState(): TabsState {
     const tabsState = parsed?.tabs as TabsState | undefined
     if (!tabsState?.tabs) return defaultState
 
-    console.log('[TabsSlice] Loaded initial state from localStorage:', tabsState.tabs.map(t => t.id))
+    if (import.meta.env.MODE === 'development') {
+      console.log('[TabsSlice] Loaded initial state from localStorage:', tabsState.tabs.map(t => t.id))
+    }
 
     // Apply same transformations as hydrateTabs to ensure consistency
     const mappedTabs = tabsState.tabs.map((t: Tab) => {
@@ -49,7 +51,9 @@ function loadInitialTabsState(): TabsState {
       activeTabId: has ? desired! : (mappedTabs[0]?.id ?? null),
     }
   } catch (err) {
-    console.error('[TabsSlice] Failed to load from localStorage:', err)
+    if (import.meta.env.MODE === 'development') {
+      console.error('[TabsSlice] Failed to load from localStorage:', err)
+    }
     return defaultState
   }
 }

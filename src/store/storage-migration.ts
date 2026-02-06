@@ -28,13 +28,17 @@ function runStorageMigration() {
 
       localStorage.setItem('freshell_version', String(STORAGE_VERSION))
 
-      console.log(
-        `[Storage Migration] Cleared localStorage (version ${currentVersion} → ${STORAGE_VERSION}) ` +
-        'due to breaking state schema changes.'
-      )
+      if (import.meta.env.MODE === 'development') {
+        console.log(
+          `[Storage Migration] Cleared localStorage (version ${currentVersion} → ${STORAGE_VERSION}) ` +
+          'due to breaking state schema changes.'
+        )
+      }
     }
   } catch (err) {
-    console.warn('[Storage Migration] Failed:', err)
+    if (import.meta.env.MODE === 'development') {
+      console.warn('[Storage Migration] Failed:', err)
+    }
   }
 }
 

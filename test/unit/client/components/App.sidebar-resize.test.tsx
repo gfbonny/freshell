@@ -139,6 +139,13 @@ describe('App Component - Sidebar Resize', () => {
     localStorage.clear()
     // Mock window.innerWidth for desktop
     Object.defineProperty(window, 'innerWidth', { value: 1024, writable: true })
+
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/settings') return Promise.resolve(defaultSettings)
+      if (url === '/api/platform') return Promise.resolve({ platform: 'linux' })
+      if (url === '/api/sessions') return Promise.resolve([])
+      return Promise.resolve({})
+    })
   })
 
   afterEach(() => {

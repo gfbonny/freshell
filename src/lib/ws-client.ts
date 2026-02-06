@@ -244,7 +244,7 @@ export class WsClient {
 
   private scheduleReconnect() {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('WsClient: max reconnect attempts reached')
+      if (import.meta.env.DEV) console.error('WsClient: max reconnect attempts reached')
       return
     }
 
@@ -253,7 +253,9 @@ export class WsClient {
 
     window.setTimeout(() => {
       if (!this.intentionalClose) {
-        this.connect().catch((err) => console.error('WsClient: reconnect failed', err))
+        this.connect().catch((err) => {
+          if (import.meta.env.DEV) console.error('WsClient: reconnect failed', err)
+        })
       }
     }, delay)
 

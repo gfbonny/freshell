@@ -241,7 +241,7 @@ export default function App() {
         if (msg.type === 'terminal.exit') {
           const terminalId = msg.terminalId
           const code = msg.exitCode
-          console.log('terminal exit', terminalId, code)
+          if (import.meta.env.MODE === 'development') console.log('terminal exit', terminalId, code)
           if (terminalId) dispatch(clearIdleWarning(terminalId))
         }
         if (msg.type === 'terminal.idle.warning') {
@@ -257,9 +257,9 @@ export default function App() {
           // Log session repair status (silent for healthy/repaired, visible for problems)
           const { sessionId, status, orphansFixed } = msg
           if (status === 'missing') {
-            console.warn(`Session ${sessionId.slice(0, 8)}... file is missing`)
+            if (import.meta.env.MODE === 'development') console.warn(`Session ${sessionId.slice(0, 8)}... file is missing`)
           } else if (status === 'repaired') {
-            console.log(`Session ${sessionId.slice(0, 8)}... repaired (${orphansFixed} orphans fixed)`)
+            if (import.meta.env.MODE === 'development') console.log(`Session ${sessionId.slice(0, 8)}... repaired (${orphansFixed} orphans fixed)`)
           }
           // For 'healthy' status, no logging needed
         }

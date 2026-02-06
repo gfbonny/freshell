@@ -36,14 +36,18 @@ function loadInitialPanesState(): PanesState {
     const raw = localStorage.getItem('freshell.panes.v1')
     if (!raw) return defaultState
     const parsed = JSON.parse(raw) as PanesState
-    console.log('[PanesSlice] Loaded initial state from localStorage:', Object.keys(parsed.layouts || {}))
+    if (import.meta.env.MODE === 'development') {
+      console.log('[PanesSlice] Loaded initial state from localStorage:', Object.keys(parsed.layouts || {}))
+    }
     return {
       layouts: parsed.layouts || {},
       activePane: parsed.activePane || {},
       paneTitles: parsed.paneTitles || {},
     }
   } catch (err) {
-    console.error('[PanesSlice] Failed to load from localStorage:', err)
+    if (import.meta.env.MODE === 'development') {
+      console.error('[PanesSlice] Failed to load from localStorage:', err)
+    }
     return defaultState
   }
 }

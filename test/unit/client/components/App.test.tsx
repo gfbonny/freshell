@@ -153,6 +153,9 @@ describe('App Component - Share Button', () => {
     })
     // Mock API responses
     mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/settings') return Promise.resolve(defaultSettings)
+      if (url === '/api/platform') return Promise.resolve({ platform: 'linux' })
+      if (url === '/api/sessions') return Promise.resolve([])
       if (url === '/api/lan-info') {
         return Promise.resolve({ ips: ['192.168.1.100'] })
       }
@@ -517,6 +520,9 @@ describe('App Component - Share Button', () => {
 
     // Mock specific LAN IP
     mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/settings') return Promise.resolve(defaultSettings)
+      if (url === '/api/platform') return Promise.resolve({ platform: 'linux' })
+      if (url === '/api/sessions') return Promise.resolve([])
       if (url === '/api/lan-info') {
         return Promise.resolve({ ips: ['10.0.0.50'] })
       }
@@ -548,6 +554,9 @@ describe('App Component - Share Button', () => {
 
     // Mock API failure
     mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/settings') return Promise.resolve(defaultSettings)
+      if (url === '/api/platform') return Promise.resolve({ platform: 'linux' })
+      if (url === '/api/sessions') return Promise.resolve([])
       if (url === '/api/lan-info') {
         return Promise.reject(new Error('Network error'))
       }
@@ -576,6 +585,12 @@ describe('App Component - Idle Warnings', () => {
     mockOnMessage.mockImplementation((cb: (msg: any) => void) => {
       messageHandler = cb
       return () => { messageHandler = null }
+    })
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/settings') return Promise.resolve(defaultSettings)
+      if (url === '/api/platform') return Promise.resolve({ platform: 'linux' })
+      if (url === '/api/sessions') return Promise.resolve([])
+      return Promise.resolve({})
     })
   })
 
@@ -613,6 +628,8 @@ describe('App Component - Mobile Sidebar', () => {
     localStorage.clear()
     mockApiGet.mockImplementation((url: string) => {
       if (url === '/api/settings') return Promise.resolve(defaultSettings)
+      if (url === '/api/platform') return Promise.resolve({ platform: 'linux' })
+      if (url === '/api/sessions') return Promise.resolve([])
       return Promise.resolve({})
     })
   })

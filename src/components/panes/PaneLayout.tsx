@@ -16,15 +16,9 @@ export default function PaneLayout({ tabId, defaultContent, hidden }: PaneLayout
   const layout = useAppSelector((s) => s.panes.layouts[tabId])
   const containerRef = useRef<HTMLDivElement>(null)
 
-  // Debug: check what's in the store
-  const allLayouts = useAppSelector((s) => s.panes.layouts)
-
   // Initialize layout if not exists
   useEffect(() => {
     if (!layout) {
-      // Only log when actually creating a new layout
-      console.log('[PaneLayout] Creating new layout for tabId:', tabId)
-      console.log('[PaneLayout] Available layout keys:', Object.keys(allLayouts))
       dispatch(initLayout({ tabId, content: defaultContent }))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
