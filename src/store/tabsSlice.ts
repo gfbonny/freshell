@@ -8,8 +8,6 @@ export interface TabsState {
   activeTabId: string | null
 }
 
-const DEFAULT_CWD = import.meta.env.VITE_DEFAULT_CWD || undefined
-
 // Load persisted tabs state directly at module initialization time
 // This ensures the initial state includes persisted data BEFORE the store is created
 function loadInitialTabsState(): TabsState {
@@ -109,7 +107,7 @@ export const tabsSlice = createSlice({
         status: payload.status || 'creating',
         mode: payload.mode || 'shell',
         shell: payload.shell || 'system',
-        initialCwd: payload.initialCwd ?? DEFAULT_CWD,
+        initialCwd: payload.initialCwd,
         resumeSessionId: payload.resumeSessionId,
         createdAt: Date.now(),
         lastInputAt: undefined,
