@@ -12,6 +12,8 @@ import asyncio
 import os
 import sys
 import traceback
+import logging
+import re
 import urllib.request
 from pathlib import Path
 
@@ -24,6 +26,7 @@ from smoke_utils import (
   load_dotenv,
   monotonic_timer,
   redact_url,
+  redact_text,
   require,
   token_fingerprint,
 )
@@ -67,6 +70,31 @@ async def _run(args: argparse.Namespace) -> int:
   model = env_or(args.model, "BROWSER_USE_MODEL") or "bu-latest"
   target_url = build_target_url(base_url, token)
   redacted_target_url = redact_url(target_url)
+
+  # Configure browser_use logging and redact tokens from any log messages.
+  # This keeps the console usable while avoiding accidental token leakage.
+  class _RedactTokenFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+      try:
+        msg = record.getMessage()
+        redacted = redact_text(msg)
+        record.msg = redacted
+        record.args = ()
+      except Exception:
+        pass
+      return True
+
+  root_logger = logging.getLogger()
+  root_logger.setLevel(logging.INFO if args.debug else logging.INFO)
+  for h in root_logger.handlers:
+    h.addFilter(_RedactTokenFilter())
+
+  # Some environments have no handlers set yet.
+  if not root_logger.handlers:
+    handler = logging.StreamHandler(stream=sys.stdout)
+    handler.addFilter(_RedactTokenFilter())
+    handler.setLevel(logging.INFO)
+    root_logger.addHandler(handler)
 
   log.info(
     "Smoke config",
@@ -152,7 +180,10 @@ SMOKE_RESULT: FAIL - <short reason>
   try:
     action_history = getattr(history, "action_history", None)
     if callable(action_history):
-      log.debug("Agent action_history", event="agent_action_history", actions=action_history())
+      actions = action_history()
+      # Avoid dumping huge non-JSON-serializable structures; log a cheap summary.
+      action_count = len(actions) if hasattr(actions, "__len__") else None
+      log.debug("Agent action_history summary", event="agent_action_history", actionCount=action_count)
   except Exception:
     log.debug("Failed to read action_history", event="agent_action_history_error", trace=traceback.format_exc())
 

@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import time
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, Optional
@@ -53,7 +54,8 @@ class JsonLogger:
     }
     # Drop None values to keep logs concise.
     payload = {k: v for k, v in payload.items() if v is not None}
-    sys.stdout.write(json.dumps(payload, ensure_ascii=True, separators=(",", ":")) + "\n")
+    # Keep logging resilient: stringify unknown objects rather than crashing.
+    sys.stdout.write(json.dumps(payload, ensure_ascii=True, separators=(",", ":"), default=str) + "\n")
     sys.stdout.flush()
 
   def debug(self, msg: str, **fields: object) -> None:
@@ -88,6 +90,13 @@ def redact_url(url: str) -> str:
     else:
       q.append((k, v))
   return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(q), parts.fragment))
+
+
+_TOKEN_RE = re.compile(r"(\\btoken=)([^&#\\s]+)")
+
+
+def redact_text(text: str) -> str:
+  return _TOKEN_RE.sub(r"\\1REDACTED", text)
 
 
 def token_fingerprint(token: str) -> str:
@@ -168,4 +177,3 @@ def require(name: str, value: Optional[str]) -> str:
   if value:
     return value
   raise ValueError(f"Missing required setting: {name}")
-
