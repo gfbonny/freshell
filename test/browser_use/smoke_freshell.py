@@ -191,7 +191,11 @@ SMOKE_RESULT: FAIL - <short reason>
     errors = getattr(history, "errors", None)
     if callable(errors):
       errs = errors()
-      if errs:
+      if isinstance(errs, list):
+        non_empty = [e for e in errs if e]
+        if non_empty:
+          log.warn("Agent history errors present", event="agent_history_errors", errors=non_empty)
+      elif errs:
         log.warn("Agent history errors present", event="agent_history_errors", errors=errs)
   except Exception:
     log.debug("Failed to read errors()", event="agent_errors_error", trace=traceback.format_exc())
