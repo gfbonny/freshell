@@ -37,10 +37,12 @@ const isTruthy = (value: unknown) => value === true || value === 'true' || value
 
 const unwrap = (response: any) => (response && typeof response === 'object' && 'data' in response ? response.data : response)
 
-async function fetchTabs(client: ReturnType<typeof createHttpClient>): Promise<TabSummary[]> {
+async function fetchTabs(client: ReturnType<typeof createHttpClient>): Promise<{ tabs: TabSummary[]; activeTabId?: string | null }> {
   const res = await client.get('/api/tabs')
   const data = unwrap(res)
-  return (data?.tabs || data || []) as TabSummary[]
+  const tabs = (data?.tabs || data || []) as TabSummary[]
+  const activeTabId = data?.activeTabId ?? null
+  return { tabs, activeTabId }
 }
 
 async function fetchPanes(client: ReturnType<typeof createHttpClient>, tabId?: string): Promise<PaneSummary[]> {
@@ -51,7 +53,7 @@ async function fetchPanes(client: ReturnType<typeof createHttpClient>, tabId?: s
 }
 
 async function buildTargetContext(client: ReturnType<typeof createHttpClient>) {
-  const tabs = await fetchTabs(client)
+  const { tabs, activeTabId } = await fetchTabs(client)
   const panesByTab: Record<string, string[]> = {}
   const paneInfoById: Record<string, PaneSummary> = {}
 
@@ -61,16 +63,16 @@ async function buildTargetContext(client: ReturnType<typeof createHttpClient>) {
     for (const pane of panes) paneInfoById[pane.id] = pane
   }
 
-  return { tabs, panesByTab, paneInfoById }
+  return { tabs, panesByTab, paneInfoById, activeTabId: activeTabId || undefined }
 }
 
 async function resolvePaneTarget(client: ReturnType<typeof createHttpClient>, target?: string) {
-  const { tabs, panesByTab, paneInfoById } = await buildTargetContext(client)
-  const activeTabId = tabs[0]?.id
-  const ctx = { activeTabId, panesByTab, tabs }
+  const { tabs, panesByTab, paneInfoById, activeTabId } = await buildTargetContext(client)
+  const effectiveActiveTabId = activeTabId || tabs[0]?.id
+  const ctx = { activeTabId: effectiveActiveTabId, panesByTab, tabs }
 
   if (!target) {
-    const fallbackTab = tabs[0]
+    const fallbackTab = tabs.find((t) => t.id === effectiveActiveTabId) || tabs[0]
     const paneId = fallbackTab?.activePaneId || (fallbackTab ? panesByTab[fallbackTab.id]?.[0] : undefined)
     return { tab: fallbackTab, pane: paneId ? paneInfoById[paneId] : undefined, message: 'active tab used' }
   }
@@ -82,9 +84,12 @@ async function resolvePaneTarget(client: ReturnType<typeof createHttpClient>, ta
 }
 
 async function resolveTabTarget(client: ReturnType<typeof createHttpClient>, target?: string) {
-  const tabs = await fetchTabs(client)
+  const { tabs, activeTabId } = await fetchTabs(client)
   if (!tabs.length) return { tab: undefined, message: 'no tabs' }
-  if (!target) return { tab: tabs[0], message: 'active tab used' }
+  if (!target) {
+    const activeTab = tabs.find((t) => t.id === activeTabId) || tabs[0]
+    return { tab: activeTab, message: 'active tab used' }
+  }
   const tab = tabs.find((t) => t.id === target || t.title === target)
   return { tab, message: tab ? undefined : 'tab not found' }
 }
@@ -96,12 +101,9 @@ function formatList(items: string[]) {
 
 async function handleDisplay(format: string, target: string | undefined, client: ReturnType<typeof createHttpClient>) {
   const config = resolveConfig()
-  const { tabs, panesByTab, paneInfoById } = await buildTargetContext(client)
-  const activeTabId = tabs[0]?.id
-  const ctx = { activeTabId, panesByTab, tabs }
-  const resolved = resolveTarget(target || '', ctx)
-  const tab = tabs.find((t) => t.id === resolved.tabId) || tabs[0]
-  const pane = resolved.paneId ? paneInfoById[resolved.paneId] : undefined
+  const resolved = await resolvePaneTarget(client, target)
+  const tab = resolved.tab
+  const pane = resolved.pane
 
   const values: Record<string, string> = {
     tab_name: tab?.title || 'N/A',

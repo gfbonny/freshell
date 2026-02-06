@@ -21,6 +21,10 @@ export class LayoutStore {
     this.sourceConnectionId = connectionId
   }
 
+  getActiveTabId() {
+    return this.snapshot?.activeTabId || null
+  }
+
   private ensureSnapshot(): UiSnapshot {
     if (!this.snapshot) {
       this.snapshot = { tabs: [], layouts: {}, activePane: {}, activeTabId: null }
@@ -39,6 +43,15 @@ export class LayoutStore {
       this.collectLeaves(node.children[1], leaves)
     }
     return leaves
+  }
+
+  private findParentSplitId(node: any, paneId: string): string | null {
+    if (!node || node.type !== 'split') return null
+    const [left, right] = node.children || []
+    if ((left?.type === 'leaf' && left.id === paneId) || (right?.type === 'leaf' && right.id === paneId)) {
+      return node.id
+    }
+    return this.findParentSplitId(left, paneId) || this.findParentSplitId(right, paneId)
   }
 
   private buildHorizontalRow(leaves: Leaf[]): any {
@@ -151,6 +164,16 @@ export class LayoutStore {
       const leaves = this.collectLeaves(root, [])
       const match = leaves.find((leaf) => leaf.id === paneId)
       if (match?.content?.terminalId) return match.content.terminalId
+    }
+    return undefined
+  }
+
+  findSplitForPane(paneId: string) {
+    if (!this.snapshot) return undefined
+    for (const tab of this.snapshot.tabs) {
+      const root = this.snapshot.layouts?.[tab.id]
+      const splitId = this.findParentSplitId(root, paneId)
+      if (splitId) return { tabId: tab.id, splitId }
     }
     return undefined
   }

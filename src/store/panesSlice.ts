@@ -359,17 +359,18 @@ export const panesSlice = createSlice({
   reducers: {
     initLayout: (
       state,
-      action: PayloadAction<{ tabId: string; content: PaneContentInput }>
+      action: PayloadAction<{ tabId: string; content: PaneContentInput; paneId?: string }>
     ) => {
-      const { tabId, content } = action.payload
+      const { tabId, content, paneId: providedPaneId } = action.payload
       // Don't overwrite existing layout
       if (state.layouts[tabId]) return
 
-      const paneId = nanoid()
+      const paneId = providedPaneId ?? nanoid()
+      const normalized = normalizeContent(content)
       state.layouts[tabId] = {
         type: 'leaf',
         id: paneId,
-        content: normalizeContent(content),
+        content: normalized,
       }
       state.activePane[tabId] = paneId
     },
@@ -397,13 +398,14 @@ export const panesSlice = createSlice({
         paneId: string
         direction: 'horizontal' | 'vertical'
         newContent: PaneContentInput
+        newPaneId?: string
       }>
     ) => {
-      const { tabId, paneId, direction, newContent } = action.payload
+      const { tabId, paneId, direction, newContent, newPaneId: providedPaneId } = action.payload
       const root = state.layouts[tabId]
       if (!root) return
 
-      const newPaneId = nanoid()
+      const newPaneId = providedPaneId ?? nanoid()
       const normalizedContent = normalizeContent(newContent)
 
       const targetPane = findLeaf(root, paneId)
@@ -666,6 +668,45 @@ export const panesSlice = createSlice({
       state.layouts[tabId] = update(root)
     },
 
+    swapPanes: (
+      state,
+      action: PayloadAction<{ tabId: string; paneId: string; otherId: string }>
+    ) => {
+      const { tabId, paneId, otherId } = action.payload
+      const root = state.layouts[tabId]
+      if (!root) return
+
+      function findLeaf(node: PaneNode, id: string): Extract<PaneNode, { type: 'leaf' }> | null {
+        if (node.type === 'leaf') return node.id === id ? node : null
+        return findLeaf(node.children[0], id) || findLeaf(node.children[1], id)
+      }
+
+      const a = findLeaf(root, paneId)
+      const b = findLeaf(root, otherId)
+      if (!a || !b) return
+
+      function update(node: PaneNode): PaneNode {
+        if (node.type === 'leaf') {
+          if (node.id === paneId) return { ...node, content: b.content }
+          if (node.id === otherId) return { ...node, content: a.content }
+          return node
+        }
+        return {
+          ...node,
+          children: [update(node.children[0]), update(node.children[1])],
+        }
+      }
+
+      state.layouts[tabId] = update(root)
+
+      if (state.paneTitles[tabId]) {
+        const titles = state.paneTitles[tabId]
+        const temp = titles[paneId]
+        titles[paneId] = titles[otherId]
+        titles[otherId] = temp
+      }
+    },
+
     replacePane: (
       state,
       action: PayloadAction<{ tabId: string; paneId: string }>
@@ -875,6 +916,7 @@ export const {
   resetSplit,
   swapSplit,
   replacePane,
+  swapPanes,
   updatePaneContent,
   removeLayout,
   hydratePanes,

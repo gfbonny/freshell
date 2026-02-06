@@ -14,6 +14,7 @@ vi.mock('@/lib/ws-client', () => ({
 
 describe('layoutMirrorMiddleware', () => {
   it('sends ui.layout.sync after tab changes', () => {
+    mockSend.mockClear()
     vi.useFakeTimers()
     const store = configureStore({
       reducer: { tabs: tabsReducer, panes: panesReducer },
@@ -22,6 +23,23 @@ describe('layoutMirrorMiddleware', () => {
     store.dispatch(addTab({ title: 'alpha' }))
     vi.runOnlyPendingTimers()
     expect(mockSend).toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  it('dedupes unchanged layout payloads', () => {
+    mockSend.mockClear()
+    vi.useFakeTimers()
+    const store = configureStore({
+      reducer: { tabs: tabsReducer, panes: panesReducer },
+      middleware: (g) => g().concat(layoutMirrorMiddleware),
+    })
+    store.dispatch(addTab({ title: 'alpha' }))
+    vi.runOnlyPendingTimers()
+    expect(mockSend).toHaveBeenCalledTimes(1)
+
+    store.dispatch({ type: 'noop' })
+    vi.runOnlyPendingTimers()
+    expect(mockSend).toHaveBeenCalledTimes(1)
     vi.useRealTimers()
   })
 })

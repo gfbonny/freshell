@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import panesReducer, {
   initLayout,
   splitPane,
+  swapPanes,
   addPane,
   closePane,
   setActivePane,
@@ -73,6 +74,17 @@ describe('panesSlice', () => {
 
       const leaf = state.layouts['tab-1'] as Extract<PaneNode, { type: 'leaf' }>
       expect(state.activePane['tab-1']).toBe(leaf.id)
+    })
+
+    it('uses the provided paneId when supplied', () => {
+      const state = panesReducer(
+        initialState,
+        initLayout({ tabId: 'tab-1', paneId: 'pane-fixed', content: { kind: 'terminal', mode: 'shell' } })
+      )
+
+      const leaf = state.layouts['tab-1'] as Extract<PaneNode, { type: 'leaf' }>
+      expect(leaf.id).toBe('pane-fixed')
+      expect(state.activePane['tab-1']).toBe('pane-fixed')
     })
 
     it('does not overwrite existing layout for a tab', () => {
@@ -250,7 +262,7 @@ describe('panesSlice', () => {
       }
     })
 
-    it('does not auto-assign resumeSessionId for claude panes created by splitPane', () => {
+    it('uses the provided newPaneId when supplied', () => {
       let state = panesReducer(
         initialState,
         initLayout({ tabId: 'tab-1', content: { kind: 'terminal', mode: 'shell' } })
@@ -263,12 +275,15 @@ describe('panesSlice', () => {
           tabId: 'tab-1',
           paneId: originalPaneId,
           direction: 'horizontal',
+          newPaneId: 'pane-fixed',
           newContent: { kind: 'terminal', mode: 'claude' },
         })
       )
 
       const split = state.layouts['tab-1'] as Extract<PaneNode, { type: 'split' }>
       const claudeLeaf = split.children[1] as Extract<PaneNode, { type: 'leaf' }>
+      expect(claudeLeaf.id).toBe('pane-fixed')
+      expect(state.activePane['tab-1']).toBe('pane-fixed')
       if (claudeLeaf.content.kind === 'terminal') {
         expect(claudeLeaf.content.resumeSessionId).toBeUndefined()
       }
@@ -509,6 +524,45 @@ describe('panesSlice', () => {
         expect(newPane.content.url).toBe('https://example.com')
         expect(newPane.content.devToolsOpen).toBe(true)
       }
+    })
+  })
+
+  describe('swapPanes', () => {
+    it('swaps pane content by pane id', () => {
+      let state = panesReducer(
+        initialState,
+        initLayout({ tabId: 'tab-1', content: { kind: 'terminal', mode: 'shell' } })
+      )
+      const originalPaneId = (state.layouts['tab-1'] as Extract<PaneNode, { type: 'leaf' }>).id
+
+      state = panesReducer(
+        state,
+        splitPane({
+          tabId: 'tab-1',
+          paneId: originalPaneId,
+          direction: 'horizontal',
+          newContent: { kind: 'browser', url: 'https://example.com', devToolsOpen: false },
+        })
+      )
+
+      const split = state.layouts['tab-1'] as Extract<PaneNode, { type: 'split' }>
+      const left = split.children[0] as Extract<PaneNode, { type: 'leaf' }>
+      const right = split.children[1] as Extract<PaneNode, { type: 'leaf' }>
+
+      expect(left.content.kind).toBe('terminal')
+      expect(right.content.kind).toBe('browser')
+
+      state = panesReducer(
+        state,
+        swapPanes({ tabId: 'tab-1', paneId: left.id, otherId: right.id })
+      )
+
+      const swapped = state.layouts['tab-1'] as Extract<PaneNode, { type: 'split' }>
+      const swappedLeft = swapped.children[0] as Extract<PaneNode, { type: 'leaf' }>
+      const swappedRight = swapped.children[1] as Extract<PaneNode, { type: 'leaf' }>
+
+      expect(swappedLeft.content.kind).toBe('browser')
+      expect(swappedRight.content.kind).toBe('terminal')
     })
   })
 

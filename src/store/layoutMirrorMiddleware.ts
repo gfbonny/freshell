@@ -15,7 +15,6 @@ export const layoutMirrorMiddleware: Middleware = (store) => {
       layouts: state.panes.layouts,
       activePane: state.panes.activePane,
       paneTitles: state.panes.paneTitles || {},
-      timestamp: Date.now(),
     }
     const serialized = JSON.stringify(payload)
     if (serialized === lastPayload) return result
@@ -23,7 +22,7 @@ export const layoutMirrorMiddleware: Middleware = (store) => {
 
     if (timer) window.clearTimeout(timer)
     timer = window.setTimeout(() => {
-      getWsClient().send(payload)
+      getWsClient().send({ ...payload, timestamp: Date.now() })
     }, 200)
 
     return result

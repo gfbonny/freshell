@@ -24,29 +24,67 @@ const looksLikePrompt = (text: string) => {
 export function createAgentApiRouter({ layoutStore, registry, wsHandler }: { layoutStore: any; registry: any; wsHandler?: any }) {
   const router = Router()
 
+  const resolvePaneTarget = (raw: string) => {
+    if (layoutStore.resolveTarget) {
+      const resolved = layoutStore.resolveTarget(raw)
+      if (resolved?.paneId) return resolved
+    }
+    return { paneId: raw }
+  }
+
   router.post('/tabs', (req, res) => {
     const { name, mode, shell, cwd, browser, editor, resumeSessionId } = req.body || {}
-    const note = browser || editor ? 'browser/editor requested; created terminal tab' : 'tab created'
+    const wantsBrowser = !!browser
+    const wantsEditor = !!editor
 
     try {
-      const { tabId, paneId } = layoutStore.createTab({ title: name })
-      const terminal = registry.create({
-        mode: mode || 'shell',
-        shell,
-        cwd,
-        resumeSessionId,
-        envContext: { tabId, paneId },
-      })
+      const { tabId, paneId } = layoutStore.createTab({ title: name, browser, editor })
 
-      layoutStore.attachPaneContent(tabId, paneId, { kind: 'terminal', terminalId: terminal.terminalId })
+      let paneContent: any
+      let terminalId: string | undefined
+
+      if (wantsBrowser) {
+        paneContent = { kind: 'browser', url: browser, devToolsOpen: false }
+      } else if (wantsEditor) {
+        paneContent = { kind: 'editor', filePath: editor, language: null, readOnly: false, content: '', viewMode: 'source' }
+      } else {
+        const terminal = registry.create({
+          mode: mode || 'shell',
+          shell,
+          cwd,
+          resumeSessionId,
+          envContext: { tabId, paneId },
+        })
+        terminalId = terminal.terminalId
+        paneContent = {
+          kind: 'terminal',
+          terminalId,
+          status: 'running',
+          mode: mode || 'shell',
+          shell: shell || 'system',
+          resumeSessionId,
+          initialCwd: cwd,
+        }
+      }
+
+      layoutStore.attachPaneContent(tabId, paneId, paneContent)
 
       wsHandler?.broadcastUiCommand({
         command: 'tab.create',
-        payload: { id: tabId, title: name, mode: mode || 'shell', shell, terminalId: terminal.terminalId, initialCwd: cwd, resumeSessionId },
+        payload: {
+          id: tabId,
+          title: name,
+          mode: mode || 'shell',
+          shell,
+          terminalId,
+          initialCwd: cwd,
+          resumeSessionId,
+          paneId,
+          paneContent,
+        },
       })
 
-      const responder = browser || editor ? approx : ok
-      res.json(responder({ tabId, paneId, terminalId: terminal.terminalId }, note))
+      res.json(ok({ tabId, paneId, terminalId }, 'tab created'))
     } catch (err: any) {
       res.status(500).json(fail(err?.message || 'Failed to create tab'))
     }
@@ -94,7 +132,8 @@ export function createAgentApiRouter({ layoutStore, registry, wsHandler }: { lay
 
   router.get('/tabs', (_req, res) => {
     const tabs = layoutStore.listTabs?.() || []
-    res.json(ok({ tabs }))
+    const activeTabId = layoutStore.getActiveTabId?.() || null
+    res.json(ok({ tabs, activeTabId }))
   })
 
   router.get('/panes', (req, res) => {
@@ -245,73 +284,127 @@ export function createAgentApiRouter({ layoutStore, registry, wsHandler }: { lay
   })
 
   router.post('/panes/:id/split', (req, res) => {
-    const paneId = req.params.id
+    const rawPaneId = req.params.id
+    const resolved = resolvePaneTarget(rawPaneId)
+    const paneId = resolved.paneId || rawPaneId
     const direction = req.body?.direction || 'horizontal'
     const wantsBrowser = !!req.body?.browser
     const wantsEditor = !!req.body?.editor
-    const terminal = wantsBrowser || wantsEditor
-      ? undefined
-      : registry.create({ mode: req.body?.mode || 'shell', shell: req.body?.shell, cwd: req.body?.cwd })
 
     const result = layoutStore.splitPane({
       paneId,
       direction,
-      terminalId: terminal?.terminalId,
-      browser: req.body?.browser,
-      editor: req.body?.editor,
+      browser: wantsBrowser ? req.body?.browser : undefined,
+      editor: wantsEditor ? req.body?.editor : undefined,
     })
 
-    if (result?.tabId && result?.newPaneId) {
-      wsHandler?.broadcastUiCommand({
-        command: 'pane.split',
-        payload: {
-          tabId: result.tabId,
-          paneId,
-          direction,
-          newContent: req.body?.browser
-            ? { kind: 'browser', url: req.body.browser, devToolsOpen: false }
-            : req.body?.editor
-              ? { kind: 'editor', filePath: req.body.editor, language: null, readOnly: false, content: '', viewMode: 'source' }
-              : { kind: 'terminal', terminalId: terminal?.terminalId, status: 'running', mode: req.body?.mode || 'shell', shell: req.body?.shell || 'system', createRequestId: nanoid() },
-        },
-      })
-      res.json(ok({ paneId: result.newPaneId, terminalId: terminal?.terminalId }, 'pane split'))
+    if (!result?.tabId || !result?.newPaneId) {
+      res.json(approx(result, 'pane split requested; not applied'))
       return
     }
 
-    res.json(approx(result, 'pane split requested; not applied'))
+    const tabId = result.tabId
+    const newPaneId = result.newPaneId
+
+    let content: any
+    let terminalId: string | undefined
+    if (wantsBrowser) {
+      content = { kind: 'browser', url: req.body.browser, devToolsOpen: false }
+    } else if (wantsEditor) {
+      content = { kind: 'editor', filePath: req.body.editor, language: null, readOnly: false, content: '', viewMode: 'source' }
+    } else {
+      const terminal = registry.create({
+        mode: req.body?.mode || 'shell',
+        shell: req.body?.shell,
+        cwd: req.body?.cwd,
+        envContext: { tabId, paneId: newPaneId },
+      })
+      terminalId = terminal.terminalId
+      content = { kind: 'terminal', terminalId, status: 'running', mode: req.body?.mode || 'shell', shell: req.body?.shell || 'system' }
+    }
+
+    layoutStore.attachPaneContent(tabId, newPaneId, content)
+
+    wsHandler?.broadcastUiCommand({
+      command: 'pane.split',
+      payload: {
+        tabId,
+        paneId,
+        direction,
+        newPaneId,
+        newContent: content,
+      },
+    })
+
+    const message = wantsBrowser || wantsEditor ? 'pane split (non-terminal)' : 'pane split'
+    res.json(ok({ paneId: newPaneId, terminalId }, message))
   })
 
   router.post('/panes/:id/close', (req, res) => {
-    const paneId = req.params.id
+    const rawPaneId = req.params.id
+    const resolved = resolvePaneTarget(rawPaneId)
+    const paneId = resolved.paneId || rawPaneId
     const result = layoutStore.closePane(paneId)
     wsHandler?.broadcastUiCommand({ command: 'pane.close', payload: { tabId: result?.tabId, paneId } })
-    res.json(ok(result, result?.message || 'pane closed'))
+    res.json(ok(result, resolved.message || result?.message || 'pane closed'))
   })
 
   router.post('/panes/:id/select', (req, res) => {
-    const paneId = req.params.id
-    const result = layoutStore.selectPane(req.body?.tabId, paneId)
+    const rawPaneId = req.params.id
+    const resolved = resolvePaneTarget(rawPaneId)
+    const paneId = resolved.paneId || rawPaneId
+    const tabId = req.body?.tabId || resolved.tabId
+    const result = layoutStore.selectPane(tabId, paneId)
     if (result?.tabId) {
       wsHandler?.broadcastUiCommand({ command: 'pane.select', payload: { tabId: result.tabId, paneId } })
     }
-    res.json(ok(result, result?.message || 'pane selected'))
+    res.json(ok(result, resolved.message || result?.message || 'pane selected'))
   })
 
   router.post('/panes/:id/resize', (req, res) => {
-    const splitId = req.params.id
+    const rawTarget = req.params.id
     const sizes = Array.isArray(req.body?.sizes) ? req.body.sizes : [req.body?.x ?? 50, req.body?.y ?? 50]
     const values = sizes.map((v: any) => Number(v))
-    const result = layoutStore.resizePane(req.body?.tabId, splitId, [values[0] || 50, values[1] || 50])
-    res.json(ok(result, result?.message || 'pane resized'))
+    const normalizedSizes: [number, number] = [values[0] || 50, values[1] || 50]
+
+    let splitId = rawTarget
+    let result = layoutStore.resizePane(req.body?.tabId, splitId, normalizedSizes)
+    let message = result?.message
+
+    if (message === 'split not found' && layoutStore.findSplitForPane && layoutStore.resolveTarget) {
+      const resolved = layoutStore.resolveTarget(rawTarget)
+      if (resolved?.paneId) {
+        const parent = layoutStore.findSplitForPane(resolved.paneId)
+        if (parent?.splitId) {
+          splitId = parent.splitId
+          result = layoutStore.resizePane(parent.tabId, splitId, normalizedSizes)
+          message = 'pane matched; resized parent split'
+        }
+      }
+    }
+
+    if (result?.tabId) {
+      wsHandler?.broadcastUiCommand({ command: 'pane.resize', payload: { tabId: result.tabId, splitId, sizes: normalizedSizes } })
+    }
+    res.json(ok(result, message || result?.message || 'pane resized'))
   })
 
   router.post('/panes/:id/swap', (req, res) => {
-    const paneId = req.params.id
-    const otherId = req.body?.target || req.body?.otherId
+    const rawPaneId = req.params.id
+    const otherRaw = req.body?.target || req.body?.otherId
+    if (!otherRaw) return res.json(approx(undefined, 'swap target missing'))
+
+    const resolved = resolvePaneTarget(rawPaneId)
+    const paneId = resolved.paneId || rawPaneId
+    const otherResolved = resolvePaneTarget(otherRaw)
+    const otherId = otherResolved.paneId || otherRaw
     if (!otherId) return res.json(approx(undefined, 'swap target missing'))
     const result = layoutStore.swapPane(req.body?.tabId, paneId, otherId)
-    res.json(ok(result, result?.message || 'panes swapped'))
+    if (result?.tabId) {
+      wsHandler?.broadcastUiCommand({ command: 'pane.swap', payload: { tabId: result.tabId, paneId, otherId } })
+    }
+    const message = resolved.message || otherResolved.message || result?.message || 'panes swapped'
+    res.json(ok(result, message))
   })
 
   router.post('/panes/:id/respawn', (req, res) => {
