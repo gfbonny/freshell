@@ -155,39 +155,68 @@ async def _run(args: argparse.Namespace) -> int:
     no_viewport=False,
   )
 
+  # Pre-open the authenticated URL outside the agent task to avoid printing the token.
+  # browser_use prints the entire task (and action URLs) to stdout; keep secrets out of it.
+  try:
+    log.info("Pre-opening target URL", event="preopen_target", targetUrl=redacted_target_url)
+    await browser.start()
+    page = await browser.new_page(target_url)
+    # Ensure the agent focus is on the freshly opened tab.
+    try:
+      from browser_use.browser.events import SwitchTabEvent  # type: ignore
+
+      await browser.event_bus.dispatch(SwitchTabEvent(target_id=None))
+    except Exception:
+      pass
+    # Best-effort: Freshell removes `?token=...` after it boots; give it a moment.
+    await asyncio.sleep(0.5)
+    try:
+      current_url = await page.get_url()
+      log.info("Target URL opened", event="preopen_target_ok", currentUrl=redact_url(current_url))
+    except Exception:
+      log.info("Target URL opened", event="preopen_target_ok")
+  except Exception as e:
+    log.error("Failed to pre-open target URL", event="preopen_target_failed", error=str(e))
+    try:
+      stop = getattr(browser, "stop", None)
+      if callable(stop):
+        await stop()
+    except Exception:
+      pass
+    return 1
+
   task = f"""
 You are running a browser smoke test for a local Freshell dev instance.
 
-Target URL: {target_url}
+The app is already opened and authenticated in the current tab.
 
 Important constraints:
 - Do not create or write any files during this run.
 - Do everything in a single browser window. You may open new tabs inside that window. Do not open any new windows.
 
 Requirements:
-1) Navigate to the Target URL.
-2) Wait until the page is fully loaded and the top bar is visible.
-3) Verify the app header contains the text "freshell".
-4) Verify the connection indicator shows the app is connected (not disconnected).
-5) Pane stress test (do this once):
+1) Wait until the page is fully loaded and the top bar is visible.
+2) Verify the app header contains the text "freshell".
+3) Verify the connection indicator shows the app is connected (not disconnected).
+4) Pane stress test (do this once):
    - Use the UI control(s) for adding/splitting panes (floating action button, split buttons, etc).
    - Try to add panes until the UI prevents adding more (button disabled, no new pane appears, or explicit limit message).
    - If you can still add panes indefinitely, stop once you have created at least {args.pane_target} panes total (this is a "good enough" stress level for this smoke test).
    - IMPORTANT: This is ONLY a pane-count stress. Do not create any actual Terminal/Editor/Browser content on this tab.
      - If the UI prompts you to choose a pane type for a new pane, do NOT select any option. Dismiss the chooser (Escape / click outside) so the new pane remains an empty "picker" pane.
      - Specifically: do not click CMD/WSL/PowerShell during pane stress, since that creates real terminal sessions and can hit terminal limits.
-6) Create a new shell tab (click the plus button in the tab bar with the tooltip/title "New shell tab"). Do not open new windows.
-7) On that new tab, create a few panes and set up EXACTLY one of each type: Editor, Terminal, Browser (keep this tab multi-pane for quick review).
+5) Create a new shell tab (click the plus button in the tab bar with the tooltip/title "New shell tab"). Do not open new windows.
+6) On that new tab, create a few panes and set up EXACTLY one of each type: Editor, Terminal, Browser (keep this tab multi-pane for quick review).
    - In the Editor pane: open this file path: {known_text_file}. Verify visually the editor shows content (not an empty placeholder).
    - In the Terminal pane: run `node -v` (or `git --version` if node is unavailable). Verify visually the output looks like a version string.
    - In the Browser pane: navigate to https://example.com and verify visually it shows "Example Domain".
    - Keep terminal creation minimal: do not create extra terminal panes beyond this one.
-8) Create one more new shell tab for Settings verification.
-9) On that tab, open the sidebar (if it is collapsed) using the top-left toggle button.
-10) Click "Settings" in the sidebar.
-11) On the Settings page, confirm "Terminal preview" is visible (use `find_text`).
-12) Navigate back to the terminal view.
-13) Click through the tabs in the tab bar to confirm they still render (stress, multi-pane, settings).
+7) Create one more new shell tab for Settings verification.
+8) On that tab, open the sidebar (if it is collapsed) using the top-left toggle button.
+9) Click "Settings" in the sidebar.
+10) On the Settings page, confirm "Terminal preview" is visible (use `find_text`).
+11) Navigate back to the terminal view.
+12) Click through the tabs in the tab bar to confirm they still render (stress, multi-pane, settings).
 
 Output:
 At the end, output exactly one line:
