@@ -27,7 +27,7 @@ import { getSessionRepairService } from './session-scanner/service.js'
 import { createClientLogsRouter } from './client-logs.js'
 import { createStartupState } from './startup-state.js'
 import { getPerfConfig, initPerfLogging, setPerfLoggingEnabled, startPerfTimer, withPerfSpan } from './perf-logger.js'
-import { detectPlatform } from './platform.js'
+import { detectPlatform, detectAvailableClis } from './platform.js'
 import { resolveVisitPort } from './startup-url.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -205,8 +205,11 @@ async function main() {
   })
 
   app.get('/api/platform', async (_req, res) => {
-    const platform = await detectPlatform()
-    res.json({ platform })
+    const [platform, availableClis] = await Promise.all([
+      detectPlatform(),
+      detectAvailableClis(),
+    ])
+    res.json({ platform, availableClis })
   })
 
   const normalizeSettingsPatch = (patch: Record<string, any>) => {

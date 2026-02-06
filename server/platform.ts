@@ -1,3 +1,4 @@
+import cp from 'child_process'
 import fsPromises from 'fs/promises'
 
 /**
@@ -21,4 +22,34 @@ export async function detectPlatform(): Promise<string> {
   }
 
   return process.platform
+}
+
+async function isCommandAvailable(command: string): Promise<boolean> {
+  const finder = process.platform === 'win32' ? 'where.exe' : 'which'
+  return new Promise((resolve) => {
+    cp.execFile(finder, [command], { timeout: 3000 }, (err) => {
+      resolve(!err)
+    })
+  })
+}
+
+export type AvailableClis = Record<string, boolean>
+
+const CLI_COMMANDS = [
+  { name: 'claude', envVar: 'CLAUDE_CMD', defaultCmd: 'claude' },
+  { name: 'codex', envVar: 'CODEX_CMD', defaultCmd: 'codex' },
+  { name: 'opencode', envVar: 'OPENCODE_CMD', defaultCmd: 'opencode' },
+  { name: 'gemini', envVar: 'GEMINI_CMD', defaultCmd: 'gemini' },
+  { name: 'kimi', envVar: 'KIMI_CMD', defaultCmd: 'kimi' },
+] as const
+
+export async function detectAvailableClis(): Promise<AvailableClis> {
+  const results = await Promise.all(
+    CLI_COMMANDS.map(async (cli) => {
+      const cmd = process.env[cli.envVar] || cli.defaultCmd
+      const available = await isCommandAvailable(cmd)
+      return [cli.name, available] as const
+    })
+  )
+  return Object.fromEntries(results)
 }
