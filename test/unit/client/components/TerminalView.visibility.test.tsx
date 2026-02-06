@@ -28,6 +28,7 @@ vi.mock('xterm', () => ({
     write: vi.fn(),
     clear: vi.fn(),
     getSelection: vi.fn(),
+    focus: vi.fn(),
     cols: 80,
     rows: 24,
     options: {},

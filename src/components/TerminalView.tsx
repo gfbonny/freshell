@@ -145,6 +145,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     requestAnimationFrame(() => {
       if (termRef.current === term) {
         try { fit.fit() } catch { /* disposed */ }
+        term.focus()
       }
     })
 

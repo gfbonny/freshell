@@ -392,6 +392,14 @@ describe('PanePicker', () => {
     })
   })
 
+  describe('auto-focus on mount', () => {
+    it('focuses the picker container on mount', () => {
+      renderPicker()
+      const container = getContainer()
+      expect(container).toHaveFocus()
+    })
+  })
+
   describe('responsive sizing', () => {
     it('applies @container class to outer wrapper', () => {
       renderPicker()

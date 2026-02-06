@@ -891,6 +891,145 @@ describe('PaneContainer', () => {
       }
     })
 
+    it('passes initialCwd from provider settings when CLI is selected', () => {
+      const node = createPickerNode('pane-1')
+      const store = configureStore({
+        reducer: {
+          panes: panesReducer,
+          settings: settingsReducer,
+          connection: connectionReducer,
+        },
+        preloadedState: {
+          panes: {
+            layouts: { 'tab-1': node },
+            activePane: { 'tab-1': 'pane-1' },
+            paneTitles: {},
+          },
+          connection: {
+            status: 'ready' as const,
+            platform: 'linux',
+            availableClis: { claude: true },
+          },
+          settings: {
+            settings: {
+              theme: 'system' as const,
+              uiScale: 1,
+              terminal: {
+                fontSize: 14,
+                fontFamily: 'monospace',
+                lineHeight: 1.2,
+                cursorBlink: true,
+                scrollback: 5000,
+                theme: 'auto' as const,
+              },
+              safety: { autoKillIdleMinutes: 180, warnBeforeKillMinutes: 5 },
+              sidebar: { sortMode: 'activity' as const, showProjectBadges: true, width: 288, collapsed: false },
+              panes: { defaultNewPane: 'ask' as const },
+              codingCli: {
+                enabledProviders: ['claude'] as any[],
+                providers: {
+                  claude: { cwd: '/home/user/projects' },
+                },
+              },
+              logging: { debug: false },
+            },
+            loaded: true,
+            lastSavedAt: null,
+          },
+        },
+      })
+
+      renderWithStore(
+        <PaneContainer tabId="tab-1" node={node} />,
+        store
+      )
+
+      const container = getPickerContainer()
+      // Press 'l' key for Claude
+      fireEvent.keyDown(container, { key: 'l' })
+      fireEvent.transitionEnd(container)
+
+      // Verify the pane content has initialCwd from provider settings
+      const state = store.getState().panes
+      const paneContent = (state.layouts['tab-1'] as Extract<PaneNode, { type: 'leaf' }>).content
+      expect(paneContent.kind).toBe('terminal')
+      if (paneContent.kind === 'terminal') {
+        expect(paneContent.mode).toBe('claude')
+        expect(paneContent.initialCwd).toBe('/home/user/projects')
+      }
+    })
+
+    it('does not set initialCwd when provider has no cwd configured', () => {
+      const node = createPickerNode('pane-1')
+      const store = createStore(
+        { layouts: { 'tab-1': node }, activePane: { 'tab-1': 'pane-1' } },
+        { platform: 'linux', availableClis: { claude: true } }
+      )
+
+      // Default store has no provider cwd configured and claude not in enabledProviders
+      // We need to add claude to enabledProviders via the store
+      const storeWithClaude = configureStore({
+        reducer: {
+          panes: panesReducer,
+          settings: settingsReducer,
+          connection: connectionReducer,
+        },
+        preloadedState: {
+          panes: {
+            layouts: { 'tab-1': node },
+            activePane: { 'tab-1': 'pane-1' },
+            paneTitles: {},
+          },
+          connection: {
+            status: 'ready' as const,
+            platform: 'linux',
+            availableClis: { claude: true },
+          },
+          settings: {
+            settings: {
+              theme: 'system' as const,
+              uiScale: 1,
+              terminal: {
+                fontSize: 14,
+                fontFamily: 'monospace',
+                lineHeight: 1.2,
+                cursorBlink: true,
+                scrollback: 5000,
+                theme: 'auto' as const,
+              },
+              safety: { autoKillIdleMinutes: 180, warnBeforeKillMinutes: 5 },
+              sidebar: { sortMode: 'activity' as const, showProjectBadges: true, width: 288, collapsed: false },
+              panes: { defaultNewPane: 'ask' as const },
+              codingCli: {
+                enabledProviders: ['claude'] as any[],
+                providers: {},
+              },
+              logging: { debug: false },
+            },
+            loaded: true,
+            lastSavedAt: null,
+          },
+        },
+      })
+
+      renderWithStore(
+        <PaneContainer tabId="tab-1" node={node} />,
+        storeWithClaude
+      )
+
+      const container = getPickerContainer()
+      fireEvent.keyDown(container, { key: 'l' })
+      fireEvent.transitionEnd(container)
+
+      const state = storeWithClaude.getState().panes
+      const paneContent = (state.layouts['tab-1'] as Extract<PaneNode, { type: 'leaf' }>).content
+      expect(paneContent.kind).toBe('terminal')
+      if (paneContent.kind === 'terminal') {
+        expect(paneContent.mode).toBe('claude')
+        expect(paneContent.initialCwd).toBeUndefined()
+      }
+    })
+
     it('creates terminal with shell=system when shell is selected (non-Windows)', () => {
       const node = createPickerNode('pane-1')
       const store = createStore(

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Terminal, Globe, FileText } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAppSelector } from '@/store/hooks'
@@ -144,11 +144,18 @@ export default function PanePicker({ onSelect, onCancel, isOnlyPane, tabId, pane
     }
   }, [handleSelect, options])
 
+  // Auto-focus the container on mount so keyboard shortcuts work immediately
+  useEffect(() => {
+    containerRef.current?.focus()
+  }, [])
+
   const showHint = (index: number) => focusedIndex === index || hoveredIndex === index
 
   return (
     <div
       ref={containerRef}
+      role="toolbar"
+      aria-label="Pane type picker"
       tabIndex={0}
       className={cn(
         '@container h-full w-full flex items-center justify-center',

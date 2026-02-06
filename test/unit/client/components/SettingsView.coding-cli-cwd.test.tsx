@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { render, screen, cleanup, act } from '@testing-library/react'
 import { Provider } from 'react-redux'
 import { configureStore } from '@reduxjs/toolkit'
 import SettingsView from '@/components/SettingsView'
-import settingsReducer from '@/store/settingsSlice'
+import settingsReducer, { updateSettingsLocal } from '@/store/settingsSlice'
 
 vi.mock('@/lib/api', () => ({
   api: {
@@ -75,5 +75,69 @@ describe('SettingsView coding CLI cwd', () => {
     )
     const claudeInput = screen.getByLabelText('Claude starting directory')
     expect(claudeInput).toHaveAttribute('placeholder', 'e.g. ~/projects/my-app')
+  })
+
+  it('shows initial cwd value from settings', () => {
+    const store = configureStore({
+      reducer: { settings: settingsReducer },
+      preloadedState: {
+        settings: {
+          settings: {
+            theme: 'system',
+            uiScale: 1,
+            terminal: {
+              fontSize: 14,
+              fontFamily: 'monospace',
+              lineHeight: 1.2,
+              cursorBlink: true,
+              scrollback: 5000,
+              theme: 'auto',
+            },
+            safety: { autoKillIdleMinutes: 180, warnBeforeKillMinutes: 5 },
+            sidebar: { sortMode: 'activity', showProjectBadges: true, width: 288, collapsed: false },
+            panes: { defaultNewPane: 'ask' },
+            codingCli: {
+              enabledProviders: ['claude'],
+              providers: {
+                claude: { cwd: '/home/user/work' },
+              },
+            },
+            logging: { debug: false },
+          },
+          loaded: true,
+          lastSavedAt: Date.now(),
+        },
+      },
+    })
+
+    render(
+      <Provider store={store}>
+        <SettingsView />
+      </Provider>
+    )
+
+    const claudeInput = screen.getByLabelText('Claude starting directory') as HTMLInputElement
+    expect(claudeInput.value).toBe('/home/user/work')
+  })
+
+  it('syncs cwd input when settings change externally', () => {
+    const store = createTestStore()
+    render(
+      <Provider store={store}>
+        <SettingsView />
+      </Provider>
+    )
+
+    const claudeInput = screen.getByLabelText('Claude starting directory') as HTMLInputElement
+    expect(claudeInput.value).toBe('')
+
+    // Simulate external settings update (e.g. from WebSocket broadcast)
+    act(() => {
+      store.dispatch(updateSettingsLocal({
+        codingCli: { providers: { claude: { cwd: '/new/path' } } },
+      } as any))
+    })
+
+    expect(claudeInput.value).toBe('/new/path')
   })
 })

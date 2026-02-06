@@ -58,6 +58,7 @@ vi.mock('xterm', () => {
     onTitleChange = vi.fn(() => ({ dispose: vi.fn() }))
     attachCustomKeyEventHandler = vi.fn()
     getSelection = vi.fn(() => '')
+    focus = vi.fn()
     constructor() { terminalInstances.push(this) }
   }
 

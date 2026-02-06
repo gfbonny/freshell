@@ -261,6 +261,29 @@ export default function SettingsView() {
   const [providerCwdErrors, setProviderCwdErrors] = useState<Record<string, string | null>>({})
   const providerCwdTimerRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const providerCwdValidationRef = useRef<Record<string, number>>({})
+  const lastSettingsProviderCwdRef = useRef<Record<string, string>>(
+    Object.fromEntries(
+      CODING_CLI_PROVIDER_CONFIGS.map((c) => [c.name, settings.codingCli?.providers?.[c.name]?.cwd ?? ''])
+    )
+  )
+
+  // Sync provider cwd inputs when settings load or change externally
+  useEffect(() => {
+    for (const config of CODING_CLI_PROVIDER_CONFIGS) {
+      const next = settings.codingCli?.providers?.[config.name]?.cwd ?? ''
+      const last = lastSettingsProviderCwdRef.current[config.name] ?? ''
+      if (next !== last) {
+        // Only update the input if the user hasn't modified it from the last-known settings value
+        setProviderCwdInputs((prev) => {
+          if (prev[config.name] === last) {
+            return { ...prev, [config.name]: next }
+          }
+          return prev
+        })
+        lastSettingsProviderCwdRef.current[config.name] = next
+      }
+    }
+  }, [settings.codingCli?.providers])
 
   const scheduleProviderCwdValidation = useCallback((providerName: string, value: string) => {
     const key = providerName

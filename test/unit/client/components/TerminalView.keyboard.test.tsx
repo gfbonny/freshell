@@ -54,6 +54,7 @@ vi.mock('xterm', () => {
       capturedKeyHandler = handler
     })
     getSelection = vi.fn(() => 'selected text')
+    focus = vi.fn()
   }
 
   return { Terminal: MockTerminal }
