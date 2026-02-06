@@ -180,9 +180,7 @@ describe('State Edge Cases', () => {
         )
 
         expect(state.tabs).toEqual([])
-        // Note: activeTabId is set from payload even when tabs is empty/null
-        // This is current behavior - activeTabId can reference non-existent tab
-        expect(state.activeTabId).toBe('foo')
+        expect(state.activeTabId).toBeNull()
       })
 
       it('handles undefined tabs array gracefully', () => {
@@ -192,9 +190,7 @@ describe('State Edge Cases', () => {
         )
 
         expect(state.tabs).toEqual([])
-        // Note: activeTabId is set from payload even when tabs is empty/undefined
-        // This is current behavior - activeTabId can reference non-existent tab
-        expect(state.activeTabId).toBe('foo')
+        expect(state.activeTabId).toBeNull()
       })
 
       it('handles tabs with missing required fields', () => {
@@ -255,9 +251,7 @@ describe('State Edge Cases', () => {
           hydrateTabs({ tabs: validTabs, activeTabId: 'non-existent-tab' })
         )
 
-        // Hydration sets activeTabId to provided value even if invalid
-        // This is a potential bug - activeTabId is not validated
-        expect(state.activeTabId).toBe('non-existent-tab')
+        expect(state.activeTabId).toBe('real-tab')
       })
 
       it('handles extremely large tab arrays', () => {
@@ -1040,7 +1034,7 @@ describe('State Edge Cases', () => {
   // POTENTIAL BUG DOCUMENTATION
   // ============================================================
   describe('documented potential issues', () => {
-    it('ISSUE: activeTabId can point to non-existent tab after hydration', () => {
+    it('FIXED: activeTabId is validated against tabs on hydration', () => {
       const state = tabsReducer(
         { tabs: [], activeTabId: null },
         hydrateTabs({
@@ -1049,9 +1043,8 @@ describe('State Edge Cases', () => {
         })
       )
 
-      // This is potentially a bug - activeTabId references non-existent tab
-      expect(state.activeTabId).toBe('non-existent')
-      expect(state.tabs.find((t) => t.id === state.activeTabId)).toBeUndefined()
+      expect(state.activeTabId).toBe('tab-1')
+      expect(state.tabs.find((t) => t.id === state.activeTabId)).toBeDefined()
     })
 
     it('FIXED: expandedProjects is pruned when projects change', () => {
