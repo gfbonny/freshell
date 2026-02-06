@@ -13,7 +13,6 @@ import os
 import sys
 import traceback
 import logging
-import re
 import urllib.request
 from pathlib import Path
 
@@ -70,6 +69,7 @@ async def _run(args: argparse.Namespace) -> int:
   model = env_or(args.model, "BROWSER_USE_MODEL") or "bu-latest"
   target_url = build_target_url(base_url, token)
   redacted_target_url = redact_url(target_url)
+  known_text_file = (repo_root / "README.md").resolve()
 
   # Configure browser_use logging and redact tokens from any log messages.
   # This keeps the console usable while avoiding accidental token leakage.
@@ -83,6 +83,25 @@ async def _run(args: argparse.Namespace) -> int:
       except Exception:
         pass
       return True
+
+  class _RedactingStream:
+    def __init__(self, stream, token: str):
+      self._stream = stream
+      self._token = token
+
+    def write(self, s):
+      try:
+        if not isinstance(s, str):
+          return self._stream.write(s)
+        redacted = redact_text(s)
+        if self._token:
+          redacted = redacted.replace(self._token, "REDACTED")
+        return self._stream.write(redacted)
+      except Exception:
+        return self._stream.write(s)
+
+    def flush(self):
+      return self._stream.flush()
 
   root_logger = logging.getLogger()
   root_logger.setLevel(logging.INFO if args.debug else logging.INFO)
@@ -143,10 +162,26 @@ Requirements:
 2) Wait until the page is fully loaded and the top bar is visible.
 3) Verify the app header contains the text "freshell".
 4) Verify the connection indicator shows the app is connected (not disconnected).
-5) Open the sidebar (if it is collapsed) using the top-left toggle button.
-6) Click "Settings" in the sidebar.
-7) On the Settings page, confirm "Terminal preview" is visible.
-8) Navigate back to the terminal view.
+5) Create panes until you can no longer create any more panes in the current tab.
+   - Use the UI control(s) for adding/splitting panes (floating action button, split buttons, etc).
+   - Stop only when the UI prevents adding more (button disabled, no new pane appears, or explicit limit message).
+6) After you hit the limit, choose exactly one pane of each type and do a trivial verification:
+   - Editor pane:
+     - Choose the "Editor" pane type for a pane.
+     - Open this file path: {known_text_file}
+     - Verify the editor shows content from that file (any recognizable text from README).
+   - Terminal pane:
+     - Choose the "Terminal"/shell pane type for a different pane (WSL/system shell is fine).
+     - Run `node -v` (or `git --version` if node is unavailable).
+     - Verify the command output looks like a version string.
+   - Browser pane:
+     - Choose the "Browser" pane type for a different pane.
+     - Navigate to https://example.com
+     - Verify the page shows "Example Domain".
+7) Open the sidebar (if it is collapsed) using the top-left toggle button.
+8) Click "Settings" in the sidebar.
+9) On the Settings page, confirm "Terminal preview" is visible.
+10) Navigate back to the terminal view.
 
 Output:
 At the end, output exactly one line:
@@ -164,7 +199,14 @@ SMOKE_RESULT: FAIL - <short reason>
 
   _start, elapsed_s = monotonic_timer()
   try:
-    history = await agent.run(max_steps=args.max_steps)
+    orig_stdout, orig_stderr = sys.stdout, sys.stderr
+    sys.stdout = _RedactingStream(orig_stdout, token)
+    sys.stderr = _RedactingStream(orig_stderr, token)
+    try:
+      history = await agent.run(max_steps=args.max_steps)
+    finally:
+      sys.stdout = orig_stdout
+      sys.stderr = orig_stderr
   finally:
     # Best-effort cleanup. The Browser API exposes start/stop in some versions.
     stop = getattr(browser, "stop", None)
@@ -247,7 +289,7 @@ def main(argv: list[str]) -> int:
   p.add_argument("--headless", action="store_true", help="Run browser headless (default: headful)")
   p.add_argument("--width", type=int, default=1024, help="Browser viewport width")
   p.add_argument("--height", type=int, default=768, help="Browser viewport height")
-  p.add_argument("--max-steps", type=int, default=40, help="Max agent steps")
+  p.add_argument("--max-steps", type=int, default=120, help="Max agent steps")
   p.add_argument("--preflight", action="store_true", help="Fail fast if /api/health is unreachable")
   p.add_argument("--debug", action="store_true", help="Enable debug logging")
   p.add_argument(

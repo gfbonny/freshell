@@ -53,3 +53,4 @@ Useful flags:
 - `--cdp-url http://localhost:9222` (attach to an existing Chrome with remote debugging enabled)
 - `--headless`
 - `--width 1024 --height 768`
+- `--max-steps 120` (the default is tuned for the multi-pane smoke)
