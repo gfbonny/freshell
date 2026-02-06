@@ -41,6 +41,26 @@ function listen(server: http.Server, timeoutMs = HOOK_TIMEOUT_MS): Promise<{ por
   })
 }
 
+function closeWebSocket(ws: WebSocket, timeoutMs = 500): Promise<void> {
+  return new Promise((resolve) => {
+    if (ws.readyState === WebSocket.CLOSED) {
+      resolve()
+      return
+    }
+
+    const timeout = setTimeout(() => {
+      ws.terminate()
+      resolve()
+    }, timeoutMs)
+
+    ws.once('close', () => {
+      clearTimeout(timeout)
+      resolve()
+    })
+    ws.close()
+  })
+}
+
 class FakeBuffer {
   private s = ''
   append(t: string) { this.s += t }
@@ -79,6 +99,8 @@ class FakeRegistry {
     rec.clients.add(ws)
     return rec
   }
+
+  finishAttachSnapshot(_terminalId: string, _ws: any) {}
 
   detach(terminalId: string, ws: any) {
     const rec = this.records.get(terminalId)
@@ -215,7 +237,7 @@ describe('ws protocol', () => {
       })
     })
     expect(ready.type).toBe('ready')
-    ws.close()
+    await closeWebSocket(ws)
   })
 
   it('creates a terminal and returns terminal.created', async () => {
@@ -241,7 +263,7 @@ describe('ws protocol', () => {
     })
 
     expect(created.terminalId).toMatch(/^term_/)
-    ws.close()
+    await closeWebSocket(ws)
   })
 
   it('accepts shell parameter with system default', async () => {
@@ -268,7 +290,7 @@ describe('ws protocol', () => {
     })
 
     expect(created.terminalId).toMatch(/^term_/)
-    ws.close()
+    await closeWebSocket(ws)
   })
 
   it('accepts explicit shell parameter', async () => {
@@ -296,11 +318,11 @@ describe('ws protocol', () => {
     })
 
     expect(created.terminalId).toMatch(/^term_/)
-    ws.close()
+    await closeWebSocket(ws)
   })
 
   // Helper function to create authenticated connection
-  async function createAuthenticatedConnection(): Promise<{ ws: WebSocket; close: () => void }> {
+  async function createAuthenticatedConnection(): Promise<{ ws: WebSocket; close: () => Promise<void> }> {
     const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`)
     await new Promise<void>((resolve) => ws.on('open', () => resolve()))
     ws.send(JSON.stringify({ type: 'hello', token: 'testtoken-testtoken' }))
@@ -316,7 +338,7 @@ describe('ws protocol', () => {
       ws.on('message', handler)
     })
 
-    return { ws, close: () => ws.close() }
+    return { ws, close: () => closeWebSocket(ws) }
   }
 
   // Helper function to create a terminal and return its ID
@@ -379,8 +401,8 @@ describe('ws protocol', () => {
     expect(attached.terminalId).toBe(terminalId)
     expect(attached.snapshot).toBeDefined()
 
-    close()
-    close2()
+    await close()
+    await close2()
   })
 
   it('terminal.attach returns error for non-existent terminal', async () => {
@@ -399,7 +421,7 @@ describe('ws protocol', () => {
     expect(error.code).toBe('INVALID_TERMINAL_ID')
     expect(error.terminalId).toBe('nonexistent_terminal')
 
-    close()
+    await close()
   })
 
   it('terminal.detach disconnects from terminal', async () => {
@@ -420,7 +442,7 @@ describe('ws protocol', () => {
     expect(detached.type).toBe('terminal.detached')
     expect(detached.terminalId).toBe(terminalId)
 
-    close()
+    await close()
   })
 
   it('terminal.detach returns error for non-existent terminal', async () => {
@@ -439,7 +461,7 @@ describe('ws protocol', () => {
     expect(error.code).toBe('INVALID_TERMINAL_ID')
     expect(error.terminalId).toBe('nonexistent_terminal')
 
-    close()
+    await close()
   })
 
   it('terminal.input sends data to terminal', async () => {
@@ -456,7 +478,7 @@ describe('ws protocol', () => {
     expect(registry.inputCalls[0].terminalId).toBe(terminalId)
     expect(registry.inputCalls[0].data).toBe('echo hello')
 
-    close()
+    await close()
   })
 
   it('terminal.input returns error for non-existent terminal', async () => {
@@ -475,7 +497,7 @@ describe('ws protocol', () => {
     expect(error.code).toBe('INVALID_TERMINAL_ID')
     expect(error.terminalId).toBe('nonexistent_terminal')
 
-    close()
+    await close()
   })
 
   it('terminal.resize changes terminal dimensions', async () => {
@@ -493,7 +515,7 @@ describe('ws protocol', () => {
     expect(registry.resizeCalls[0].cols).toBe(120)
     expect(registry.resizeCalls[0].rows).toBe(40)
 
-    close()
+    await close()
   })
 
   it('terminal.resize returns error for non-existent terminal', async () => {
@@ -512,7 +534,7 @@ describe('ws protocol', () => {
     expect(error.code).toBe('INVALID_TERMINAL_ID')
     expect(error.terminalId).toBe('nonexistent_terminal')
 
-    close()
+    await close()
   })
 
   it('terminal.kill terminates terminal', async () => {
@@ -536,7 +558,7 @@ describe('ws protocol', () => {
     expect(registry.killCalls).toContain(terminalId)
     expect(registry.records.has(terminalId)).toBe(false)
 
-    close()
+    await close()
   })
 
   it('terminal.kill returns error for non-existent terminal', async () => {
@@ -555,7 +577,7 @@ describe('ws protocol', () => {
     expect(error.code).toBe('INVALID_TERMINAL_ID')
     expect(error.terminalId).toBe('nonexistent_terminal')
 
-    close()
+    await close()
   })
 
   it('terminal.list returns all terminals', async () => {
@@ -582,7 +604,7 @@ describe('ws protocol', () => {
     expect(ids).toContain(terminalId1)
     expect(ids).toContain(terminalId2)
 
-    close()
+    await close()
   })
 
   it('invalid message types return error', async () => {
@@ -601,7 +623,7 @@ describe('ws protocol', () => {
     expect(error.type).toBe('error')
     expect(error.code).toBe('INVALID_MESSAGE')
 
-    close()
+    await close()
   })
 
   it('invalid JSON returns error', async () => {
@@ -621,7 +643,7 @@ describe('ws protocol', () => {
     expect(error.code).toBe('INVALID_MESSAGE')
     expect(error.message).toBe('Invalid JSON')
 
-    close()
+    await close()
   })
 
   it('messages before hello are rejected', async () => {
@@ -680,7 +702,7 @@ describe('ws protocol', () => {
     expect(pong.type).toBe('pong')
     expect(pong.timestamp).toBeDefined()
 
-    ws.close()
+    await closeWebSocket(ws)
   })
 
   it('rate limits terminal.create after too many requests', async () => {

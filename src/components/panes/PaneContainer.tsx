@@ -59,7 +59,7 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
     // Get current sizes from the node
     if (node.type !== 'split' || node.id !== splitId) return
 
-    const [size1, size2] = node.sizes
+    const [size1] = node.sizes
     const newSize1 = Math.max(10, Math.min(90, size1 + percentDelta))
     const newSize2 = 100 - newSize1
 

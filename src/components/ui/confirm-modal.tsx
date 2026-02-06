@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import React, { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { OVERLAY_Z } from '@/components/ui/overlay'
 
@@ -65,7 +65,16 @@ export function ConfirmModal({ open, title, body, confirmLabel, onConfirm, onCan
     <div
       className={`fixed inset-0 flex items-center justify-center bg-black/50 ${OVERLAY_Z.modal}`}
       onClick={onCancel}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          onCancel()
+        }
+      }}
+      role="presentation"
+      tabIndex={-1}
     >
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
       <div
         ref={dialogRef}
         className="bg-background border border-border rounded-lg shadow-lg w-full max-w-md mx-4 p-5"

@@ -78,10 +78,46 @@ export default function PaneDivider({
     }
   }, [isDragging, direction, onResize, onResizeEnd])
 
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    const step = 10 // keyboard resize step in pixels
+    let handled = false
+
+    if (direction === 'horizontal') {
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault()
+        onResize(-step)
+        handled = true
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault()
+        onResize(step)
+        handled = true
+      }
+    } else {
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        onResize(-step)
+        handled = true
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        onResize(step)
+        handled = true
+      }
+    }
+
+    if (handled) {
+      onResizeEnd()
+    }
+  }, [direction, onResize, onResizeEnd])
+
   return (
     <div
+      role="button"
+      tabIndex={0}
+      aria-label={`Pane divider (${direction === 'horizontal' ? 'horizontal' : 'vertical'} resize)`}
+      aria-pressed={isDragging}
       onMouseDown={handleMouseDown}
       onTouchStart={handleTouchStart}
+      onKeyDown={handleKeyDown}
       data-context={dataContext}
       data-tab-id={dataTabId}
       data-split-id={dataSplitId}

@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { addTab, closeTab, reorderTabs, updateTab, setActiveTab } from '@/store/tabsSlice'
-import { addPane, closePane, initLayout, resetLayout, resetSplit, swapSplit, updatePaneTitle } from '@/store/panesSlice'
+import { addPane, closePane, initLayout, resetSplit, swapSplit, updatePaneTitle } from '@/store/panesSlice'
 import { setProjects, setProjectExpanded } from '@/store/sessionsSlice'
 import { getWsClient } from '@/lib/ws-client'
 import { api } from '@/lib/api'
@@ -13,6 +13,7 @@ import { getBrowserActions, getEditorActions, getTerminalActions } from '@/lib/p
 import { ConfirmModal } from '@/components/ui/confirm-modal'
 import type { AppView } from '@/components/Sidebar'
 import type { CodingCliProviderName } from '@/store/types'
+import type { ContextId } from './context-menu-constants'
 import type { ContextTarget } from './context-menu-types'
 import { ContextMenu } from './ContextMenu'
 import { ContextIds } from './context-menu-constants'
@@ -54,10 +55,10 @@ function findContextElement(start: HTMLElement | null): HTMLElement | null {
   return null
 }
 
-function resolveContextId(value: string | undefined): string {
+function resolveContextId(value: string | undefined): ContextId {
   if (!value) return ContextIds.Global
-  const allowed = new Set(Object.values(ContextIds))
-  return allowed.has(value) ? value : ContextIds.Global
+  const allowed = new Set(Object.values(ContextIds) as ContextId[])
+  return allowed.has(value as ContextId) ? (value as ContextId) : ContextIds.Global
 }
 
 export function ContextMenuProvider({

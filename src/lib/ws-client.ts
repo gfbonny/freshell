@@ -38,6 +38,7 @@ export class WsClient {
   private pendingMessages: unknown[] = []
   private intentionalClose = false
   private helloExtensionProvider?: HelloExtensionProvider
+  private connectPromise: Promise<void> | null = null
 
   private reconnectAttempts = 0
   private maxReconnectAttempts = 10
@@ -67,9 +68,8 @@ export class WsClient {
   }
 
   connect(): Promise<void> {
-    if (this._state === 'connecting' || this._state === 'connected' || this._state === 'ready') {
-      return Promise.resolve()
-    }
+    if (this._state === 'ready') return Promise.resolve()
+    if (this.connectPromise) return this.connectPromise
 
     this.intentionalClose = false
     this._state = 'connecting'
@@ -77,17 +77,19 @@ export class WsClient {
       this.connectStartedAt = performance.now()
     }
 
-    return new Promise((resolve, reject) => {
+    this.connectPromise = new Promise((resolve, reject) => {
       let finished = false
       const finishResolve = () => {
         if (!finished) {
           finished = true
+          this.connectPromise = null
           resolve()
         }
       }
       const finishReject = (err: Error) => {
         if (!finished) {
           finished = true
+          this.connectPromise = null
           reject(err)
         }
       }
@@ -189,10 +191,16 @@ export class WsClient {
         this._state = 'disconnected'
         this.ws = null
 
-        const AUTH_CLOSE_CODES = [4001, 4002] // NOT_AUTHENTICATED, HELLO_TIMEOUT
-        if (AUTH_CLOSE_CODES.includes(event.code)) {
+        if (event.code === 4001) {
           this.intentionalClose = true
           finishReject(new Error(`Authentication failed (code ${event.code})`))
+          return
+        }
+
+        if (event.code === 4002) {
+          // HELLO_TIMEOUT: treat as transient handshake failure (retry).
+          finishReject(new Error('Handshake timeout'))
+          if (!this.intentionalClose) this.scheduleReconnect()
           return
         }
 
@@ -221,9 +229,7 @@ export class WsClient {
           }, 'warn')
         }
 
-        if (!this.intentionalClose) {
-          this.scheduleReconnect()
-        }
+        if (!this.intentionalClose) this.scheduleReconnect()
       }
 
       this.ws.onerror = () => {
@@ -233,11 +239,12 @@ export class WsClient {
         }
       }
     })
+    return this.connectPromise
   }
 
   private scheduleReconnect() {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('WsClient: max reconnect attempts reached')
+      if (import.meta.env.DEV) console.error('WsClient: max reconnect attempts reached')
       return
     }
 
@@ -246,7 +253,9 @@ export class WsClient {
 
     window.setTimeout(() => {
       if (!this.intentionalClose) {
-        this.connect().catch((err) => console.error('WsClient: reconnect failed', err))
+        this.connect().catch((err) => {
+          if (import.meta.env.DEV) console.error('WsClient: reconnect failed', err)
+        })
       }
     }, delay)
 

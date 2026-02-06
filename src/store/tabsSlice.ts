@@ -8,8 +8,6 @@ export interface TabsState {
   activeTabId: string | null
 }
 
-const DEFAULT_CWD = import.meta.env.VITE_DEFAULT_CWD || undefined
-
 // Load persisted tabs state directly at module initialization time
 // This ensures the initial state includes persisted data BEFORE the store is created
 function loadInitialTabsState(): TabsState {
@@ -26,28 +24,36 @@ function loadInitialTabsState(): TabsState {
     const tabsState = parsed?.tabs as TabsState | undefined
     if (!tabsState?.tabs) return defaultState
 
-    console.log('[TabsSlice] Loaded initial state from localStorage:', tabsState.tabs.map(t => t.id))
+    if (import.meta.env.MODE === 'development') {
+      console.log('[TabsSlice] Loaded initial state from localStorage:', tabsState.tabs.map(t => t.id))
+    }
 
     // Apply same transformations as hydrateTabs to ensure consistency
+    const mappedTabs = tabsState.tabs.map((t: Tab) => {
+      const legacyClaudeSessionId = (t as any).claudeSessionId as string | undefined
+      return {
+        ...t,
+        codingCliSessionId: t.codingCliSessionId || legacyClaudeSessionId,
+        codingCliProvider: t.codingCliProvider || (legacyClaudeSessionId ? 'claude' : undefined),
+        createdAt: t.createdAt || Date.now(),
+        createRequestId: (t as any).createRequestId || t.id,
+        status: t.status || 'creating',
+        mode: t.mode || 'shell',
+        shell: t.shell || 'system',
+        lastInputAt: t.lastInputAt,
+      }
+    })
+    const desired = tabsState.activeTabId
+    const has = desired && mappedTabs.some((t) => t.id === desired)
+
     return {
-      tabs: tabsState.tabs.map((t: Tab) => {
-        const legacyClaudeSessionId = (t as any).claudeSessionId as string | undefined
-        return {
-          ...t,
-          codingCliSessionId: t.codingCliSessionId || legacyClaudeSessionId,
-          codingCliProvider: t.codingCliProvider || (legacyClaudeSessionId ? 'claude' : undefined),
-          createdAt: t.createdAt || Date.now(),
-          createRequestId: (t as any).createRequestId || t.id,
-          status: t.status || 'creating',
-          mode: t.mode || 'shell',
-          shell: t.shell || 'system',
-          lastInputAt: t.lastInputAt,
-        }
-      }),
-      activeTabId: tabsState.activeTabId || (tabsState.tabs[0]?.id ?? null),
+      tabs: mappedTabs,
+      activeTabId: has ? desired! : (mappedTabs[0]?.id ?? null),
     }
   } catch (err) {
-    console.error('[TabsSlice] Failed to load from localStorage:', err)
+    if (import.meta.env.MODE === 'development') {
+      console.error('[TabsSlice] Failed to load from localStorage:', err)
+    }
     return defaultState
   }
 }
@@ -109,7 +115,7 @@ export const tabsSlice = createSlice({
         status: payload.status || 'creating',
         mode: payload.mode || 'shell',
         shell: payload.shell || 'system',
-        initialCwd: payload.initialCwd ?? DEFAULT_CWD,
+        initialCwd: payload.initialCwd,
         resumeSessionId: payload.resumeSessionId,
         createdAt: Date.now(),
         lastInputAt: undefined,
@@ -145,7 +151,9 @@ export const tabsSlice = createSlice({
           shell: t.shell || 'system',
         }
       })
-      state.activeTabId = action.payload.activeTabId || (state.tabs[0]?.id ?? null)
+      const desired = action.payload.activeTabId
+      const has = desired && state.tabs.some((t) => t.id === desired)
+      state.activeTabId = has ? desired! : (state.tabs[0]?.id ?? null)
     },
     reorderTabs: (
       state,

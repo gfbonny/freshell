@@ -141,14 +141,15 @@ describe('sessionsSlice', () => {
       expect(state.projects).toEqual([])
     })
 
-    it('preserves expandedProjects when clearing', () => {
+    it('clears expandedProjects when clearing projects', () => {
       const stateWithExpanded = {
         projects: mockProjects,
         expandedProjects: new Set(['/project/one']),
       }
       const state = sessionsReducer(stateWithExpanded, clearProjects())
       expect(state.projects).toEqual([])
-      expect(state.expandedProjects.has('/project/one')).toBe(true)
+      expect(state.expandedProjects.has('/project/one')).toBe(false)
+      expect(state.expandedProjects.size).toBe(0)
     })
 
     it('does not update lastLoadedAt', () => {
@@ -442,8 +443,7 @@ describe('sessionsSlice', () => {
       ]
       state = sessionsReducer(state, setProjects(newProjects))
       expect(state.projects.length).toBe(1)
-      // Note: expandedProjects still contains old paths
-      expect(state.expandedProjects.has('/project/one')).toBe(true)
+      expect(state.expandedProjects.has('/project/one')).toBe(false)
     })
   })
 })

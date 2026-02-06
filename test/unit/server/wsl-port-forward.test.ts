@@ -402,6 +402,7 @@ Address         Port        Address         Port
     })
 
     it('returns failed when WSL IP cannot be detected', () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
       vi.mocked(fs.readFileSync).mockReturnValue('Linux version 5.15.0-microsoft-standard-WSL2')
       vi.mocked(execSync).mockImplementation(() => {
         throw new Error('Command failed')
@@ -440,6 +441,7 @@ Address         Port        Address         Port
     })
 
     it('returns failed when rules not applied after elevation (UAC cancelled)', () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
       vi.mocked(fs.readFileSync).mockReturnValue('Linux version 5.15.0-microsoft-standard-WSL2')
 
       // Mock execSync calls in order
@@ -455,6 +457,7 @@ Address         Port        Address         Port
     })
 
     it('returns failed when PowerShell execution throws an error', () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
       vi.mocked(fs.readFileSync).mockReturnValue('Linux version 5.15.0-microsoft-standard-WSL2')
 
       vi.mocked(execSync)

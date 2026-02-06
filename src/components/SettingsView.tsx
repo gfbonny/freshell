@@ -45,7 +45,7 @@ type PreviewToken = {
 const terminalPreviewWidth = 40
 const terminalPreviewHeight = 8
 
-const terminalPreviewLines: PreviewToken[][] = [
+const terminalPreviewLinesRaw: PreviewToken[][] = [
   [{ text: '// terminal preview: syntax demo', kind: 'comment' }],
   [
     { text: 'const ', kind: 'keyword' },
@@ -108,7 +108,11 @@ const terminalPreviewLines: PreviewToken[][] = [
     { text: ' === ', kind: 'operator' },
     { text: '0', kind: 'number' },
   ],
-].map((tokens) => normalizePreviewLine(tokens, terminalPreviewWidth))
+]
+
+const terminalPreviewLines: PreviewToken[][] = terminalPreviewLinesRaw.map((tokens) =>
+  normalizePreviewLine(tokens, terminalPreviewWidth)
+)
 
 function normalizePreviewLine(tokens: PreviewToken[], width: number): PreviewToken[] {
   let remaining = width
@@ -820,6 +824,8 @@ function Toggle({
   return (
     <button
       onClick={() => onChange(!checked)}
+      aria-label={checked ? 'Toggle off' : 'Toggle on'}
+      aria-pressed={checked}
       className={cn(
         'relative w-9 h-5 rounded-full transition-colors',
         checked ? 'bg-foreground' : 'bg-muted'
@@ -830,6 +836,7 @@ function Toggle({
           'absolute top-0.5 h-4 w-4 rounded-full transition-all',
           checked ? 'left-[1.125rem] bg-background' : 'left-0.5 bg-muted-foreground'
         )}
+        aria-hidden="true"
       />
     </button>
   )

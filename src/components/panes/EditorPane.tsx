@@ -36,15 +36,24 @@ type FileSystemFileHandle = {
   createWritable?: () => Promise<FileSystemWritableFileStream>
 }
 
-function debounce<T extends (...args: any[]) => any>(
-  func: T,
-  wait: number
-): (...args: Parameters<T>) => void {
+type DebouncedFn<T extends (...args: any[]) => any> = ((...args: Parameters<T>) => void) & {
+  cancel: () => void
+}
+
+function debounce<T extends (...args: any[]) => any>(func: T, wait: number): DebouncedFn<T> {
   let timeout: NodeJS.Timeout | null = null
-  return (...args: Parameters<T>) => {
+
+  const debounced = ((...args: Parameters<T>) => {
     if (timeout) clearTimeout(timeout)
     timeout = setTimeout(() => func(...args), wait)
+  }) as DebouncedFn<T>
+
+  debounced.cancel = () => {
+    if (timeout) clearTimeout(timeout)
+    timeout = null
   }
+
+  return debounced
 }
 
 const LANGUAGE_MAP: Record<string, string> = {
@@ -127,6 +136,7 @@ export default function EditorPane({
   const dispatch = useAppDispatch()
   const layout = useAppSelector((s) => s.panes.layouts[tabId])
   const defaultCwd = useAppSelector((s) => s.settings.settings.defaultCwd)
+  const mountedRef = useRef(true)
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const pathInputRef = useRef<HTMLInputElement>(null)
@@ -177,7 +187,9 @@ export default function EditorPane({
   }, [viewMode])
 
   useEffect(() => {
+    mountedRef.current = true
     return () => {
+      mountedRef.current = false
       if (autoSaveTimer.current) {
         clearTimeout(autoSaveTimer.current)
       }
@@ -237,34 +249,45 @@ export default function EditorPane({
     editor.focus()
   }
 
-  const debouncedPathChange = useCallback(
-    debounce(async (path: string) => {
-      if (!path.trim()) {
-        setSuggestions([])
-        return
-      }
+  const debouncedPathChange = useMemo(
+    () =>
+      debounce(async (path: string) => {
+        if (!mountedRef.current) return
 
-      try {
-        let url = `/api/files/complete?prefix=${encodeURIComponent(path)}`
-        if (!isAbsolutePath(path) && defaultBrowseRoot) {
-          url += `&root=${encodeURIComponent(defaultBrowseRoot)}`
+        if (!path.trim()) {
+          setSuggestions([])
+          return
         }
-        const response = await api.get<{ suggestions?: FileSuggestion[] }>(url)
-        setSuggestions(response?.suggestions || [])
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
-        console.error(
-          JSON.stringify({
-            severity: 'error',
-            event: 'editor_autocomplete_failed',
-            error: message,
-          })
-        )
-        setSuggestions([])
-      }
-    }, 300),
+
+        try {
+          let url = `/api/files/complete?prefix=${encodeURIComponent(path)}`
+          if (!isAbsolutePath(path) && defaultBrowseRoot) {
+            url += `&root=${encodeURIComponent(defaultBrowseRoot)}`
+          }
+          const response = await api.get<{ suggestions?: FileSuggestion[] }>(url)
+          if (!mountedRef.current) return
+          setSuggestions(response?.suggestions || [])
+        } catch (err) {
+          if (!mountedRef.current) return
+          const message = err instanceof Error ? err.message : String(err)
+          console.error(
+            JSON.stringify({
+              severity: 'error',
+              event: 'editor_autocomplete_failed',
+              error: message,
+            })
+          )
+          setSuggestions([])
+        }
+      }, 300),
     [defaultBrowseRoot]
   )
+
+  useEffect(() => {
+    return () => {
+      debouncedPathChange.cancel()
+    }
+  }, [debouncedPathChange])
 
   const handlePathChange = useCallback(
     (path: string) => {
@@ -309,7 +332,7 @@ export default function EditorPane({
       const resolvedPath =
         defaultBrowseRoot && !isAbsolutePath(path) ? joinPath(defaultBrowseRoot, path) : path
 
-      setIsLoading(true)
+      if (mountedRef.current) setIsLoading(true)
       try {
         const response = await api.get<{
           content: string
@@ -328,6 +351,8 @@ export default function EditorPane({
           viewMode: nextViewMode,
         })
 
+        if (!mountedRef.current) return
+
         setEditorValue(response.content)
         setCurrentLanguage(resolvedLanguage)
         setCurrentViewMode(nextViewMode)
@@ -345,6 +370,7 @@ export default function EditorPane({
 
         setSuggestions([])
       } catch (err) {
+        if (!mountedRef.current) return
         const message = err instanceof Error ? err.message : String(err)
         console.error(
           JSON.stringify({
@@ -354,7 +380,7 @@ export default function EditorPane({
           })
         )
       } finally {
-        setIsLoading(false)
+        if (mountedRef.current) setIsLoading(false)
       }
     },
     [defaultBrowseRoot, updateContent]

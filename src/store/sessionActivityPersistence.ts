@@ -93,7 +93,7 @@ export const sessionActivityPersistMiddleware: Middleware<{}, SessionActivitySta
 
   registerFlushCallback(flushNow)
 
-  return (next) => (action) => {
+  return (next) => (action: any) => {
     const result = next(action)
 
     if (typeof action?.type === 'string' && action.type.startsWith('sessionActivity/')) {

@@ -8,6 +8,7 @@ import tabsReducer from '@/store/tabsSlice'
 import connectionReducer from '@/store/connectionSlice'
 import sessionsReducer from '@/store/sessionsSlice'
 import panesReducer from '@/store/panesSlice'
+import idleWarningsReducer from '@/store/idleWarningsSlice'
 
 // Mock the WebSocket client
 const mockSend = vi.fn()
@@ -78,6 +79,7 @@ function createTestStore(options?: {
       connection: connectionReducer,
       sessions: sessionsReducer,
       panes: panesReducer,
+      idleWarnings: idleWarningsReducer,
     },
     middleware: (getDefault) =>
       getDefault({
@@ -116,6 +118,9 @@ function createTestStore(options?: {
         layouts: {},
         activePane: {},
       },
+      idleWarnings: {
+        warnings: {},
+      },
     },
   })
 }
@@ -134,6 +139,13 @@ describe('App Component - Sidebar Resize', () => {
     localStorage.clear()
     // Mock window.innerWidth for desktop
     Object.defineProperty(window, 'innerWidth', { value: 1024, writable: true })
+
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/settings') return Promise.resolve(defaultSettings)
+      if (url === '/api/platform') return Promise.resolve({ platform: 'linux' })
+      if (url === '/api/sessions') return Promise.resolve([])
+      return Promise.resolve({})
+    })
   })
 
   afterEach(() => {

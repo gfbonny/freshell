@@ -11,6 +11,12 @@ export function derivePaneTitle(content: PaneContent): string {
     return 'New Tab'
   }
 
+  if (content.kind === 'editor') {
+    if (!content.filePath) return 'Editor'
+    const parts = content.filePath.replace(/\\/g, '/').split('/')
+    return parts[parts.length - 1] || 'Editor'
+  }
+
   if (content.kind === 'browser') {
     if (!content.url) return 'Browser'
     try {

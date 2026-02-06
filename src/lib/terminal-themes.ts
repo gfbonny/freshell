@@ -1,4 +1,4 @@
-import type { ITheme } from '@xterm/xterm'
+import type { ITheme } from 'xterm'
 import type { TerminalTheme } from '@/store/types'
 
 // Full xterm theme with ANSI colors for proper syntax highlighting
@@ -196,7 +196,9 @@ const githubLight: FullTheme = {
   brightWhite: '#8c959f',
 }
 
-export const terminalThemes: Record<Exclude<TerminalTheme, 'auto'>, FullTheme> = {
+export type ConcreteTerminalTheme = Exclude<TerminalTheme, 'auto'>
+
+export const terminalThemes: Record<ConcreteTerminalTheme, FullTheme> = {
   'dracula': dracula,
   'one-dark': oneDark,
   'solarized-dark': solarizedDark,
@@ -206,8 +208,8 @@ export const terminalThemes: Record<Exclude<TerminalTheme, 'auto'>, FullTheme> =
   'github-light': githubLight,
 }
 
-export const darkThemes: TerminalTheme[] = ['dracula', 'one-dark', 'solarized-dark', 'github-dark']
-export const lightThemes: TerminalTheme[] = ['one-light', 'solarized-light', 'github-light']
+export const darkThemes: ConcreteTerminalTheme[] = ['dracula', 'one-dark', 'solarized-dark', 'github-dark']
+export const lightThemes: ConcreteTerminalTheme[] = ['one-light', 'solarized-light', 'github-light']
 
 export function getTerminalTheme(
   themeSetting: TerminalTheme | string | undefined,

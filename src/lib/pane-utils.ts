@@ -1,4 +1,4 @@
-import type { PaneNode } from '@/store/paneTypes'
+import type { PaneContent, PaneNode } from '@/store/paneTypes'
 
 /**
  * Get the cwd of the first terminal in the pane tree (depth-first traversal).
@@ -36,7 +36,7 @@ export function collectTerminalIds(node: PaneNode): string[] {
   ]
 }
 
-export function findPaneContent(node: PaneNode, paneId: string) {
+export function findPaneContent(node: PaneNode, paneId: string): PaneContent | null {
   if (node.type === 'leaf') {
     return node.id === paneId ? node.content : null
   }

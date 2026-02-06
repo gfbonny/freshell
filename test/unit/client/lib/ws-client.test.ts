@@ -1,0 +1,95 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { WsClient } from '../../../../src/lib/ws-client'
+
+class MockWebSocket {
+  static OPEN = 1
+  static instances: MockWebSocket[] = []
+
+  readyState = MockWebSocket.OPEN
+  onopen: null | (() => void) = null
+  onmessage: null | ((ev: { data: string }) => void) = null
+  onclose: null | ((ev: { code: number; reason: string }) => void) = null
+  onerror: null | (() => void) = null
+  sent: string[] = []
+
+  constructor(_url: string) {
+    MockWebSocket.instances.push(this)
+  }
+
+  send(data: any) {
+    this.sent.push(String(data))
+  }
+
+  close() {
+    this.onclose?.({ code: 1000, reason: '' })
+  }
+
+  _open() {
+    this.onopen?.()
+  }
+
+  _message(obj: any) {
+    this.onmessage?.({ data: JSON.stringify(obj) })
+  }
+
+  _close(code: number, reason = '') {
+    this.onclose?.({ code, reason })
+  }
+}
+
+describe('WsClient.connect', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    MockWebSocket.instances = []
+    // @ts-expect-error - test override
+    globalThis.WebSocket = MockWebSocket
+    sessionStorage.setItem('auth-token', 't')
+
+    // Some Vitest environments provide a minimal window without timer fns.
+    ;(window as any).setTimeout = globalThis.setTimeout
+    ;(window as any).clearTimeout = globalThis.clearTimeout
+  })
+
+  afterEach(() => {
+    vi.clearAllTimers()
+    vi.useRealTimers()
+  })
+
+  it('returns the same in-flight promise and resolves only after ready', async () => {
+    const c = new WsClient('ws://example/ws')
+
+    const p1 = c.connect()
+    const p2 = c.connect()
+    expect(p2).toBe(p1)
+
+    let resolved = false
+    void p1.then(() => { resolved = true })
+
+    // Not resolved until ready arrives.
+    await Promise.resolve()
+    expect(resolved).toBe(false)
+
+    expect(MockWebSocket.instances).toHaveLength(1)
+    MockWebSocket.instances[0]._open()
+    MockWebSocket.instances[0]._message({ type: 'ready' })
+
+    await p1
+    expect(resolved).toBe(true)
+  })
+
+  it('treats HELLO_TIMEOUT as transient and schedules reconnect', async () => {
+    const setTimeoutSpy = vi.spyOn(window, 'setTimeout')
+
+    const c = new WsClient('ws://example/ws')
+    const p = c.connect()
+    expect(MockWebSocket.instances).toHaveLength(1)
+
+    MockWebSocket.instances[0]._open()
+    MockWebSocket.instances[0]._close(4002, 'Hello timeout')
+
+    await expect(p).rejects.toThrow(/Handshake timeout/i)
+
+    // Should schedule a reconnect attempt (baseReconnectDelay = 1000).
+    expect(setTimeoutSpy.mock.calls.some((call) => call[1] === 1000)).toBe(true)
+  })
+})

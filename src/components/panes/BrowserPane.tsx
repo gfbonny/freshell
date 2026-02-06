@@ -29,6 +29,7 @@ function toIframeSrc(url: string): string {
 export default function BrowserPane({ paneId, tabId, url, devToolsOpen }: BrowserPaneProps) {
   const dispatch = useAppDispatch()
   const iframeRef = useRef<HTMLIFrameElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
   const [inputUrl, setInputUrl] = useState(url)
   const [isLoading, setIsLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -98,11 +99,24 @@ export default function BrowserPane({ paneId, tabId, url, devToolsOpen }: Browse
     }
   }, [dispatch, tabId, paneId, devToolsOpen, history, historyIndex])
 
+  const currentUrl = history[historyIndex] || ''
+
   const refresh = useCallback(() => {
-    if (iframeRef.current) {
-      iframeRef.current.src = iframeRef.current.src
+    const iframe = iframeRef.current
+    if (!iframe) return
+
+    // Prefer reloading the current document (handles in-iframe navigations when allowed).
+    try {
+      iframe.contentWindow?.location.reload()
       setIsLoading(true)
+      return
+    } catch {
+      // cross-origin or unavailable; fall back to resetting src
     }
+
+    const src = iframe.src
+    iframe.src = src
+    setIsLoading(true)
   }, [])
 
   const stop = useCallback(() => {
@@ -126,7 +140,13 @@ export default function BrowserPane({ paneId, tabId, url, devToolsOpen }: Browse
     }
   }
 
-  const currentUrl = history[historyIndex] || ''
+  useEffect(() => {
+    // Focus the URL input only when there's no initial URL (user just created a new browser pane)
+    // This is more accessible than autoFocus and allows users to manually control focus
+    if (!url && inputRef.current) {
+      inputRef.current.focus()
+    }
+  }, [url])
 
   useEffect(() => {
     return registerBrowserActions(paneId, {
@@ -180,13 +200,13 @@ export default function BrowserPane({ paneId, tabId, url, devToolsOpen }: Browse
         </button>
 
         <input
+          ref={inputRef}
           type="text"
           value={inputUrl}
           onChange={(e) => setInputUrl(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Enter URL..."
           className="flex-1 h-8 px-3 text-sm bg-muted/50 border-0 rounded-md placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-border"
-          autoFocus={!url}
         />
 
         <button

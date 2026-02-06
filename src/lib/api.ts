@@ -11,7 +11,7 @@ function getAuthToken(): string | undefined {
   return sessionStorage.getItem('auth-token') || undefined
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+async function request<T = any>(path: string, options: RequestInit = {}): Promise<T> {
   const perfEnabled = isClientPerfLoggingEnabled() && typeof performance !== 'undefined'
   const perfConfig = getClientPerfConfig()
   const startAt = perfEnabled ? performance.now() : 0
@@ -100,19 +100,19 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
-  get<T>(path: string): Promise<T> {
+  get<T = any>(path: string): Promise<T> {
     return request<T>(path)
   },
-  post<T>(path: string, body: unknown): Promise<T> {
+  post<T = any>(path: string, body: unknown): Promise<T> {
     return request<T>(path, { method: 'POST', body: JSON.stringify(body) })
   },
-  patch<T>(path: string, body: unknown): Promise<T> {
+  patch<T = any>(path: string, body: unknown): Promise<T> {
     return request<T>(path, { method: 'PATCH', body: JSON.stringify(body) })
   },
-  put<T>(path: string, body: unknown): Promise<T> {
+  put<T = any>(path: string, body: unknown): Promise<T> {
     return request<T>(path, { method: 'PUT', body: JSON.stringify(body) })
   },
-  delete<T>(path: string): Promise<T> {
+  delete<T = any>(path: string): Promise<T> {
     return request<T>(path, { method: 'DELETE' })
   },
 }

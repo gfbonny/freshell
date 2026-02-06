@@ -45,6 +45,11 @@ describe('tabsSlice', () => {
       expect(state.activeTabId).toBe(tab.id)
     })
 
+    it('does not force initialCwd by default (lets server apply defaultCwd)', () => {
+      const state = tabsReducer(initialState, addTab({ mode: 'shell' }))
+      expect(state.tabs[0].initialCwd).toBeUndefined()
+    })
+
     it('creates new tab with defaults when empty payload provided', () => {
       const state = tabsReducer(initialState, addTab({}))
 

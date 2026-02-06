@@ -3,7 +3,7 @@ import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { setStatus, setError, setPlatform } from '@/store/connectionSlice'
 import { setSettings } from '@/store/settingsSlice'
 import { setProjects, clearProjects, mergeProjects } from '@/store/sessionsSlice'
-import { addTab, removeTab, switchToNextTab, switchToPrevTab } from '@/store/tabsSlice'
+import { addTab, switchToNextTab, switchToPrevTab } from '@/store/tabsSlice'
 import { api } from '@/lib/api'
 import { buildShareUrl } from '@/lib/utils'
 import { getWsClient } from '@/lib/ws-client'
@@ -23,10 +23,12 @@ import { ContextMenuProvider } from '@/components/context-menu/ContextMenuProvid
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
 import { Wifi, WifiOff, Moon, Sun, Share2, X, Copy, Check, PanelLeftClose, PanelLeft } from 'lucide-react'
 import { updateSettingsLocal, markSaved } from '@/store/settingsSlice'
+import { clearIdleWarning, recordIdleWarning } from '@/store/idleWarningsSlice'
 
 const SIDEBAR_MIN_WIDTH = 200
 const SIDEBAR_MAX_WIDTH = 500
 const MOBILE_BREAKPOINT = 768
+const EMPTY_IDLE_WARNINGS: Record<string, unknown> = {}
 
 export default function App() {
   useThemeEffect()
@@ -37,12 +39,15 @@ export default function App() {
   const connection = useAppSelector((s) => s.connection.status)
   const connectionError = useAppSelector((s) => s.connection.lastError)
   const settings = useAppSelector((s) => s.settings.settings)
+  const idleWarnings = useAppSelector((s) => (s as any).idleWarnings?.warnings ?? EMPTY_IDLE_WARNINGS)
+  const idleWarningCount = Object.keys(idleWarnings).length
 
   const [view, setView] = useState<AppView>('terminal')
   const [shareModalUrl, setShareModalUrl] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
   const mainContentRef = useRef<HTMLDivElement>(null)
+  const userOpenedSidebarOnMobileRef = useRef(false)
 
   // Sidebar width from settings (or local state during drag)
   const sidebarWidth = settings.sidebar?.width ?? 288
@@ -60,10 +65,14 @@ export default function App() {
 
   // Auto-collapse sidebar on mobile
   useEffect(() => {
-    if (isMobile && !sidebarCollapsed) {
+    if (!isMobile) {
+      userOpenedSidebarOnMobileRef.current = false
+      return
+    }
+    if (!sidebarCollapsed && !userOpenedSidebarOnMobileRef.current) {
       dispatch(updateSettingsLocal({ sidebar: { ...settings.sidebar, collapsed: true } }))
     }
-  }, [isMobile])
+  }, [isMobile, sidebarCollapsed, settings.sidebar, dispatch])
 
   const handleSidebarResize = useCallback((delta: number) => {
     const newWidth = Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, sidebarWidth + delta))
@@ -74,17 +83,24 @@ export default function App() {
     try {
       await api.patch('/api/settings', { sidebar: settings.sidebar })
       dispatch(markSaved())
-    } catch {}
+    } catch (err) {
+      console.warn('Failed to save sidebar settings', err)
+    }
   }, [settings.sidebar, dispatch])
 
   const toggleSidebarCollapse = useCallback(async () => {
     const newCollapsed = !sidebarCollapsed
+    if (isMobile && !newCollapsed) {
+      userOpenedSidebarOnMobileRef.current = true
+    }
     dispatch(updateSettingsLocal({ sidebar: { ...settings.sidebar, collapsed: newCollapsed } }))
     try {
       await api.patch('/api/settings', { sidebar: { ...settings.sidebar, collapsed: newCollapsed } })
       dispatch(markSaved())
-    } catch {}
-  }, [sidebarCollapsed, settings.sidebar, dispatch])
+    } catch (err) {
+      console.warn('Failed to save sidebar settings', err)
+    }
+  }, [isMobile, sidebarCollapsed, settings.sidebar, dispatch])
 
   const toggleTheme = async () => {
     const newTheme = settings.theme === 'dark' ? 'light' : settings.theme === 'light' ? 'system' : 'dark'
@@ -92,7 +108,9 @@ export default function App() {
     try {
       await api.patch('/api/settings', { theme: newTheme })
       dispatch(markSaved())
-    } catch {}
+    } catch (err) {
+      console.warn('Failed to save theme setting', err)
+    }
   }
 
   const handleShare = async () => {
@@ -224,15 +242,25 @@ export default function App() {
         if (msg.type === 'terminal.exit') {
           const terminalId = msg.terminalId
           const code = msg.exitCode
-          console.log('terminal exit', terminalId, code)
+          if (import.meta.env.MODE === 'development') console.log('terminal exit', terminalId, code)
+          if (terminalId) dispatch(clearIdleWarning(terminalId))
+        }
+        if (msg.type === 'terminal.idle.warning') {
+          if (!msg.terminalId) return
+          dispatch(recordIdleWarning({
+            terminalId: msg.terminalId,
+            killMinutes: Number(msg.killMinutes) || 0,
+            warnMinutes: Number(msg.warnMinutes) || 0,
+            lastActivityAt: typeof msg.lastActivityAt === 'number' ? msg.lastActivityAt : undefined,
+          }))
         }
         if (msg.type === 'session.status') {
           // Log session repair status (silent for healthy/repaired, visible for problems)
           const { sessionId, status, orphansFixed } = msg
           if (status === 'missing') {
-            console.warn(`Session ${sessionId.slice(0, 8)}... file is missing`)
+            if (import.meta.env.MODE === 'development') console.warn(`Session ${sessionId.slice(0, 8)}... file is missing`)
           } else if (status === 'repaired') {
-            console.log(`Session ${sessionId.slice(0, 8)}... repaired (${orphansFixed} orphans fixed)`)
+            if (import.meta.env.MODE === 'development') console.log(`Session ${sessionId.slice(0, 8)}... repaired (${orphansFixed} orphans fixed)`)
           }
           // For 'healthy' status, no logging needed
         }
@@ -340,6 +368,16 @@ export default function App() {
           <span className="font-mono text-base font-semibold tracking-tight">🐚🔥freshell</span>
         </div>
         <div className="flex items-center gap-1">
+          {idleWarningCount > 0 && (
+            <button
+              onClick={() => setView('overview')}
+              className="px-2 py-1 rounded-md bg-amber-100 text-amber-950 hover:bg-amber-200 transition-colors text-xs font-medium"
+              aria-label={`${idleWarningCount} terminal(s) will auto-kill soon`}
+              title="View idle terminals"
+            >
+              {idleWarningCount} terminal{idleWarningCount === 1 ? '' : 's'} will auto-kill soon
+            </button>
+          )}
           <button
             onClick={toggleTheme}
             className="p-1.5 rounded-md hover:bg-muted transition-colors"
@@ -378,7 +416,12 @@ export default function App() {
         {isMobile && !sidebarCollapsed && (
           <div
             className="absolute inset-0 bg-black/50 z-10"
+            role="presentation"
             onClick={toggleSidebarCollapse}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') toggleSidebarCollapse()
+            }}
+            tabIndex={-1}
           />
         )}
         {/* Sidebar - on mobile it overlays, on desktop it's inline */}
@@ -407,10 +450,19 @@ export default function App() {
       {shareModalUrl && (
         <div
           className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]"
+          role="presentation"
           onClick={() => setShareModalUrl(null)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setShareModalUrl(null)
+          }}
+          tabIndex={-1}
         >
+          {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions */}
           <div
             className="bg-background border border-border rounded-lg shadow-lg max-w-md w-full mx-4 p-6"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Share freshell invitation"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-4">

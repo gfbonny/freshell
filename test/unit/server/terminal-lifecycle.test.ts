@@ -194,6 +194,25 @@ describe('TerminalRegistry Lifecycle', () => {
       expect(term.clients.size).toBe(1)
     })
 
+    it('queues output while attach snapshot is pending and flushes after finishAttachSnapshot', () => {
+      const term = registry.create({ mode: 'shell' })
+      const pty = mockPtyProcess.instances[0]
+      const client = createMockWebSocket()
+
+      registry.attach(term.terminalId, client, { pendingSnapshot: true })
+
+      pty._emitData('queued output\n')
+
+      expect(client.send).not.toHaveBeenCalled()
+
+      registry.finishAttachSnapshot(term.terminalId, client)
+
+      const sent = (client.send as Mock).mock.calls.map((call) => JSON.parse(call[0]))
+      const outputs = sent.filter((m) => m.type === 'terminal.output')
+      expect(outputs).toHaveLength(1)
+      expect(outputs[0].data).toBe('queued output\n')
+    })
+
     it('should properly clean up zombie terminal on remove', () => {
       const term = registry.create({ mode: 'shell' })
       const pty = mockPtyProcess.instances[0]
@@ -461,6 +480,38 @@ describe('TerminalRegistry Lifecycle', () => {
   })
 
   describe('Idle timeout edge cases', () => {
+    it('emits an idle warning before auto-kill (once per idle period)', async () => {
+      registry = new TerminalRegistry(createTestSettings({ safety: { autoKillIdleMinutes: 10, warnBeforeKillMinutes: 3 } }))
+      const term = registry.create({ mode: 'shell' })
+
+      const onWarn = vi.fn()
+      registry.on('terminal.idle.warning', onWarn)
+
+      // Detached terminal idle long enough to warn (>= 7 minutes) but not kill (< 10).
+      term.lastActivityAt = Date.now() - 8 * 60 * 1000
+
+      await registry.enforceIdleKillsForTest()
+
+      expect(term.status).toBe('running')
+      expect(onWarn).toHaveBeenCalledTimes(1)
+      expect(onWarn.mock.calls[0][0]).toMatchObject({
+        terminalId: term.terminalId,
+        killMinutes: 10,
+        warnMinutes: 3,
+      })
+
+      // Subsequent checks should not spam warnings without new activity.
+      onWarn.mockClear()
+      await registry.enforceIdleKillsForTest()
+      expect(onWarn).not.toHaveBeenCalled()
+
+      // Any activity should reset warnedIdle so the next idle period warns again.
+      registry.input(term.terminalId, 'x')
+      term.lastActivityAt = Date.now() - 8 * 60 * 1000
+      await registry.enforceIdleKillsForTest()
+      expect(onWarn).toHaveBeenCalledTimes(1)
+    })
+
     it('should kill terminal exactly at threshold', () => {
       registry = new TerminalRegistry(createTestSettings({ safety: { autoKillIdleMinutes: 30, warnBeforeKillMinutes: 5 } }))
       registry.create({ mode: 'shell' })
@@ -559,6 +610,10 @@ describe('TerminalRegistry Lifecycle', () => {
 
   describe('Buffer overflow with rapid output', () => {
     it('should handle rapid output without memory leak', () => {
+      // Force a small server-side reattach buffer so this test validates eviction behavior.
+      settings.terminal.scrollback = 1
+      registry.setSettings(settings)
+
       const term = registry.create({ mode: 'shell' })
       const pty = mockPtyProcess.instances[0]
       const client = createMockWebSocket()
@@ -576,6 +631,9 @@ describe('TerminalRegistry Lifecycle', () => {
     })
 
     it('should drop old data when buffer overflows', () => {
+      settings.terminal.scrollback = 1
+      registry.setSettings(settings)
+
       const term = registry.create({ mode: 'shell' })
       const pty = mockPtyProcess.instances[0]
 
@@ -601,11 +659,12 @@ describe('TerminalRegistry Lifecycle', () => {
 
       registry.attach(term.terminalId, client)
 
-      // Output should be dropped due to backpressure
+      // Output should force-close the client due to backpressure
       pty._emitData('should be dropped')
 
       // safeSend should not have sent (due to backpressure check)
       expect(client.send).not.toHaveBeenCalled()
+      expect(client.close).toHaveBeenCalledWith(4008, expect.any(String))
     })
 
     it('should send to healthy clients even if one has backpressure', () => {
@@ -627,6 +686,7 @@ describe('TerminalRegistry Lifecycle', () => {
       pty._emitData('test output')
 
       expect(slowClient.send).not.toHaveBeenCalled()
+      expect(slowClient.close).toHaveBeenCalledWith(4008, expect.any(String))
       expect(fastClient.send).toHaveBeenCalled()
     })
   })

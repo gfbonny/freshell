@@ -98,6 +98,11 @@ export interface PanesState {
   layouts: Record<string, PaneNode>
   /** Map of tabId -> currently focused pane id */
   activePane: Record<string, string>
+  /**
+   * Map of tabId -> paneId -> explicit title override.
+   * Used to keep user-edited or derived titles stable across renders.
+   */
+  paneTitles: Record<string, Record<string, string>>
 }
 
 /**
@@ -106,6 +111,6 @@ export interface PanesState {
  * NOTE: This type is only for documentation - not used in runtime code.
  */
 export interface PersistedPanesState extends PanesState {
-  /** Schema version for migrations. Current: 2 */
+  /** Schema version for migrations. */
   version: number
 }

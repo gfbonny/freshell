@@ -19,9 +19,12 @@ export const sessionsSlice = createSlice({
     setProjects: (state, action: PayloadAction<ProjectGroup[]>) => {
       state.projects = action.payload
       state.lastLoadedAt = Date.now()
+      const valid = new Set(state.projects.map((p) => p.projectPath))
+      state.expandedProjects = new Set(Array.from(state.expandedProjects).filter((k) => valid.has(k)))
     },
     clearProjects: (state) => {
       state.projects = []
+      state.expandedProjects = new Set()
     },
     mergeProjects: (state, action: PayloadAction<ProjectGroup[]>) => {
       // Merge incoming projects with existing ones by projectPath
@@ -31,6 +34,8 @@ export const sessionsSlice = createSlice({
       }
       state.projects = Array.from(projectMap.values())
       state.lastLoadedAt = Date.now()
+      const valid = new Set(state.projects.map((p) => p.projectPath))
+      state.expandedProjects = new Set(Array.from(state.expandedProjects).filter((k) => valid.has(k)))
     },
     toggleProjectExpanded: (state, action: PayloadAction<string>) => {
       const key = action.payload

@@ -1,4 +1,5 @@
 import { X, Circle } from 'lucide-react'
+import { useRef, useEffect } from 'react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import type { Tab } from '@/store/types'
@@ -46,6 +47,14 @@ export default function TabItem({
   onClick,
   onDoubleClick,
 }: TabItemProps) {
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (isRenaming && inputRef.current) {
+      inputRef.current.focus()
+    }
+  }, [isRenaming])
+
   return (
     <div
       className={cn(
@@ -55,18 +64,27 @@ export default function TabItem({
           : 'bg-muted text-muted-foreground hover:text-foreground hover:bg-accent mt-1',
         isDragging && 'opacity-50'
       )}
+      role="button"
+      tabIndex={0}
+      aria-label={tab.title}
       data-context={ContextIds.Tab}
       data-tab-id={tab.id}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onClick()
+        }
+      }}
     >
       <StatusIndicator status={tab.status} />
 
       {isRenaming ? (
         <input
+          ref={inputRef}
           className="bg-transparent outline-none w-32 text-sm"
           value={renameValue}
-          autoFocus
           onChange={(e) => onRenameChange(e.target.value)}
           onBlur={onRenameBlur}
           onKeyDown={onRenameKeyDown}

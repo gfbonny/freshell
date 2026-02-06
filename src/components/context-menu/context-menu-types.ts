@@ -1,3 +1,4 @@
+import React from 'react'
 import type { ContextId } from './context-menu-constants'
 
 export type ContextTarget =

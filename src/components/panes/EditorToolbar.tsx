@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, type RefObject } from 'react'
+import { useState, useRef, useEffect, type MutableRefObject } from 'react'
 import { FolderOpen, Eye, Code } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -15,7 +15,7 @@ export interface EditorToolbarProps {
   onViewModeToggle: () => void
   showViewToggle: boolean
   defaultBrowseRoot?: string | null
-  inputRef?: RefObject<HTMLInputElement>
+  inputRef?: MutableRefObject<HTMLInputElement | null>
 }
 
 function withTrailingSeparator(value: string): string {
@@ -39,8 +39,8 @@ export default function EditorToolbar({
   const [inputValue, setInputValue] = useState(filePath || '')
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [selectedIndex, setSelectedIndex] = useState(-1)
-  const internalInputRef = useRef<HTMLInputElement>(null)
-  const dropdownRef = useRef<HTMLDivElement>(null)
+  const internalInputRef = useRef<HTMLInputElement | null>(null)
+  const dropdownRef = useRef<HTMLDivElement | null>(null)
 
   // Sync input value with filePath prop
   useEffect(() => {
