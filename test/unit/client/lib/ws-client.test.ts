@@ -109,3 +109,116 @@ describe('WsClient.connect', () => {
     expect(Math.max(...delays)).toBeGreaterThanOrEqual(5000)
   })
 })
+
+describe('WsClient.send terminal.create dedupe', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    MockWebSocket.instances = []
+    // @ts-expect-error - test override
+    globalThis.WebSocket = MockWebSocket
+    localStorage.setItem('freshell.auth-token', 't')
+
+    ;(window as any).setTimeout = globalThis.setTimeout
+    ;(window as any).clearTimeout = globalThis.clearTimeout
+  })
+
+  afterEach(() => {
+    vi.clearAllTimers()
+    vi.useRealTimers()
+  })
+
+  it('dedupes duplicate terminal.create sends until terminal.created arrives', async () => {
+    const c = new WsClient('ws://example/ws')
+    const p = c.connect()
+    expect(MockWebSocket.instances).toHaveLength(1)
+    const ws = MockWebSocket.instances[0]
+
+    ws._open()
+    ws._message({ type: 'ready' })
+    await p
+
+    const requestId = 'req-1'
+    c.send({ type: 'terminal.create', requestId, mode: 'shell' })
+    c.send({ type: 'terminal.create', requestId, mode: 'shell' })
+
+    const sentMessages = ws.sent.map((s) => JSON.parse(s))
+    const creates = sentMessages.filter((m) => m.type === 'terminal.create' && m.requestId === requestId)
+    expect(creates).toHaveLength(1)
+
+    // When the create is acknowledged, a later send is allowed again.
+    ws._message({ type: 'terminal.created', requestId, terminalId: 't1' })
+    c.send({ type: 'terminal.create', requestId, mode: 'shell' })
+
+    const sentMessages2 = ws.sent.map((s) => JSON.parse(s))
+    const creates2 = sentMessages2.filter((m) => m.type === 'terminal.create' && m.requestId === requestId)
+    expect(creates2).toHaveLength(2)
+  })
+
+  it('dedupes terminal.create messages queued before ready', async () => {
+    const c = new WsClient('ws://example/ws')
+    const p = c.connect()
+    expect(MockWebSocket.instances).toHaveLength(1)
+    const ws = MockWebSocket.instances[0]
+
+    const requestId = 'req-queued'
+    c.send({ type: 'terminal.create', requestId, mode: 'shell' })
+    c.send({ type: 'terminal.create', requestId, mode: 'shell' })
+
+    // Nothing sent yet (no socket open).
+    expect(ws.sent).toEqual([])
+
+    ws._open()
+    ws._message({ type: 'ready' })
+    await p
+
+    const sentMessages = ws.sent.map((s) => JSON.parse(s))
+    const creates = sentMessages.filter((m) => m.type === 'terminal.create' && m.requestId === requestId)
+    expect(creates).toHaveLength(1)
+  })
+
+  it('clears dedupe on error responses', async () => {
+    const c = new WsClient('ws://example/ws')
+    const p = c.connect()
+    const ws = MockWebSocket.instances[0]
+
+    ws._open()
+    ws._message({ type: 'ready' })
+    await p
+
+    const requestId = 'req-error'
+    c.send({ type: 'terminal.create', requestId, mode: 'shell' })
+    c.send({ type: 'terminal.create', requestId, mode: 'shell' })
+
+    ws._message({ type: 'error', code: 'PTY_SPAWN_FAILED', message: 'boom', requestId })
+    c.send({ type: 'terminal.create', requestId, mode: 'shell' })
+
+    const sentMessages = ws.sent.map((s) => JSON.parse(s))
+    const creates = sentMessages.filter((m) => m.type === 'terminal.create' && m.requestId === requestId)
+    expect(creates).toHaveLength(2)
+  })
+
+  it('clears terminal.create dedupe when an enqueued create is dropped due to queue overflow', async () => {
+    const c = new WsClient('ws://example/ws')
+    const p = c.connect()
+    const ws = MockWebSocket.instances[0]
+
+    const requestId = 'req-drop'
+    c.send({ type: 'terminal.create', requestId, mode: 'shell' })
+
+    // Overflow the queue to drop the first message (maxQueueSize = 1000).
+    for (let i = 0; i < 1000; i++) {
+      c.send({ type: 'noop', i })
+    }
+
+    // Re-send should be allowed because the original was dropped.
+    c.send({ type: 'terminal.create', requestId, mode: 'shell' })
+
+    ws._open()
+    ws._message({ type: 'ready' })
+    await p
+
+    const sent = ws.sent.map((s) => JSON.parse(s))
+    const creates = sent.filter((m) => m.type === 'terminal.create' && m.requestId === requestId)
+    expect(creates).toHaveLength(1)
+  })
+})
