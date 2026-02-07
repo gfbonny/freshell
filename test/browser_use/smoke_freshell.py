@@ -341,15 +341,17 @@ Steps:
 4) Pane stress (do this once):
    - Create a new Freshell in-app tab (not a browser tab) that you will use for this stress check.
    - Rename that in-app tab to: Stress test
-     - Preferred: double-click the tab name to rename.
-     - If double-click doesn't work: right-click the tab and choose "Rename tab". (This should open an inline rename input.)
+     - Right-click the tab and choose "Rename tab" from the context menu.
+     - An editable text field will appear in place of the tab name.
+     - Select all / clear the existing text, type the new name, and press Enter to confirm.
+     - Verify the tab now displays the new name before moving on.
    - Add shell panes until this tab has {args.pane_target} panes total.
      - Do it one pane at a time: click "Add pane" once, then pick ONE shell type in the picker.
      - If you have multiple shell choices (CMD / PowerShell / WSL), rotate them as you go.
 
 5) Mixed panes on a new in-app tab:
    - Create another new in-app shell tab using the '+' button in the top tab bar (tooltip: "New shell tab").
-   - Rename it to: Test mixed panes (same rename approach as above).
+   - Rename it to: Test mixed panes (same rename approach: right-click → "Rename tab" → clear → type name → Enter → verify).
    - On this tab, build a 3-pane layout with EXACTLY:
      - one Editor pane
      - one shell pane
@@ -362,8 +364,9 @@ Steps:
    - Use the "Enter file path..." box, paste/type the full path, and press Enter.
    - Prove the preview toggle works:
      - click "Source", then click "Preview".
-   - Use find_text to confirm "Quick Start" is visible.
-     - If it is not visible, output:
+   - Confirm "Quick Start" appears in the editor by using your find_text action to search for it.
+     - find_text is the right tool here because it proves on-screen visibility.
+     - If find_text does not find "Quick Start", output:
        SMOKE_RESULT: FAIL - editor did not load file
 
 7) Shell pane check:
@@ -398,11 +401,12 @@ Steps:
    - Use find_text to confirm "Terminal preview" is visible.
      - If it isn't visible, output:
        SMOKE_RESULT: FAIL - settings missing terminal preview
-   - Go back to the terminal view by clicking "Terminal".
+   - Return to the terminal view by clicking "Terminal" in the left sidebar (the first item, above "Settings").
+     - You should see your previously created tabs (Stress test, Test mixed panes, etc.) reappear in the tab bar.
 
 10) Coding CLI panes (best-effort):
    - Create a new in-app tab with the '+' button.
-   - Rename it to: Coding CLIs (same rename approach as above).
+   - Rename it to: Coding CLIs (same rename approach: right-click → "Rename tab" → clear → type name → Enter → verify).
    - You should see a pane type picker. Look at the options.
      - If you see "Claude": click it to create a Claude Code pane. Wait a few seconds for it to initialize.
      - Split once ("Add pane") to get another picker.
