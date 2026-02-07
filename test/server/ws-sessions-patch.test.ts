@@ -12,16 +12,27 @@ function listen(server: http.Server): Promise<number> {
   }))
 }
 
-function waitFor(ws: WebSocket, type: string, timeoutMs = 2000): Promise<any> {
+function waitFor(ws: WebSocket, type: string, timeoutMs = 5000): Promise<any> {
   return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error('timeout')), timeoutMs)
-    ws.on('message', (data) => {
+    const onMessage = (data: WebSocket.RawData) => {
       const msg = JSON.parse(data.toString())
       if (msg.type === type) {
-        clearTimeout(t)
+        cleanup()
         resolve(msg)
       }
-    })
+    }
+
+    const cleanup = () => {
+      clearTimeout(t)
+      ws.off('message', onMessage)
+    }
+
+    const t = setTimeout(() => {
+      cleanup()
+      reject(new Error('timeout'))
+    }, timeoutMs)
+
+    ws.on('message', onMessage)
   })
 }
 
@@ -59,14 +70,16 @@ describe('ws sessions.patch broadcast', () => {
     const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`)
     await new Promise<void>((resolve) => ws.on('open', () => resolve()))
 
+    const readyPromise = waitFor(ws, 'ready')
+    const sessionsUpdatedPromise = waitFor(ws, 'sessions.updated')
     ws.send(JSON.stringify({
       type: 'hello',
       token: 'testtoken-testtoken',
       capabilities: { sessionsPatchV1: true },
     }))
 
-    await waitFor(ws, 'ready')
-    await waitFor(ws, 'sessions.updated')
+    await readyPromise
+    await sessionsUpdatedPromise
 
     const patchPromise = waitFor(ws, 'sessions.patch')
     handler.broadcastSessionsPatch({
@@ -80,4 +93,3 @@ describe('ws sessions.patch broadcast', () => {
     ws.terminate()
   })
 })
-
