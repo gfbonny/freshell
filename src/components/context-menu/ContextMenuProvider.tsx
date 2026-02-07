@@ -80,7 +80,6 @@ export function ContextMenuProvider({
   const sessions = useAppSelector((s) => s.sessions.projects)
   const expandedProjects = useAppSelector((s) => s.sessions.expandedProjects)
   const settings = useAppSelector((s) => s.settings.settings)
-  const platform = useAppSelector((s) => s.connection?.platform ?? null)
 
   const [menuState, setMenuState] = useState<MenuState | null>(null)
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null)
@@ -774,7 +773,6 @@ export function ContextMenuProvider({
       sessions,
       expandedProjects,
       contextElement: menuState.contextElement,
-      platform,
       actions: {
         newDefaultTab,
         newTabWithPane,
@@ -825,7 +823,6 @@ export function ContextMenuProvider({
     panes,
     sessions,
     expandedProjects,
-    platform,
     newDefaultTab,
     newTabWithPane,
     copyTabNames,
