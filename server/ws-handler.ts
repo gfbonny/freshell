@@ -100,6 +100,9 @@ export function chunkProjects(projects: ProjectGroup[], maxBytes: number): Proje
 const HelloSchema = z.object({
   type: z.literal('hello'),
   token: z.string().optional(),
+  capabilities: z.object({
+    sessionsPatchV1: z.boolean().optional(),
+  }).optional(),
   sessions: z.object({
     active: z.string().optional(),
     visible: z.array(z.string()).optional(),

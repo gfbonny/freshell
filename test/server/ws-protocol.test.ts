@@ -287,6 +287,26 @@ describe('ws protocol', () => {
     await closeWebSocket(ws)
   })
 
+  it('accepts hello with capabilities', async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`)
+    await new Promise<void>((resolve) => ws.on('open', () => resolve()))
+
+    ws.send(JSON.stringify({
+      type: 'hello',
+      token: 'testtoken-testtoken',
+      capabilities: { sessionsPatchV1: true },
+    }))
+
+    const ready = await new Promise<any>((resolve) => {
+      ws.on('message', (data) => {
+        const msg = JSON.parse(data.toString())
+        if (msg.type === 'ready') resolve(msg)
+      })
+    })
+    expect(ready.type).toBe('ready')
+    await closeWebSocket(ws)
+  })
+
   it('creates a terminal and returns terminal.created', async () => {
     const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`)
     await new Promise<void>((resolve) => ws.on('open', () => resolve()))

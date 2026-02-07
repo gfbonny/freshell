@@ -88,7 +88,12 @@ export class WsClient {
         // Send hello with token in message body (not URL).
         const token = getAuthToken()
         const extensions = this.helloExtensionProvider?.() || {}
-        this.ws?.send(JSON.stringify({ type: 'hello', token, ...extensions }))
+        this.ws?.send(JSON.stringify({
+          type: 'hello',
+          token,
+          capabilities: { sessionsPatchV1: true },
+          ...extensions,
+        }))
       }
 
       this.ws.onmessage = (event) => {
