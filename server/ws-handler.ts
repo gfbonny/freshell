@@ -11,11 +11,17 @@ import type { CodingCliSessionManager } from './coding-cli/session-manager.js'
 import type { ProjectGroup } from './coding-cli/types.js'
 import type { SessionRepairService } from './session-scanner/service.js'
 import type { SessionScanResult, SessionRepairResult } from './session-scanner/types.js'
+import { isValidClaudeSessionId } from './claude-session-id.js'
 
 const MAX_CONNECTIONS = Number(process.env.MAX_CONNECTIONS || 10)
 const HELLO_TIMEOUT_MS = Number(process.env.HELLO_TIMEOUT_MS || 5_000)
 const PING_INTERVAL_MS = Number(process.env.PING_INTERVAL_MS || 30_000)
 const MAX_WS_BUFFERED_AMOUNT = Number(process.env.MAX_WS_BUFFERED_AMOUNT || 2 * 1024 * 1024)
+// Max payload size per WebSocket message for mobile browser compatibility (500KB)
+const MAX_CHUNK_BYTES = Number(process.env.MAX_WS_CHUNK_BYTES || 500 * 1024)
+// Rate limit: max terminal.create requests per client within a sliding window
+const TERMINAL_CREATE_RATE_LIMIT = Number(process.env.TERMINAL_CREATE_RATE_LIMIT || 10)
+const TERMINAL_CREATE_RATE_WINDOW_MS = Number(process.env.TERMINAL_CREATE_RATE_WINDOW_MS || 10_000)
 
 const log = logger.child({ component: 'ws' })
 const perfConfig = getPerfConfig()
@@ -25,6 +31,8 @@ interface LiveWebSocket extends WebSocket {
   isAlive?: boolean
   connectionId?: string
   connectedAt?: number
+  // Generation counter for chunked session updates to prevent interleaving
+  sessionUpdateGeneration?: number
 }
 
 const CLOSE_CODES = {
@@ -49,6 +57,43 @@ const ErrorCode = z.enum([
 
 function nowIso() {
   return new Date().toISOString()
+}
+
+/**
+ * Chunk projects array into batches that fit within MAX_CHUNK_BYTES when serialized.
+ * This ensures mobile browsers with limited WebSocket buffers can receive the data.
+ * Uses Buffer.byteLength for accurate UTF-8 byte counting (not UTF-16 code units).
+ */
+export function chunkProjects(projects: ProjectGroup[], maxBytes: number): ProjectGroup[][] {
+  if (projects.length === 0) return [[]]
+
+  const chunks: ProjectGroup[][] = []
+  let currentChunk: ProjectGroup[] = []
+  let currentSize = 0
+  // Base overhead for message wrapper, plus max flag length ('"append":true' is longer than '"clear":true')
+  const baseOverhead = Buffer.byteLength(JSON.stringify({ type: 'sessions.updated', projects: [] }))
+  const flagOverhead = Buffer.byteLength(',"append":true')
+  const overhead = baseOverhead + flagOverhead
+
+  for (const project of projects) {
+    const projectJson = JSON.stringify(project)
+    const projectSize = Buffer.byteLength(projectJson)
+    // Account for comma separator between array elements (except first element)
+    const separatorSize = currentChunk.length > 0 ? 1 : 0
+    if (currentChunk.length > 0 && currentSize + separatorSize + projectSize + overhead > maxBytes) {
+      chunks.push(currentChunk)
+      currentChunk = []
+      currentSize = 0
+    }
+    currentChunk.push(project)
+    currentSize += (currentChunk.length > 1 ? 1 : 0) + projectSize // Add comma for non-first elements
+  }
+
+  if (currentChunk.length > 0) {
+    chunks.push(currentChunk)
+  }
+
+  return chunks
 }
 
 const HelloSchema = z.object({
@@ -78,6 +123,7 @@ const TerminalCreateSchema = z.object({
   shell: ShellSchema.default('system'),
   cwd: z.string().optional(),
   resumeSessionId: z.string().optional(),
+  restore: z.boolean().optional(),
 })
 
 const TerminalAttachSchema = z.object({
@@ -161,6 +207,7 @@ type ClientState = {
   sessionsSnapshotSent: boolean
   attachedTerminalIds: Set<string>
   createdByRequestId: Map<string, string>
+  terminalCreateTimestamps: number[]
   codingCliSessions: Set<string>
   codingCliSubscriptions: Map<string, () => void>
   interestedSessions: Set<string>
@@ -344,6 +391,7 @@ export class WsHandler {
       sessionsSnapshotSent: false,
       attachedTerminalIds: new Set(),
       createdByRequestId: new Map(),
+      terminalCreateTimestamps: [],
       codingCliSessions: new Set(),
       codingCliSubscriptions: new Map(),
       interestedSessions: new Set(),
@@ -439,7 +487,54 @@ export class WsHandler {
         ws.close(CLOSE_CODES.BACKPRESSURE, 'Backpressure')
         return
       }
-      ws.send(JSON.stringify(msg))
+      let serialized = ''
+      let payloadBytes: number | undefined
+      let messageType: string | undefined
+      let serializeMs: number | undefined
+      let shouldLogSend = false
+
+      if (perfConfig.enabled) {
+        if (msg && typeof msg === 'object' && 'type' in msg) {
+          const typeValue = (msg as { type?: unknown }).type
+          if (typeof typeValue === 'string') messageType = typeValue
+        }
+
+        const serializeStart = process.hrtime.bigint()
+        serialized = JSON.stringify(msg)
+        const serializeEnd = process.hrtime.bigint()
+        payloadBytes = Buffer.byteLength(serialized)
+
+        if (payloadBytes >= perfConfig.wsPayloadWarnBytes) {
+          shouldLogSend = shouldLog(
+            `ws_send_large_${ws.connectionId || 'unknown'}_${messageType || 'unknown'}`,
+            perfConfig.rateLimitMs,
+          )
+          if (shouldLogSend) {
+            serializeMs = Number((Number(serializeEnd - serializeStart) / 1e6).toFixed(2))
+          }
+        }
+      } else {
+        serialized = JSON.stringify(msg)
+      }
+
+      const sendStart = shouldLogSend ? process.hrtime.bigint() : null
+      ws.send(serialized, (err) => {
+        if (!shouldLogSend) return
+        const sendMs = sendStart ? Number((Number(process.hrtime.bigint() - sendStart) / 1e6).toFixed(2)) : undefined
+        logPerfEvent(
+          'ws_send_large',
+          {
+            connectionId: ws.connectionId,
+            messageType,
+            payloadBytes,
+            bufferedBytes: buffered,
+            serializeMs,
+            sendMs,
+            error: !!err,
+          },
+          'warn',
+        )
+      })
     } catch {
       // ignore
     }
@@ -491,6 +586,43 @@ export class WsHandler {
     }
   }
 
+  /**
+   * Send chunked sessions to a single WebSocket client with interleave protection.
+   * Uses a generation counter to cancel in-flight sends when a new update arrives.
+   */
+  private async sendChunkedSessions(ws: LiveWebSocket, projects: ProjectGroup[]): Promise<void> {
+    // Increment generation to cancel any in-flight sends for this connection
+    const generation = (ws.sessionUpdateGeneration = (ws.sessionUpdateGeneration || 0) + 1)
+    const chunks = chunkProjects(projects, MAX_CHUNK_BYTES)
+
+    for (let i = 0; i < chunks.length; i++) {
+      // Bail out if connection closed or a newer update has started
+      if (ws.readyState !== WebSocket.OPEN) return
+      if (ws.sessionUpdateGeneration !== generation) return
+
+      const isFirst = i === 0
+      let msg: { type: 'sessions.updated'; projects: ProjectGroup[]; clear?: true; append?: true }
+
+      if (chunks.length === 1) {
+        // Single chunk: no flags needed (backwards compatible)
+        msg = { type: 'sessions.updated', projects: chunks[i] }
+      } else if (isFirst) {
+        // First chunk: clear existing data
+        msg = { type: 'sessions.updated', projects: chunks[i], clear: true }
+      } else {
+        // Subsequent chunks: append to existing
+        msg = { type: 'sessions.updated', projects: chunks[i], append: true }
+      }
+
+      this.safeSend(ws, msg)
+
+      // Yield to event loop between chunks to allow other processing
+      // This helps prevent blocking and allows the buffer to flush
+      if (i < chunks.length - 1) {
+        await new Promise<void>((resolve) => setImmediate(resolve))
+      }
+    }
+  }
   private async onMessage(ws: LiveWebSocket, state: ClientState, data: WebSocket.RawData) {
     const endMessageTimer = startPerfTimer(
       'ws_message',
@@ -580,36 +712,99 @@ export class WsHandler {
         let terminalId: string | undefined
         let reused = false
         let error = false
+        let rateLimited = false
         try {
           const existingId = state.createdByRequestId.get(m.requestId)
           if (existingId) {
             const existing = this.registry.get(existingId)
             if (existing) {
-              this.registry.attach(existingId, ws)
+              this.registry.attach(existingId, ws, { pendingSnapshot: true })
               state.attachedTerminalIds.add(existingId)
               terminalId = existingId
               reused = true
-              this.send(ws, { type: 'terminal.created', requestId: m.requestId, terminalId: existingId, snapshot: existing.buffer.snapshot(), createdAt: existing.createdAt })
+              this.send(ws, {
+                type: 'terminal.created',
+                requestId: m.requestId,
+                terminalId: existingId,
+                snapshot: existing.buffer.snapshot(),
+                createdAt: existing.createdAt,
+                effectiveResumeSessionId: existing.resumeSessionId,
+              })
+              setImmediate(() => this.registry.finishAttachSnapshot(existingId, ws))
+              this.broadcast({ type: 'terminal.list.updated' })
               return
             }
             // If it no longer exists, fall through and create a new one.
             state.createdByRequestId.delete(m.requestId)
           }
 
-          // Wait for session repair before resuming Claude
+          // Rate limit: prevent runaway terminal creation (e.g., infinite respawn loops)
+          if (!m.restore) {
+            const now = Date.now()
+            state.terminalCreateTimestamps = state.terminalCreateTimestamps.filter(
+              (t) => now - t < TERMINAL_CREATE_RATE_WINDOW_MS
+            )
+            if (state.terminalCreateTimestamps.length >= TERMINAL_CREATE_RATE_LIMIT) {
+              rateLimited = true
+              log.warn({ connectionId: ws.connectionId, count: state.terminalCreateTimestamps.length }, 'terminal.create rate limited')
+              this.sendError(ws, { code: 'RATE_LIMITED', message: 'Too many terminal.create requests', requestId: m.requestId })
+              return
+            }
+            state.terminalCreateTimestamps.push(now)
+          }
+          // Kick off session repair without blocking terminal creation.
           let effectiveResumeSessionId = m.resumeSessionId
-          if (m.mode === 'claude' && m.resumeSessionId && this.sessionRepairService) {
-            try {
-              const result = await this.sessionRepairService.waitForSession(m.resumeSessionId, 10000)
-              if (result.status === 'missing') {
-                // Session file doesn't exist - don't try to resume
-                log.info({ sessionId: m.resumeSessionId, connectionId: ws.connectionId }, 'Session file missing, starting fresh')
-                effectiveResumeSessionId = undefined
-              }
-              // For 'healthy', 'corrupted' (which is now repaired), we proceed with resume
-            } catch (err) {
-              // Timeout or not in queue - proceed anyway, Claude will handle missing session
-              log.debug({ err, sessionId: m.resumeSessionId, connectionId: ws.connectionId }, 'Session repair wait failed, proceeding')
+          if (m.mode === 'claude' && effectiveResumeSessionId && !isValidClaudeSessionId(effectiveResumeSessionId)) {
+            log.warn({ resumeSessionId: effectiveResumeSessionId, connectionId: ws.connectionId }, 'Ignoring invalid Claude resumeSessionId')
+            effectiveResumeSessionId = undefined
+          }
+
+          if (m.mode === 'claude' && effectiveResumeSessionId) {
+            const existing = this.registry.findRunningClaudeTerminalBySession(effectiveResumeSessionId)
+            if (existing) {
+              this.registry.attach(existing.terminalId, ws, { pendingSnapshot: true })
+              state.attachedTerminalIds.add(existing.terminalId)
+              state.createdByRequestId.set(m.requestId, existing.terminalId)
+              terminalId = existing.terminalId
+              reused = true
+              this.send(ws, {
+                type: 'terminal.created',
+                requestId: m.requestId,
+                terminalId: existing.terminalId,
+                snapshot: existing.buffer.snapshot(),
+                createdAt: existing.createdAt,
+                effectiveResumeSessionId: existing.resumeSessionId,
+              })
+              setImmediate(() => this.registry.finishAttachSnapshot(existing.terminalId, ws))
+              this.broadcast({ type: 'terminal.list.updated' })
+              return
+            }
+          }
+
+          // Kick off session repair without blocking terminal creation.
+          if (m.mode === 'claude' && effectiveResumeSessionId && this.sessionRepairService) {
+            const sessionId = effectiveResumeSessionId
+            const cached = this.sessionRepairService.getResult(sessionId)
+            if (cached?.status === 'missing') {
+              log.info({ sessionId, connectionId: ws.connectionId }, 'Session previously marked missing; resume will start fresh')
+              effectiveResumeSessionId = undefined
+            } else {
+              const endRepairTimer = startPerfTimer(
+                'terminal_create_repair_wait',
+                { connectionId: ws.connectionId, sessionId },
+                { minDurationMs: perfConfig.slowTerminalCreateMs, level: 'warn' },
+              )
+              void this.sessionRepairService.waitForSession(sessionId, 10000)
+                .then((result) => {
+                  endRepairTimer({ status: result.status })
+                  if (result.status === 'missing') {
+                    log.info({ sessionId, connectionId: ws.connectionId }, 'Session file missing; resume may start fresh')
+                  }
+                })
+                .catch((err) => {
+                  endRepairTimer({ error: err instanceof Error ? err.message : String(err) })
+                  log.debug({ err, sessionId, connectionId: ws.connectionId }, 'Session repair wait failed, proceeding')
+                })
             }
           }
 
@@ -624,7 +819,7 @@ export class WsHandler {
           terminalId = record.terminalId
 
           // Attach creator immediately
-          this.registry.attach(record.terminalId, ws)
+          this.registry.attach(record.terminalId, ws, { pendingSnapshot: true })
           state.attachedTerminalIds.add(record.terminalId)
 
           this.send(ws, {
@@ -633,7 +828,9 @@ export class WsHandler {
             terminalId: record.terminalId,
             snapshot: record.buffer.snapshot(),
             createdAt: record.createdAt,
+            effectiveResumeSessionId,
           })
+          setImmediate(() => this.registry.finishAttachSnapshot(record.terminalId, ws))
 
           // Notify all clients that list changed
           this.broadcast({ type: 'terminal.list.updated' })
@@ -646,19 +843,20 @@ export class WsHandler {
             requestId: m.requestId,
           })
         } finally {
-          endCreateTimer({ terminalId, reused, error })
+          endCreateTimer({ terminalId, reused, error, rateLimited })
         }
         return
       }
 
       case 'terminal.attach': {
-        const rec = this.registry.attach(m.terminalId, ws)
+        const rec = this.registry.attach(m.terminalId, ws, { pendingSnapshot: true })
         if (!rec) {
           this.sendError(ws, { code: 'INVALID_TERMINAL_ID', message: 'Unknown terminalId', terminalId: m.terminalId })
           return
         }
         state.attachedTerminalIds.add(m.terminalId)
         this.send(ws, { type: 'terminal.attached', terminalId: m.terminalId, snapshot: rec.buffer.snapshot() })
+        setImmediate(() => this.registry.finishAttachSnapshot(m.terminalId, ws))
         this.broadcast({ type: 'terminal.list.updated' })
         return
       }
