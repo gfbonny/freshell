@@ -23,7 +23,6 @@ type LogContext = {
 }
 
 const logContext = new AsyncLocalStorage<LogContext>()
-const EMPTY_CONTEXT: LogContext = {}
 const require = createRequire(import.meta.url)
 
 type SizeString = `${number}B` | `${number}K` | `${number}M` | `${number}G`
@@ -114,7 +113,10 @@ function createPinoOptions() {
       },
     },
     mixin() {
-      return logContext.getStore() || EMPTY_CONTEXT
+      // IMPORTANT: pino mutates the object returned by `mixin()` when merging log payloads.
+      // Always return a fresh object so fields don't leak between log calls.
+      const ctx = logContext.getStore()
+      return ctx ? { ...ctx } : {}
     },
     timestamp: pino.stdTimeFunctions.isoTime,
   }
