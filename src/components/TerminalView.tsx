@@ -191,6 +191,9 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       // Otherwise, let the browser handle paste natively via paste event
       if (event.ctrlKey && (event.key === 'v' || event.key === 'V') && event.type === 'keydown' && !event.repeat) {
         if (isClipboardReadAvailable()) {
+          // Prevent the browser's native paste into xterm's hidden textarea, which would
+          // otherwise cause double-paste (native + our manual ws.send).
+          event.preventDefault()
           void readText().then((text) => {
             if (!text) return
             const tid = terminalIdRef.current
@@ -366,9 +369,9 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         }
 
         if (msg.type === 'terminal.snapshot' && msg.terminalId === tid) {
-          try { xtermApi.clear() } catch {}
+          try { xtermApi.clear() } catch { /* disposed */ }
           if (msg.snapshot) {
-            try { xtermApi.write(msg.snapshot) } catch {}
+            try { xtermApi.write(msg.snapshot) } catch { /* disposed */ }
           }
         }
 
@@ -377,15 +380,18 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           terminalIdRef.current = newId
           updateContent({ terminalId: newId, status: 'running' })
           if (msg.snapshot) {
-            try { xtermApi.clear(); xtermApi.write(msg.snapshot) } catch {}
+            try { xtermApi.clear(); xtermApi.write(msg.snapshot) } catch { /* disposed */ }
           }
-          attach(newId)
+          // The server attaches the creator automatically during terminal.create.
+          // Avoid sending a second attach, which can race a snapshot and clear new output.
+          setIsAttaching(false)
+          ws.send({ type: 'terminal.resize', terminalId: newId, cols: xtermApi.cols, rows: xtermApi.rows })
         }
 
         if (msg.type === 'terminal.attached' && msg.terminalId === tid) {
           setIsAttaching(false)
           if (msg.snapshot) {
-            try { xtermApi.clear(); xtermApi.write(msg.snapshot) } catch {}
+            try { xtermApi.clear(); xtermApi.write(msg.snapshot) } catch { /* disposed */ }
           }
           updateContent({ status: 'running' })
         }
@@ -488,16 +494,6 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   // when tab properties (like title) change
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isTerminal, paneId, terminalContent?.createRequestId, updateContent, ws, dispatch])
-
-  // Detach when this terminal pane unmounts (tab close or pane swap)
-  useEffect(() => {
-    return () => {
-      const tid = terminalIdRef.current
-      if (tid) {
-        ws.send({ type: 'terminal.detach', terminalId: tid })
-      }
-    }
-  }, [ws])
 
   // NOW we can do the conditional return - after all hooks
   if (!isTerminal || !terminalContent) {
