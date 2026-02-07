@@ -61,6 +61,39 @@ function closeWebSocket(ws: WebSocket, timeoutMs = 500): Promise<void> {
   })
 }
 
+function waitForMessage(
+  ws: WebSocket,
+  predicate: (msg: any) => boolean,
+  timeoutMs = 2000,
+): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      ws.off('message', onMessage)
+      ws.off('close', onClose)
+      reject(new Error('Timed out waiting for expected WebSocket message'))
+    }, timeoutMs)
+
+    const onClose = (code: number, reason: Buffer) => {
+      clearTimeout(timeout)
+      ws.off('message', onMessage)
+      ws.off('close', onClose)
+      reject(new Error(`WebSocket closed before expected message (code ${code}, reason ${reason.toString()})`))
+    }
+
+    const onMessage = (data: WebSocket.Data) => {
+      const msg = JSON.parse(data.toString())
+      if (!predicate(msg)) return
+      clearTimeout(timeout)
+      ws.off('message', onMessage)
+      ws.off('close', onClose)
+      resolve(msg)
+    }
+
+    ws.on('message', onMessage)
+    ws.on('close', onClose)
+  })
+}
+
 class FakeBuffer {
   private s = ''
   append(t: string) { this.s += t }
@@ -198,7 +231,8 @@ describe('ws protocol', () => {
   beforeAll(async () => {
     process.env.NODE_ENV = 'test'
     process.env.AUTH_TOKEN = 'testtoken-testtoken'
-    process.env.HELLO_TIMEOUT_MS = '100'
+    // Speed up hello-timeout tests, but keep enough headroom to avoid flakiness under load.
+    process.env.HELLO_TIMEOUT_MS = '2000'
     process.env.TERMINAL_CREATE_RATE_LIMIT = '10'
     process.env.TERMINAL_CREATE_RATE_WINDOW_MS = '10000'
 
@@ -340,16 +374,7 @@ describe('ws protocol', () => {
     await new Promise<void>((resolve) => ws.on('open', () => resolve()))
     ws.send(JSON.stringify({ type: 'hello', token: 'testtoken-testtoken' }))
 
-    await new Promise<void>((resolve) => {
-      const handler = (data: WebSocket.Data) => {
-        const msg = JSON.parse(data.toString())
-        if (msg.type === 'ready') {
-          ws.off('message', handler)
-          resolve()
-        }
-      }
-      ws.on('message', handler)
-    })
+    await waitForMessage(ws, (msg) => msg.type === 'ready', 5000)
 
     return { ws, close: () => closeWebSocket(ws) }
   }
@@ -358,16 +383,16 @@ describe('ws protocol', () => {
   async function createTerminal(ws: WebSocket, requestId: string): Promise<string> {
     ws.send(JSON.stringify({ type: 'terminal.create', requestId, mode: 'shell' }))
 
-    return new Promise((resolve) => {
-      const handler = (data: WebSocket.Data) => {
-        const msg = JSON.parse(data.toString())
-        if (msg.type === 'terminal.created' && msg.requestId === requestId) {
-          ws.off('message', handler)
-          resolve(msg.terminalId)
-        }
-      }
-      ws.on('message', handler)
-    })
+    const msg = await waitForMessage(
+      ws,
+      (m) => typeof m?.requestId === 'string' && m.requestId === requestId && (m.type === 'terminal.created' || m.type === 'error'),
+      5000,
+    )
+
+    if (msg.type === 'error') {
+      throw new Error(`terminal.create failed: ${msg.code || 'UNKNOWN_ERROR'}`)
+    }
+    return msg.terminalId
   }
 
   // Helper to collect messages until a condition is met
