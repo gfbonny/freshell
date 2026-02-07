@@ -168,6 +168,135 @@ describe('TerminalView lifecycle updates', () => {
     expect(layout.content.status).toBe('running')
   })
 
+  it('does not send terminal.attach after terminal.created (creator is already attached server-side)', async () => {
+    const tabId = 'tab-created'
+    const paneId = 'pane-created'
+
+    const paneContent: TerminalPaneContent = {
+      kind: 'terminal',
+      createRequestId: 'req-created',
+      status: 'creating',
+      mode: 'shell',
+      shell: 'system',
+    }
+
+    const root: PaneNode = { type: 'leaf', id: paneId, content: paneContent }
+
+    const store = configureStore({
+      reducer: {
+        tabs: tabsReducer,
+        panes: panesReducer,
+        settings: settingsReducer,
+        connection: connectionReducer,
+      },
+      preloadedState: {
+        tabs: {
+          tabs: [{
+            id: tabId,
+            title: 'Tab',
+            createdAt: Date.now(),
+          }],
+          activeTabId: tabId,
+        },
+        panes: {
+          layouts: { [tabId]: root },
+          activePane: { [tabId]: paneId },
+          paneTitles: {},
+          paneTitleSetByUser: {},
+        },
+        settings: { settings: defaultSettings, status: 'loaded' },
+        connection: { status: 'connected', error: null },
+      },
+    })
+
+    render(
+      <Provider store={store}>
+        <TerminalView tabId={tabId} paneId={paneId} paneContent={paneContent} />
+      </Provider>
+    )
+
+    await waitFor(() => {
+      expect(messageHandler).not.toBeNull()
+    })
+
+    wsMocks.send.mockClear()
+    messageHandler!({
+      type: 'terminal.created',
+      requestId: 'req-created',
+      terminalId: 'term-123',
+      snapshot: '',
+      createdAt: Date.now(),
+    })
+
+    expect(wsMocks.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'terminal.attach' }))
+    expect(wsMocks.send).toHaveBeenCalledWith(expect.objectContaining({ type: 'terminal.resize', terminalId: 'term-123' }))
+  })
+
+  it('does not detach on unmount (cleanup is handled by paneCleanupListeners)', async () => {
+    const tabId = 'tab-unmount'
+    const paneId = 'pane-unmount'
+
+    const paneContent: TerminalPaneContent = {
+      kind: 'terminal',
+      createRequestId: 'req-unmount',
+      status: 'creating',
+      mode: 'shell',
+      shell: 'system',
+    }
+
+    const root: PaneNode = { type: 'leaf', id: paneId, content: paneContent }
+
+    const store = configureStore({
+      reducer: {
+        tabs: tabsReducer,
+        panes: panesReducer,
+        settings: settingsReducer,
+        connection: connectionReducer,
+      },
+      preloadedState: {
+        tabs: {
+          tabs: [{
+            id: tabId,
+            title: 'Tab',
+            createdAt: Date.now(),
+          }],
+          activeTabId: tabId,
+        },
+        panes: {
+          layouts: { [tabId]: root },
+          activePane: { [tabId]: paneId },
+          paneTitles: {},
+          paneTitleSetByUser: {},
+        },
+        settings: { settings: defaultSettings, status: 'loaded' },
+        connection: { status: 'connected', error: null },
+      },
+    })
+
+    const rendered = render(
+      <Provider store={store}>
+        <TerminalView tabId={tabId} paneId={paneId} paneContent={paneContent} />
+      </Provider>
+    )
+
+    await waitFor(() => {
+      expect(messageHandler).not.toBeNull()
+    })
+
+    messageHandler!({
+      type: 'terminal.created',
+      requestId: 'req-unmount',
+      terminalId: 'term-unmount',
+      snapshot: '',
+      createdAt: Date.now(),
+    })
+
+    wsMocks.send.mockClear()
+    rendered.unmount()
+
+    expect(wsMocks.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'terminal.detach' }))
+  })
+
   it('ignores INVALID_TERMINAL_ID errors for other terminals', async () => {
     const tabId = 'tab-2'
     const paneId = 'pane-2'
