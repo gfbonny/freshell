@@ -22,6 +22,7 @@ const MAX_CHUNK_BYTES = Number(process.env.MAX_WS_CHUNK_BYTES || 500 * 1024)
 // Rate limit: max terminal.create requests per client within a sliding window
 const TERMINAL_CREATE_RATE_LIMIT = Number(process.env.TERMINAL_CREATE_RATE_LIMIT || 10)
 const TERMINAL_CREATE_RATE_WINDOW_MS = Number(process.env.TERMINAL_CREATE_RATE_WINDOW_MS || 10_000)
+const GLOBAL_REQUEST_ID_CACHE_MAX = Number(process.env.GLOBAL_REQUEST_ID_CACHE_MAX || 5000)
 
 const log = logger.child({ component: 'ws' })
 const perfConfig = getPerfConfig()
@@ -123,6 +124,12 @@ const TerminalCreateSchema = z.object({
   restore: z.boolean().optional(),
 })
 
+const TerminalCreateCancelSchema = z.object({
+  type: z.literal('terminal.create.cancel'),
+  requestId: z.string().min(1),
+  kill: z.boolean().optional(),
+})
+
 const TerminalAttachSchema = z.object({
   type: z.literal('terminal.attach'),
   terminalId: z.string().min(1),
@@ -187,6 +194,7 @@ const ClientMessageSchema = z.discriminatedUnion('type', [
   HelloSchema,
   PingSchema,
   TerminalCreateSchema,
+  TerminalCreateCancelSchema,
   TerminalAttachSchema,
   TerminalDetachSchema,
   TerminalInputSchema,
@@ -221,6 +229,11 @@ export class WsHandler {
   private wss: WebSocketServer
   private connections = new Set<LiveWebSocket>()
   private clientStates = new Map<LiveWebSocket, ClientState>()
+  // Cross-connection idempotency cache for terminal.create requestIds.
+  // This helps when:
+  // - a client retries terminal.create after a disconnect before it received terminal.created
+  // - multiple browser tabs share the same persisted createRequestId (same localStorage)
+  private globalCreatedByRequestId = new Map<string, string>()
   private pingInterval: NodeJS.Timeout | null = null
   private closed = false
   private sessionRepairService?: SessionRepairService
@@ -322,6 +335,28 @@ export class WsHandler {
       this.sessionRepairService.on('repaired', onRepaired)
       this.sessionRepairService.on('error', onError)
     }
+  }
+
+  private setGlobalRequestIdMapping(requestId: string, terminalId: string): void {
+    // Refresh insertion order to approximate LRU behavior.
+    if (this.globalCreatedByRequestId.has(requestId)) {
+      this.globalCreatedByRequestId.delete(requestId)
+    }
+    this.globalCreatedByRequestId.set(requestId, terminalId)
+
+    if (this.globalCreatedByRequestId.size > GLOBAL_REQUEST_ID_CACHE_MAX) {
+      const oldest = this.globalCreatedByRequestId.keys().next().value
+      if (oldest) this.globalCreatedByRequestId.delete(oldest)
+    }
+  }
+
+  private getGlobalRequestIdMapping(requestId: string): string | undefined {
+    const terminalId = this.globalCreatedByRequestId.get(requestId)
+    if (!terminalId) return undefined
+    // Touch to keep it hot.
+    this.globalCreatedByRequestId.delete(requestId)
+    this.globalCreatedByRequestId.set(requestId, terminalId)
+    return terminalId
   }
 
   /**
@@ -713,6 +748,7 @@ export class WsHandler {
               state.attachedTerminalIds.add(existingId)
               terminalId = existingId
               reused = true
+              this.setGlobalRequestIdMapping(m.requestId, existingId)
               this.send(ws, {
                 type: 'terminal.created',
                 requestId: m.requestId,
@@ -727,6 +763,32 @@ export class WsHandler {
             }
             // If it no longer exists, fall through and create a new one.
             state.createdByRequestId.delete(m.requestId)
+          }
+
+          const globalExistingId = this.getGlobalRequestIdMapping(m.requestId)
+          if (globalExistingId) {
+            const existing = this.registry.get(globalExistingId)
+            if (existing) {
+              // Seed per-connection mapping so subsequent retries on this connection are fast.
+              state.createdByRequestId.set(m.requestId, globalExistingId)
+              this.registry.attach(globalExistingId, ws, { pendingSnapshot: true })
+              state.attachedTerminalIds.add(globalExistingId)
+              terminalId = globalExistingId
+              reused = true
+              this.send(ws, {
+                type: 'terminal.created',
+                requestId: m.requestId,
+                terminalId: globalExistingId,
+                snapshot: existing.buffer.snapshot(),
+                createdAt: existing.createdAt,
+                effectiveResumeSessionId: existing.resumeSessionId,
+              })
+              setImmediate(() => this.registry.finishAttachSnapshot(globalExistingId, ws))
+              this.broadcast({ type: 'terminal.list.updated' })
+              return
+            }
+            // Stale mapping; allow fallthrough to create.
+            this.globalCreatedByRequestId.delete(m.requestId)
           }
 
           // Rate limit: prevent runaway terminal creation (e.g., infinite respawn loops)
@@ -756,6 +818,7 @@ export class WsHandler {
               this.registry.attach(existing.terminalId, ws, { pendingSnapshot: true })
               state.attachedTerminalIds.add(existing.terminalId)
               state.createdByRequestId.set(m.requestId, existing.terminalId)
+              this.setGlobalRequestIdMapping(m.requestId, existing.terminalId)
               terminalId = existing.terminalId
               reused = true
               this.send(ws, {
@@ -807,6 +870,7 @@ export class WsHandler {
           })
 
           state.createdByRequestId.set(m.requestId, record.terminalId)
+          this.setGlobalRequestIdMapping(m.requestId, record.terminalId)
           terminalId = record.terminalId
 
           // Attach creator immediately
@@ -836,6 +900,28 @@ export class WsHandler {
         } finally {
           endCreateTimer({ terminalId, reused, error, rateLimited })
         }
+        return
+      }
+
+      case 'terminal.create.cancel': {
+        const requestId = m.requestId
+        const kill = !!m.kill
+
+        const localTerminalId = state.createdByRequestId.get(requestId)
+        const terminalId = localTerminalId || this.getGlobalRequestIdMapping(requestId)
+        if (!terminalId) return
+
+        if (kill && !localTerminalId) {
+          // Safety: don't allow kill via a requestId that was created by a different connection.
+          this.registry.detach(terminalId, ws)
+        } else if (kill) {
+          this.registry.kill(terminalId)
+          this.globalCreatedByRequestId.delete(requestId)
+        } else {
+          this.registry.detach(terminalId, ws)
+        }
+        state.attachedTerminalIds.delete(terminalId)
+        this.broadcast({ type: 'terminal.list.updated' })
         return
       }
 
