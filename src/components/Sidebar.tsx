@@ -439,38 +439,38 @@ function SidebarItem({
   onClick: () => void
 }) {
   return (
-    <button
-      onClick={onClick}
-      className={cn(
-        'w-full flex items-center gap-2 px-2 py-2 rounded-md text-left transition-colors group',
-        isActiveTab
-          ? 'bg-muted'
-          : 'hover:bg-muted/50'
-      )}
-      data-context={ContextIds.SidebarSession}
-      data-session-id={item.sessionId}
-      data-provider={item.provider}
-      data-running-terminal-id={item.runningTerminalId}
-      data-has-tab={item.hasTab ? 'true' : 'false'}
-    >
-      {/* Provider icon */}
-      <div className="flex-shrink-0">
-        <div className={cn('relative', item.hasTab && 'animate-pulse-subtle')}>
-          <ProviderIcon
-            provider={item.provider}
-            className={cn(
-              'h-3.5 w-3.5',
-              item.hasTab ? 'text-success' : 'text-muted-foreground'
-            )}
-          />
-        </div>
-      </div>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          onClick={onClick}
+          className={cn(
+            'w-full flex items-center gap-2 px-2 py-2 rounded-md text-left transition-colors group',
+            isActiveTab
+              ? 'bg-muted'
+              : 'hover:bg-muted/50'
+          )}
+          data-context={ContextIds.SidebarSession}
+          data-session-id={item.sessionId}
+          data-provider={item.provider}
+          data-running-terminal-id={item.runningTerminalId}
+          data-has-tab={item.hasTab ? 'true' : 'false'}
+        >
+          {/* Provider icon */}
+          <div className="flex-shrink-0">
+            <div className={cn('relative', item.hasTab && 'animate-pulse-subtle')}>
+              <ProviderIcon
+                provider={item.provider}
+                className={cn(
+                  'h-3.5 w-3.5',
+                  item.hasTab ? 'text-success' : 'text-muted-foreground'
+                )}
+              />
+            </div>
+          </div>
 
-      {/* Content */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <Tooltip>
-            <TooltipTrigger asChild>
+          {/* Content */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
               <span
                 className={cn(
                   'text-sm truncate',
@@ -479,29 +479,27 @@ function SidebarItem({
               >
                 {item.title}
               </span>
-            </TooltipTrigger>
-            <TooltipContent>{getProviderLabel(item.provider)}: {item.title}</TooltipContent>
-          </Tooltip>
-          {item.archived && (
-            <Archive className="h-3 w-3 text-muted-foreground/70" aria-label="Archived session" />
-          )}
-        </div>
-        {item.subtitle && showProjectBadge && (
-          <Tooltip>
-            <TooltipTrigger asChild>
+              {item.archived && (
+                <Archive className="h-3 w-3 text-muted-foreground/70" aria-label="Archived session" />
+              )}
+            </div>
+            {item.subtitle && showProjectBadge && (
               <div className="text-2xs text-muted-foreground truncate">
                 {item.subtitle}
               </div>
-            </TooltipTrigger>
-            <TooltipContent>{item.subtitle}</TooltipContent>
-          </Tooltip>
-        )}
-      </div>
+            )}
+          </div>
 
-      {/* Timestamp */}
-      <span className="text-2xs text-muted-foreground/60 flex-shrink-0">
-        {formatRelativeTime(item.timestamp)}
-      </span>
-    </button>
+          {/* Timestamp */}
+          <span className="text-2xs text-muted-foreground/60 flex-shrink-0">
+            {formatRelativeTime(item.timestamp)}
+          </span>
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>
+        <div>{getProviderLabel(item.provider)}: {item.title}</div>
+        <div className="text-muted-foreground">{item.subtitle || item.projectPath || getProviderLabel(item.provider)}</div>
+      </TooltipContent>
+    </Tooltip>
   )
 }

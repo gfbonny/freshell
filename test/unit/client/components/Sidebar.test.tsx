@@ -263,7 +263,9 @@ describe('Sidebar Component - Session-Centric Display', () => {
       const store = createTestStore({ projects })
       renderSidebar(store, [])
 
-      vi.advanceTimersByTime(100)
+      act(() => {
+        vi.advanceTimersByTime(100)
+      })
 
       expect(screen.getByText('Fix authentication bug')).toBeInTheDocument()
     })
@@ -329,6 +331,40 @@ describe('Sidebar Component - Session-Centric Display', () => {
 
       // Should show session title, not "Claude"
       expect(screen.getByText('Implement user authentication')).toBeInTheDocument()
+    })
+
+    it('shows tooltips when hovering anywhere on a session row (not just the text)', () => {
+      const projects: ProjectGroup[] = [
+        {
+          projectPath: '/home/user/project',
+          sessions: [
+            {
+              sessionId: 'session-abc',
+              projectPath: '/home/user/project',
+              updatedAt: Date.now(),
+              title: 'Implement user authentication',
+              cwd: '/home/user/project',
+            },
+          ],
+        },
+      ]
+
+      const store = createTestStore({ projects })
+      renderSidebar(store, [])
+
+      act(() => {
+        vi.advanceTimersByTime(100)
+      })
+
+      const title = screen.getByText('Implement user authentication')
+      const rowButton = title.closest('button')
+      expect(rowButton).toBeTruthy()
+
+      fireEvent.mouseEnter(rowButton!)
+      expect(screen.getByText('Claude: Implement user authentication')).toBeInTheDocument()
+
+      fireEvent.mouseLeave(rowButton!)
+      expect(screen.queryByText('Claude: Implement user authentication')).not.toBeInTheDocument()
     })
   })
 
