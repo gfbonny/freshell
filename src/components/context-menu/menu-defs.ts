@@ -2,7 +2,7 @@ import type { MenuItem, ContextTarget } from './context-menu-types'
 import type { AppView } from '@/components/Sidebar'
 import type { Tab, ProjectGroup } from '@/store/types'
 import type { PaneNode } from '@/store/paneTypes'
-import { collectTerminalPanes, findPaneContent } from '@/lib/pane-utils'
+import { collectSessionPanes, collectTerminalPanes, findPaneContent } from '@/lib/pane-utils'
 import type { TerminalActions, EditorActions, BrowserActions } from '@/lib/pane-action-registry'
 
 export type MenuActions = {
@@ -305,10 +305,14 @@ export function buildMenuItems(target: ContextTarget, ctx: MenuBuildContext): Me
     const provider = target.provider || 'claude'
     const isOpen = Object.values(paneLayouts).some((layout) => {
       const terminals = collectTerminalPanes(layout)
-      return terminals.some(
-        (terminal) =>
-          terminal.content.resumeSessionId === target.sessionId &&
-          terminal.content.mode === provider
+      const openInTerminal = terminals.some(
+        (terminal) => terminal.content.resumeSessionId === target.sessionId && terminal.content.mode === provider,
+      )
+      if (openInTerminal) return true
+
+      const sessions = collectSessionPanes(layout)
+      return sessions.some(
+        (session) => session.content.sessionId === target.sessionId && (session.content.provider || 'claude') === provider,
       )
     })
     return [
