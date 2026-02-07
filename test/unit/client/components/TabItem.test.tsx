@@ -96,4 +96,10 @@ describe('TabItem', () => {
     fireEvent.doubleClick(tabElement!)
     expect(onDoubleClick).toHaveBeenCalled()
   })
+
+  it('shows pulsing indicator when isWorking is true', () => {
+    render(<TabItem {...defaultProps} isWorking={true} />)
+    const cls = screen.getByTestId('circle-icon').getAttribute('class') || ''
+    expect(cls).toContain('animate-pulse')
+  })
 })
