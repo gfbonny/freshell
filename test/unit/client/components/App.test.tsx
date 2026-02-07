@@ -102,6 +102,7 @@ function createTestStore() {
       sessions: {
         projects: [],
         expandedProjects: new Set<string>(),
+        wsSnapshotReceived: false,
         isLoading: false,
         error: null,
       },
@@ -659,6 +660,43 @@ describe('App WS message handling', () => {
     })
   })
 
+  it('ignores sessions.patch messages until a WS sessions.updated snapshot is received', async () => {
+    let handler: ((msg: any) => void) | null = null
+    mockOnMessage.mockImplementation((cb: (msg: any) => void) => {
+      handler = cb
+      return () => { handler = null }
+    })
+
+    const store = createTestStore()
+    renderApp(store)
+    await waitFor(() => expect(handler).not.toBeNull())
+
+    handler!({
+      type: 'sessions.patch',
+      upsertProjects: [{ projectPath: '/p1', sessions: [{ provider: 'claude', sessionId: 's1', updatedAt: 1 }] }],
+      removeProjectPaths: [],
+    })
+
+    await waitFor(() => {
+      expect(store.getState().sessions.projects).toEqual([])
+    })
+
+    handler!({
+      type: 'sessions.updated',
+      projects: [{ projectPath: '/p2', sessions: [{ provider: 'claude', sessionId: 's2', updatedAt: 2 }] }],
+    })
+
+    handler!({
+      type: 'sessions.patch',
+      upsertProjects: [{ projectPath: '/p1', sessions: [{ provider: 'claude', sessionId: 's1', updatedAt: 3 }] }],
+      removeProjectPaths: [],
+    })
+
+    await waitFor(() => {
+      expect(store.getState().sessions.projects.map((p: any) => p.projectPath).sort()).toEqual(['/p1', '/p2'])
+    })
+  })
+
   it('applies sessions.patch messages (upsert + remove) without clearing all sessions', async () => {
     let handler: ((msg: any) => void) | null = null
     mockOnMessage.mockImplementation((cb: (msg: any) => void) => {
@@ -774,6 +812,7 @@ describe('Tab Switching Keyboard Shortcuts', () => {
         sessions: {
           projects: [],
           expandedProjects: new Set<string>(),
+          wsSnapshotReceived: false,
           isLoading: false,
           error: null,
         },

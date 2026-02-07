@@ -28,29 +28,46 @@ function projectNewestUpdatedAt(project: ProjectGroup): number {
 }
 
 function sortProjectsByRecency(projects: ProjectGroup[]): ProjectGroup[] {
+  const newestByPath = new Map<string, number>()
+  const newest = (project: ProjectGroup): number => {
+    if (newestByPath.has(project.projectPath)) return newestByPath.get(project.projectPath)!
+    const time = projectNewestUpdatedAt(project)
+    newestByPath.set(project.projectPath, time)
+    return time
+  }
+
   return [...projects].sort((a, b) => {
-    const aTime = projectNewestUpdatedAt(a)
-    const bTime = projectNewestUpdatedAt(b)
-    if (aTime !== bTime) return bTime - aTime
-    return a.projectPath.localeCompare(b.projectPath)
+    const diff = newest(b) - newest(a)
+    if (diff !== 0) return diff
+    if (a.projectPath < b.projectPath) return -1
+    if (a.projectPath > b.projectPath) return 1
+    return 0
   })
 }
 
 export interface SessionsState {
   projects: ProjectGroup[]
   expandedProjects: Set<string>
+  wsSnapshotReceived: boolean
   lastLoadedAt?: number
 }
 
 const initialState: SessionsState = {
   projects: [],
   expandedProjects: new Set<string>(),
+  wsSnapshotReceived: false,
 }
 
 export const sessionsSlice = createSlice({
   name: 'sessions',
   initialState,
   reducers: {
+    markWsSnapshotReceived: (state) => {
+      state.wsSnapshotReceived = true
+    },
+    resetWsSnapshotReceived: (state) => {
+      state.wsSnapshotReceived = false
+    },
     setProjects: (state, action: PayloadAction<ProjectGroup[]>) => {
       state.projects = normalizeProjects(action.payload)
       state.lastLoadedAt = Date.now()
@@ -60,6 +77,7 @@ export const sessionsSlice = createSlice({
     clearProjects: (state) => {
       state.projects = []
       state.expandedProjects = new Set()
+      state.wsSnapshotReceived = false
     },
     mergeProjects: (state, action: PayloadAction<ProjectGroup[]>) => {
       const incoming = normalizeProjects(action.payload)
@@ -77,6 +95,7 @@ export const sessionsSlice = createSlice({
       state,
       action: PayloadAction<{ upsertProjects: ProjectGroup[]; removeProjectPaths: string[] }>
     ) => {
+      if (!state.wsSnapshotReceived) return
       const remove = new Set(action.payload.removeProjectPaths || [])
       const incoming = normalizeProjects(action.payload.upsertProjects)
 
@@ -111,6 +130,8 @@ export const sessionsSlice = createSlice({
 })
 
 export const {
+  markWsSnapshotReceived,
+  resetWsSnapshotReceived,
   setProjects,
   clearProjects,
   mergeProjects,

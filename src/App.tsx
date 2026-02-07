@@ -2,7 +2,14 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { setStatus, setError, setPlatform, setAvailableClis } from '@/store/connectionSlice'
 import { setSettings } from '@/store/settingsSlice'
-import { setProjects, clearProjects, mergeProjects, applySessionsPatch } from '@/store/sessionsSlice'
+import {
+  setProjects,
+  clearProjects,
+  mergeProjects,
+  applySessionsPatch,
+  markWsSnapshotReceived,
+  resetWsSnapshotReceived,
+} from '@/store/sessionsSlice'
 import { switchToNextTab, switchToPrevTab } from '@/store/tabsSlice'
 import { createTabWithPane } from '@/store/tabThunks'
 import { clearIdleWarning, recordIdleWarning } from '@/store/idleWarningsSlice'
@@ -200,6 +207,7 @@ export default function App() {
         if (!cancelled) {
           dispatch(setError(undefined))
           dispatch(setStatus('ready'))
+          dispatch(resetWsSnapshotReceived())
         }
         return
       }
@@ -214,6 +222,7 @@ export default function App() {
         } else {
           dispatch(setProjects(msg.projects || []))
         }
+        dispatch(markWsSnapshotReceived())
       }
       if (msg.type === 'sessions.patch') {
         dispatch(applySessionsPatch({

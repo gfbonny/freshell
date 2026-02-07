@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { enableMapSet } from 'immer'
 import sessionsReducer, {
+  markWsSnapshotReceived,
   setProjects,
   clearProjects,
   mergeProjects,
@@ -61,6 +62,7 @@ describe('sessionsSlice', () => {
     initialState = {
       projects: [],
       expandedProjects: new Set<string>(),
+      wsSnapshotReceived: false,
     }
   })
 
@@ -74,6 +76,11 @@ describe('sessionsSlice', () => {
       const state = sessionsReducer(undefined, { type: 'unknown' })
       expect(state.expandedProjects).toBeInstanceOf(Set)
       expect(state.expandedProjects.size).toBe(0)
+    })
+
+    it('defaults to wsSnapshotReceived = false', () => {
+      const state = sessionsReducer(undefined, { type: 'unknown' })
+      expect(state.wsSnapshotReceived).toBe(false)
     })
 
     it('has no lastLoadedAt initially', () => {
@@ -137,6 +144,7 @@ describe('sessionsSlice', () => {
       const stateWithProjects = {
         ...initialState,
         projects: mockProjects,
+        wsSnapshotReceived: true,
       }
       const state = sessionsReducer(stateWithProjects, clearProjects())
       expect(state.projects).toEqual([])
@@ -144,6 +152,7 @@ describe('sessionsSlice', () => {
 
     it('clears expandedProjects when clearing projects', () => {
       const stateWithExpanded = {
+        ...initialState,
         projects: mockProjects,
         expandedProjects: new Set(['/project/one']),
       }
@@ -158,6 +167,7 @@ describe('sessionsSlice', () => {
         ...initialState,
         projects: mockProjects,
         lastLoadedAt: 1700000000000,
+        wsSnapshotReceived: true,
       }
       const state = sessionsReducer(stateWithTimestamp, clearProjects())
       expect(state.lastLoadedAt).toBe(1700000000000)
@@ -249,11 +259,26 @@ describe('sessionsSlice', () => {
   })
 
   describe('applySessionsPatch', () => {
-    it('upserts projects and removes deleted project paths', () => {
+    it('ignores patches until a WS sessions.updated snapshot has been received', () => {
       const starting = sessionsReducer(undefined, setProjects([
+        { projectPath: '/p1', sessions: [{ provider: 'claude', sessionId: 's1', projectPath: '/p1', updatedAt: 1 }] },
+      ] as any))
+
+      const next = sessionsReducer(starting, applySessionsPatch({
+        upsertProjects: [{ projectPath: '/p2', sessions: [{ provider: 'claude', sessionId: 's2', projectPath: '/p2', updatedAt: 2 }] }],
+        removeProjectPaths: [],
+      }))
+
+      expect(next.projects).toEqual(starting.projects)
+      expect(next.lastLoadedAt).toBe(starting.lastLoadedAt)
+    })
+
+    it('upserts projects and removes deleted project paths', () => {
+      let starting = sessionsReducer(undefined, setProjects([
         { projectPath: '/p1', sessions: [{ provider: 'claude', sessionId: 's1', projectPath: '/p1', updatedAt: 1 }] },
         { projectPath: '/p2', sessions: [{ provider: 'claude', sessionId: 's2', projectPath: '/p2', updatedAt: 2 }] },
       ] as any))
+      starting = sessionsReducer(starting, markWsSnapshotReceived())
 
       const next = sessionsReducer(starting, applySessionsPatch({
         upsertProjects: [{ projectPath: '/p3', sessions: [{ provider: 'claude', sessionId: 's3', projectPath: '/p3', updatedAt: 3 }] }],
@@ -264,10 +289,11 @@ describe('sessionsSlice', () => {
     })
 
     it('keeps HistoryView project ordering stable by sorting projects by newest session updatedAt', () => {
-      const starting = sessionsReducer(undefined, setProjects([
+      let starting = sessionsReducer(undefined, setProjects([
         { projectPath: '/p2', sessions: [{ provider: 'claude', sessionId: 's2', projectPath: '/p2', updatedAt: 20 }] },
         { projectPath: '/p1', sessions: [{ provider: 'claude', sessionId: 's1', projectPath: '/p1', updatedAt: 10 }] },
       ] as any))
+      starting = sessionsReducer(starting, markWsSnapshotReceived())
 
       const next = sessionsReducer(starting, applySessionsPatch({
         upsertProjects: [{ projectPath: '/p1', sessions: [{ provider: 'claude', sessionId: 's1', projectPath: '/p1', updatedAt: 30 }] }],
@@ -385,6 +411,7 @@ describe('sessionsSlice', () => {
 
     it('preserves projects list', () => {
       const stateWithProjects = {
+        ...initialState,
         projects: mockProjects,
         expandedProjects: new Set(['/project/one']),
       }
@@ -396,6 +423,7 @@ describe('sessionsSlice', () => {
   describe('expandAll', () => {
     it('expands all projects in the list', () => {
       const stateWithProjects = {
+        ...initialState,
         projects: mockProjects,
         expandedProjects: new Set<string>(),
       }
@@ -408,6 +436,7 @@ describe('sessionsSlice', () => {
 
     it('works when some projects are already expanded', () => {
       const stateWithProjects = {
+        ...initialState,
         projects: mockProjects,
         expandedProjects: new Set(['/project/one']),
       }
@@ -417,6 +446,7 @@ describe('sessionsSlice', () => {
 
     it('replaces expandedProjects with new Set', () => {
       const stateWithProjects = {
+        ...initialState,
         projects: mockProjects,
         expandedProjects: new Set(['/old/project']),
       }
