@@ -11,6 +11,13 @@ Steps:
   2 - Wait for Claude to finish building the project
   3 - Add Shell + Browser panes, start dev server, load synth, play Mr. Roboto
   4 - Ask Claude to create a git worktree
+
+Outputs:
+  /tmp/demo_timeline.json   Timestamped event log for video post-production.
+                            Categories: llm_thinking (dead air / trim),
+                            ui_wait (speed-up), ui_click/ui_input/ui_keypress
+                            (keep at 1x), step_start/step_end (chapter marks).
+  stdout                    Live [T+...s] timeline printed during the run.
 """
 
 from __future__ import annotations
@@ -39,6 +46,109 @@ from smoke_utils import (
     redact_text,
     require,
 )
+
+
+# Synth keyboard → note name mapping (for readable timeline output)
+KEY_TO_NOTE = {
+    "a": "C3",  "w": "C#3/D\u266d3", "s": "D3", "e": "D#3/E\u266d3",
+    "d": "E3",  "f": "F3",  "t": "F#3/G\u266d3", "g": "G3",
+    "y": "G#3/A\u266d3", "h": "A3", "u": "A#3/B\u266d3", "j": "B3",
+    "k": "C4",  "o": "C#4/D\u266d4", "l": "D4", "p": "D#4/E\u266d4",
+}
+
+# ---------------------------------------------------------------------------
+# Melody: "Domo Arigato, Mr. Roboto" — Key of B♭ minor
+#
+# Each entry: (key, eighths, gap_type)
+#   key       — keyboard letter (None = rest)
+#   eighths   — duration in eighth-note units
+#   gap_type  — "r" retrigger (same pitch follows, needs short silence to re-attack)
+#               "l" legato (different pitch follows, near-zero gap)
+#               "n" none (rest, bar-end, or final note follows)
+#
+# Enharmonic mapping for B♭ minor on the synth keyboard:
+#   C3=a  D♭3=w  E♭3=e  F3=f  G♭3=t  A♭3=y  B♭3=u
+# ---------------------------------------------------------------------------
+MELODY_NOTES: list[tuple[str | None, int, str]] = [
+    # ---- Measure 1: F F F F E♭ F [8th rest] F(tied→m2) ----
+    ("f", 1, "r"),  # F 8th
+    ("f", 1, "r"),  # F 8th
+    ("f", 1, "r"),  # F 8th
+    ("f", 1, "r"),  # F 8th
+    ("e", 1, "l"),  # E♭ 8th
+    ("f", 1, "n"),  # F 8th (rest follows)
+    (None, 1, "n"), # 8th rest
+    ("f", 2, "l"),  # F tied across barline (pickup 8th + 8th in m2)
+
+    # ---- Measure 2: →(F) E♭ | F F | C half ----
+    ("e", 1, "l"),  # E♭ 8th
+    ("f", 1, "r"),  # F 8th
+    ("f", 1, "l"),  # F 8th
+    ("a", 4, "n"),  # C half note
+
+    # ---- Measure 3: C qtr  C qtr | D♭ E♭ F G♭ 8ths ----
+    ("a", 2, "r"),  # C quarter
+    ("a", 2, "l"),  # C quarter (legato into D♭)
+    ("w", 1, "l"),  # D♭ 8th
+    ("e", 1, "l"),  # E♭ 8th
+    ("f", 1, "l"),  # F 8th
+    ("t", 1, "r"),  # G♭ 8th (retrigger before m4 G♭)
+
+    # ---- Measure 4: G♭ dotted half (3 beats) ----
+    ("t", 6, "n"),  # G♭ dotted half
+]
+
+
+class Timeline:
+    """Records timestamped events for video post-production.
+
+    Every event has a T+ offset (seconds from script start), a wall-clock
+    timestamp, a category, and a human description.  Categories tell the
+    video editor what to do with each time range:
+
+      step_start / step_end — demo step boundaries (chapter markers)
+      llm_thinking          — dead air: agent is calling the LLM (trim / cut)
+      llm_decided           — LLM returned, actions about to fire (transition)
+      ui_click              — visible click on a UI element (keep 1×)
+      ui_input              — text pasted into terminal (keep 1×)
+      ui_keypress           — synth note played (keep 1×, maybe highlight)
+      ui_wait               — agent explicitly waiting N seconds (speed-up)
+      ui_sendkeys           — keyboard shortcut sent (keep 1×)
+      action_done           — action result summary (keep 1×)
+      transition            — gap between demo steps (trim)
+      meta                  — script-level bookkeeping
+    """
+
+    def __init__(self):
+        self._t0 = time.monotonic()
+        self._wall0 = time.time()
+        self.events: list[dict] = []
+
+    def _offset(self) -> float:
+        return time.monotonic() - self._t0
+
+    def event(self, category: str, description: str, **extra) -> dict:
+        t = self._offset()
+        wall = time.strftime("%H:%M:%S", time.localtime(self._wall0 + t))
+        ms = int((t % 1) * 1000)
+        e = {
+            "t": round(t, 2),
+            "wall": f"{wall}.{ms:03d}",
+            "cat": category,
+            "desc": description,
+            **{k: v for k, v in extra.items() if v is not None},
+        }
+        self.events.append(e)
+        print(f"[T+{t:7.1f}s] {category:20s} | {description}", flush=True)
+        return e
+
+    def save(self, path: str):
+        import json as _json
+
+        total = round(self._offset(), 2)
+        with open(path, "w") as f:
+            _json.dump({"total_duration_s": total, "events": self.events}, f, indent=2)
+        self.event("meta", f"Timeline written: {path} ({len(self.events)} events, {total}s)")
 
 
 async def setup_browser(args, log, token, base_url):
@@ -128,7 +238,7 @@ async def setup_browser(args, log, token, base_url):
     return browser, page
 
 
-def register_insert_text(tools):
+def register_insert_text(tools, timeline: Timeline | None = None):
     """Register the CDP insert_text action for reliable terminal typing."""
     from browser_use.agent.views import ActionResult
     from pydantic import BaseModel
@@ -142,6 +252,13 @@ def register_insert_text(tools):
     )
     async def insert_text(params: InsertTextAction, browser_session):
         try:
+            preview = params.text[:80].replace("\n", "\\n")
+            if timeline:
+                timeline.event(
+                    "ui_input",
+                    f"Inserting text ({len(params.text)} chars): {preview}",
+                    text_len=len(params.text),
+                )
             cdp_session = await browser_session.get_or_create_cdp_session(
                 target_id=None, focus=True
             )
@@ -157,7 +274,7 @@ def register_insert_text(tools):
             )
 
 
-def register_dispatch_key(tools):
+def register_dispatch_key(tools, timeline: Timeline | None = None):
     """Register a CDP-level key dispatch action for pressing keys inside iframes."""
     from browser_use.agent.views import ActionResult
     from pydantic import BaseModel
@@ -176,10 +293,20 @@ def register_dispatch_key(tools):
     )
     async def dispatch_key(params: DispatchKeyAction, browser_session):
         try:
+            key = params.key
+            note = KEY_TO_NOTE.get(key, key)
+            if timeline:
+                timeline.event(
+                    "ui_keypress",
+                    f"♪ {note} (key='{key}', hold={params.hold_ms}ms, pause={params.pause_after_ms}ms)",
+                    key=key,
+                    note=note,
+                    hold_ms=params.hold_ms,
+                    pause_ms=params.pause_after_ms,
+                )
             cdp_session = await browser_session.get_or_create_cdp_session(
                 target_id=None, focus=True
             )
-            key = params.key
             key_code = ord(key.upper())
             code = f"Key{key.upper()}" if key.isalpha() else key
 
@@ -207,6 +334,14 @@ def register_dispatch_key(tools):
                 },
                 session_id=cdp_session.session_id,
             )
+            if timeline:
+                timeline.event(
+                    "ui_keypress",
+                    f"♪ {note} released (after {params.hold_ms}ms hold)",
+                    key=key,
+                    note=note,
+                    phase="release",
+                )
             # Built-in pause after the note
             await asyncio.sleep(params.pause_after_ms / 1000.0)
             memory = f"Played key '{key}' (held {params.hold_ms}ms, paused {params.pause_after_ms}ms)"
@@ -217,7 +352,141 @@ def register_dispatch_key(tools):
             )
 
 
-async def run_agent_task(browser, task, args, log, max_steps=None):
+def register_play_melody(tools, timeline: Timeline | None = None):
+    """Register a single action that plays the full melody in real-time via CDP.
+
+    This avoids LLM round-trips between notes — the entire sequence is fired
+    from one async function with precise sleep-based timing.
+    """
+    from browser_use.agent.views import ActionResult
+    from pydantic import BaseModel
+
+    RETRIGGER_GAP_MS = 20  # silence between repeated same-pitch notes
+    LEGATO_GAP_MS = 5      # near-zero gap for different-pitch transitions
+
+    class PlayMelodyAction(BaseModel):
+        bpm: int = 140
+
+    @tools.registry.action(
+        "Play the pre-programmed 'Domo Arigato Mr. Roboto' melody on the synth in real-time. "
+        "bpm: tempo in beats per minute (default 140). "
+        "Call this ONCE after clicking inside the synth iframe to focus it. "
+        "The melody plays for ~6 seconds with precise timing — do NOT interrupt.",
+        param_model=PlayMelodyAction,
+    )
+    async def play_melody(params: PlayMelodyAction, browser_session):
+        try:
+            cdp_session = await browser_session.get_or_create_cdp_session(
+                target_id=None, focus=True
+            )
+            session_id = cdp_session.session_id
+            send = cdp_session.cdp_client.send
+
+            e8 = round(60_000 / params.bpm / 2)  # eighth-note duration in ms
+
+            if timeline:
+                timeline.event(
+                    "ui_keypress",
+                    f"♪ Melody START — Domo Arigato, Mr. Roboto "
+                    f"({params.bpm} BPM, 8th={e8}ms, {len(MELODY_NOTES)} events)",
+                )
+
+            measure = 1
+            eighth_count = 0
+
+            for key, eighths, gap_type in MELODY_NOTES:
+                dur = eighths * e8
+
+                # Compute hold / gap from gap_type
+                if gap_type == "r":
+                    hold = dur - RETRIGGER_GAP_MS
+                    gap = RETRIGGER_GAP_MS
+                elif gap_type == "l":
+                    hold = dur - LEGATO_GAP_MS
+                    gap = LEGATO_GAP_MS
+                else:
+                    hold = dur
+                    gap = 0
+
+                # Track measure boundaries for timeline
+                eighth_count += eighths
+                if eighth_count > 8:
+                    measure += 1
+                    eighth_count = eighths
+
+                if key is None:
+                    # Rest
+                    if timeline:
+                        timeline.event(
+                            "ui_keypress",
+                            f"♪ REST ({dur}ms) [m{measure}]",
+                            measure=measure,
+                        )
+                    await asyncio.sleep(dur / 1000.0)
+                    continue
+
+                note = KEY_TO_NOTE.get(key, key)
+                key_code = ord(key.upper())
+                code = f"Key{key.upper()}" if key.isalpha() else key
+
+                if timeline:
+                    beat_label = {1: "8th", 2: "qtr", 4: "half", 6: "dot-half"}.get(eighths, f"{eighths}/8")
+                    timeline.event(
+                        "ui_keypress",
+                        f"♪ {note} ({beat_label}, {hold}ms hold) [m{measure}]",
+                        key=key,
+                        note=note,
+                        hold_ms=hold,
+                        gap_ms=gap,
+                        measure=measure,
+                    )
+
+                # keyDown
+                await send.Input.dispatchKeyEvent(
+                    params={
+                        "type": "keyDown",
+                        "key": key,
+                        "code": code,
+                        "windowsVirtualKeyCode": key_code,
+                        "nativeVirtualKeyCode": key_code,
+                        "text": key,
+                    },
+                    session_id=session_id,
+                )
+                await asyncio.sleep(hold / 1000.0)
+
+                # keyUp
+                await send.Input.dispatchKeyEvent(
+                    params={
+                        "type": "keyUp",
+                        "key": key,
+                        "code": code,
+                        "windowsVirtualKeyCode": key_code,
+                        "nativeVirtualKeyCode": key_code,
+                    },
+                    session_id=session_id,
+                )
+
+                if gap > 0:
+                    await asyncio.sleep(gap / 1000.0)
+
+            if timeline:
+                timeline.event("ui_keypress", "♪ Melody COMPLETE")
+
+            return ActionResult(
+                extracted_content="Melody played: Domo Arigato Mr. Roboto (4 measures, real-time)",
+                long_term_memory="Melody played successfully",
+            )
+        except Exception as e:
+            return ActionResult(
+                error=f"Failed to play melody: {type(e).__name__}: {e}"
+            )
+
+
+async def run_agent_task(
+    browser, task, args, log, max_steps=None,
+    timeline: Timeline | None = None, step_label: str = "",
+):
     """Run an LLM-driven browser-use agent with the given task."""
     from browser_use import Agent, ChatBrowserUse
     from browser_use.tools.service import Tools
@@ -228,8 +497,99 @@ async def run_agent_task(browser, task, args, log, max_steps=None):
     tools = Tools(
         exclude_actions=["write_file", "replace_file", "read_file", "extract"]
     )
-    register_insert_text(tools)
-    register_dispatch_key(tools)
+    register_insert_text(tools, timeline=timeline)
+    register_dispatch_key(tools, timeline=timeline)
+    register_play_melody(tools, timeline=timeline)
+
+    # ---- Timeline hooks: take cues from the UI, not the LLM ----
+
+    _step_t: dict[str, float] = {}  # track per-agent-step timing
+
+    async def on_step_start(agent):
+        """Fires at the top of each agent step — screenshot about to be taken,
+        then sent to the LLM.  Nothing will change on screen until the LLM
+        returns and actions execute, so this marks the START of dead air."""
+        n = getattr(agent.state, "n_steps", "?")
+        _step_t["think_start"] = time.monotonic()
+        if timeline:
+            timeline.event(
+                "llm_thinking",
+                f"[{step_label}] Agent step {n}: screen frozen while LLM thinks",
+                agent_step=n,
+            )
+
+    async def on_step_end(agent):
+        """Fires after actions execute — the screen just changed.  Log what
+        the actions actually produced (the UI-visible result)."""
+        n = getattr(agent.state, "n_steps", "?")
+        results = getattr(agent.state, "last_result", None) or []
+        descs = []
+        for r in results:
+            if r and r.extracted_content:
+                descs.append(str(r.extracted_content)[:120])
+            elif r and r.error:
+                descs.append(f"ERROR: {r.error[:80]}")
+        summary = "; ".join(descs) if descs else "no visible change"
+        if timeline:
+            timeline.event(
+                "action_done",
+                f"[{step_label}] Step {n} visible result: {summary}",
+                agent_step=n,
+            )
+
+    def on_new_step(browser_state, agent_output, step_num):
+        """Fires after LLM returns but BEFORE actions execute.  This is the
+        boundary between dead air (LLM thinking) and live action (UI changing).
+        Log the LLM think duration and describe what's about to happen."""
+        if not timeline:
+            return
+
+        # How long was the screen frozen while the LLM thought?
+        think_start = _step_t.get("think_start")
+        think_s = round(time.monotonic() - think_start, 1) if think_start else None
+
+        # Parse what actions are about to fire
+        actions_desc = []
+        try:
+            raw = agent_output.action
+            action_list = raw if isinstance(raw, list) else [raw]
+            for a in action_list:
+                if a is None:
+                    continue
+                d = a.model_dump(exclude_none=True, exclude_unset=True) if hasattr(a, "model_dump") else {}
+                for k, v in d.items():
+                    if isinstance(v, dict):
+                        # Detect wait actions — useful for speed-ramping
+                        if k == "wait":
+                            secs = v.get("seconds", 0)
+                            timeline.event(
+                                "ui_wait",
+                                f"[{step_label}] Explicit wait {secs}s — nothing changes on screen (speed-up candidate)",
+                                wait_seconds=secs,
+                            )
+                        # Detect click actions
+                        elif k in ("click_element", "click"):
+                            idx = v.get("index", "?")
+                            actions_desc.append(f"click(element #{idx})")
+                        # Detect send_keys
+                        elif k == "send_keys":
+                            keys = v.get("keys", "?")
+                            timeline.event("ui_sendkeys", f"[{step_label}] send_keys: {keys}", keys=keys)
+                            actions_desc.append(f"send_keys({keys})")
+                        else:
+                            actions_desc.append(f"{k}({', '.join(f'{kk}={vv}' for kk, vv in v.items())})")
+                    elif v is not None:
+                        actions_desc.append(f"{k}={v}")
+        except Exception:
+            actions_desc = ["(could not parse actions)"]
+
+        actions_str = "; ".join(actions_desc) or "(internal/done)"
+        timeline.event(
+            "llm_decided",
+            f"[{step_label}] LLM responded after {think_s}s → {actions_str}",
+            agent_step=step_num,
+            llm_think_s=think_s,
+        )
 
     agent = Agent(
         task=task.strip(),
@@ -239,12 +599,21 @@ async def run_agent_task(browser, task, args, log, max_steps=None):
         use_vision=True,
         max_actions_per_step=3,
         directly_open_url=False,
+        register_new_step_callback=on_new_step,
     )
 
     steps = max_steps or args.max_steps
     log.info("Agent run start", event="agent_run_start", maxSteps=steps)
-    history = await agent.run(max_steps=steps)
+    if timeline:
+        timeline.event("meta", f"[{step_label}] Agent starting (max {steps} steps)")
+    history = await agent.run(
+        max_steps=steps,
+        on_step_start=on_step_start,
+        on_step_end=on_step_end,
+    )
     log.info("Agent run done", event="agent_run_done")
+    if timeline:
+        timeline.event("meta", f"[{step_label}] Agent finished")
     return history
 
 
@@ -337,36 +706,13 @@ Non-negotiable constraints:
 
 === PART B: Play Mr. Roboto ===
 
-The synth keyboard has these computer keyboard shortcuts:
-  a=C3, w=C#3, s=D3, e=D#3, d=E3, f=F3, t=F#3, g=G3, y=G#3, h=A3, u=A#3, j=B3,
-  k=C4, o=C#4, l=D4, p=D#4
-
-The melody "Domo Arigato, Mr. Roboto" transposed to octave 3:
-  Phrase 1: E3 E3 E3 D3 E3 -> keys: d d d s d
-  Phrase 2: E3 E3 E3 D3 E3 F#3 E3 -> keys: d d d s d t d
-
 9) Click INSIDE the browser pane's iframe area (where you see the synth keyboard) to focus it.
-10) Wait 1 second.
-11) Play Phrase 1 using dispatch_key (each call includes its own pause - do NOT add separate wait actions):
-   - dispatch_key(key="d", hold_ms=200, pause_after_ms=300)
-   - dispatch_key(key="d", hold_ms=200, pause_after_ms=300)
-   - dispatch_key(key="d", hold_ms=200, pause_after_ms=300)
-   - dispatch_key(key="s", hold_ms=200, pause_after_ms=300)
-   - dispatch_key(key="d", hold_ms=400, pause_after_ms=800)
+10) Wait 2 seconds for the iframe to be fully focused.
+11) Call play_melody() — this plays the entire "Domo Arigato, Mr. Roboto" melody
+    in real-time with precise timing (~6 seconds). Do NOT interrupt it.
+    Just call: play_melody(bpm=140)
 
-12) Play Phrase 2 using dispatch_key:
-   - dispatch_key(key="d", hold_ms=200, pause_after_ms=300)
-   - dispatch_key(key="d", hold_ms=200, pause_after_ms=300)
-   - dispatch_key(key="d", hold_ms=200, pause_after_ms=300)
-   - dispatch_key(key="s", hold_ms=200, pause_after_ms=300)
-   - dispatch_key(key="d", hold_ms=200, pause_after_ms=200)
-   - dispatch_key(key="t", hold_ms=200, pause_after_ms=200)
-   - dispatch_key(key="d", hold_ms=500, pause_after_ms=1000)
-
-IMPORTANT: Call dispatch_key ONE AT A TIME per step. Do NOT combine dispatch_key with wait.
-Each dispatch_key already includes its own pause_after_ms.
-
-13) Output exactly:
+12) Output exactly:
 DEMO_STEP: DONE - Synth loaded and Mr. Roboto played
 """
 
@@ -402,7 +748,7 @@ DEMO_STEP: DONE - Worktree created
 """
 
 
-async def run_step(step_num, browser, args, log):
+async def run_step(step_num, browser, args, log, timeline: Timeline | None = None):
     """Run a single demo step."""
     tasks = {
         1: ("Create Claude tab + prompt", STEP1_TASK, 60),
@@ -417,14 +763,20 @@ async def run_step(step_num, browser, args, log):
 
     name, task, max_steps = tasks[step_num]
     log.info(f"Starting step {step_num}: {name}", event="step_start", step=step_num)
+    if timeline:
+        timeline.event("step_start", f"{'='*20} STEP {step_num}: {name} {'='*20}", step=step_num)
 
-    _start, elapsed = monotonic_timer()
-    history = await run_agent_task(browser, task, args, log, max_steps=max_steps)
+    _, elapsed = monotonic_timer()
+    history = await run_agent_task(
+        browser, task, args, log, max_steps=max_steps,
+        timeline=timeline, step_label=f"Step {step_num}",
+    )
+    dur = elapsed()
     log.info(
-        f"Step {step_num} finished in {elapsed():.1f}s",
+        f"Step {step_num} finished in {dur:.1f}s",
         event="step_done",
         step=step_num,
-        elapsedS=round(elapsed(), 2),
+        elapsedS=round(dur, 2),
     )
 
     # Check result
@@ -435,9 +787,18 @@ async def run_step(step_num, browser, args, log):
         f"Step {step_num} result: {final_text}", event="step_result", step=step_num
     )
 
-    if "DONE" in final_text:
-        return 0
-    return 1
+    passed = "DONE" in final_text
+    if timeline:
+        status = "PASSED" if passed else "FAILED"
+        timeline.event(
+            "step_end",
+            f"{'='*20} STEP {step_num} {status} ({dur:.1f}s) {'='*20}",
+            step=step_num,
+            duration_s=round(dur, 2),
+            passed=passed,
+        )
+
+    return 0 if passed else 1
 
 
 async def _run(args):
@@ -492,27 +853,36 @@ async def _run(args):
         height=args.height,
     )
 
+    # ---- Timeline for video post-production ----
+    timeline = Timeline()
+    timeline.event("meta", "Demo script starting", base_url=base_url)
+
     async def fresh_browser():
         """Create (or re-attach) a browser and navigate to Freshell."""
         return await setup_browser(args, log, token, base_url)
 
     browser, page = await fresh_browser()
+    timeline.event("meta", "Browser ready, Freshell loaded and authenticated")
 
     try:
         if args.step:
-            return await run_step(args.step, browser, args, log)
+            result = await run_step(args.step, browser, args, log, timeline=timeline)
+            timeline.save(args.timeline_output)
+            return result
         else:
             start = args.from_step or 1
             end = args.to_step or 4
 
             for step_num in range(start, end + 1):
-                result = await run_step(step_num, browser, args, log)
+                result = await run_step(step_num, browser, args, log, timeline=timeline)
                 if result != 0:
                     log.error(
                         f"Step {step_num} failed",
                         event="step_failed",
                         step=step_num,
                     )
+                    timeline.event("meta", f"Step {step_num} FAILED — aborting", step=step_num)
+                    timeline.save(args.timeline_output)
                     return result
                 log.info(
                     f"Step {step_num} passed, continuing...",
@@ -522,14 +892,18 @@ async def _run(args):
 
                 # Between steps: re-attach browser (CDP keeps Chrome state alive)
                 if step_num < end:
-                    await asyncio.sleep(3)
-                    log.info(
-                        "Re-attaching browser for next step",
-                        event="browser_reattach",
+                    timeline.event(
+                        "transition",
+                        f"Gap between step {step_num} and {step_num + 1} — 3s pause, no UI changes (trim candidate)",
                     )
+                    await asyncio.sleep(3)
+                    timeline.event("transition", "Re-attaching browser session for next step")
                     browser, page = await fresh_browser()
+                    timeline.event("transition", "Browser re-attached, ready for next step")
 
+            timeline.event("meta", "All demo steps completed!")
             log.info("All demo steps completed!", event="demo_complete")
+            timeline.save(args.timeline_output)
             return 0
     finally:
         stop = getattr(browser, "stop", None)
@@ -564,6 +938,11 @@ def main(argv):
         "--max-steps", type=int, default=120, help="Default max agent steps per task"
     )
     p.add_argument("--debug", action="store_true", help="Debug logging")
+    p.add_argument(
+        "--timeline-output",
+        default="/tmp/demo_timeline.json",
+        help="Path for timeline JSON (default: /tmp/demo_timeline.json)",
+    )
     p.add_argument(
         "--no-require-api-key",
         dest="require_api_key",
