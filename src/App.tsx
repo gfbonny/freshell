@@ -386,7 +386,7 @@ export default function App() {
       sidebarCollapsed={sidebarCollapsed}
     >
       <div
-        className="h-full flex flex-col bg-background text-foreground"
+        className="h-full overflow-hidden flex flex-col bg-background text-foreground"
         data-context={ContextIds.Global}
       >
       {/* Top header bar spanning full width */}
