@@ -114,6 +114,44 @@ function applyLegacyResumeSessionIds(state: PanesState): PanesState {
   return changed ? { ...state, layouts: nextLayouts } : state
 }
 
+/**
+ * Remove pane layouts/activePane/paneTitles for tabs that no longer exist.
+ * Reads the tab list from localStorage (already loaded by tabsSlice at this point).
+ */
+function cleanOrphanedLayouts(state: PanesState): PanesState {
+  try {
+    const rawTabs = localStorage.getItem('freshell.tabs.v1')
+    if (!rawTabs) return state
+    const parsedTabs = JSON.parse(rawTabs)
+    const tabs = parsedTabs?.tabs?.tabs
+    if (!Array.isArray(tabs)) return state
+
+    const tabIds = new Set(tabs.map((t: any) => t?.id).filter(Boolean))
+    const layoutTabIds = Object.keys(state.layouts)
+    const orphaned = layoutTabIds.filter(id => !tabIds.has(id))
+
+    if (orphaned.length === 0) return state
+
+    if (import.meta.env.MODE === 'development') {
+      console.log('[PanesSlice] Cleaning orphaned pane layouts:', orphaned)
+    }
+
+    const nextLayouts = { ...state.layouts }
+    const nextActivePane = { ...state.activePane }
+    const nextPaneTitles = { ...state.paneTitles }
+
+    for (const tabId of orphaned) {
+      delete nextLayouts[tabId]
+      delete nextActivePane[tabId]
+      delete nextPaneTitles[tabId]
+    }
+
+    return { layouts: nextLayouts, activePane: nextActivePane, paneTitles: nextPaneTitles }
+  } catch {
+    return state
+  }
+}
+
 // Load persisted panes state directly at module initialization time
 // This ensures the initial state includes persisted data BEFORE the store is created.
 // Delegates to loadPersistedPanes() so that both Redux initial state and
@@ -132,12 +170,14 @@ function loadInitialPanesState(): PanesState {
     if (import.meta.env.MODE === 'development') {
       console.log('[PanesSlice] Loaded initial state from localStorage:', Object.keys(loaded.layouts || {}))
     }
-    const state: PanesState = {
+    let state: PanesState = {
       layouts: loaded.layouts || {},
       activePane: loaded.activePane || {},
       paneTitles: loaded.paneTitles || {},
     }
-    return applyLegacyResumeSessionIds(state)
+    state = applyLegacyResumeSessionIds(state)
+    state = cleanOrphanedLayouts(state)
+    return state
   } catch (err) {
     if (import.meta.env.MODE === 'development') {
       console.error('[PanesSlice] Failed to load from localStorage:', err)

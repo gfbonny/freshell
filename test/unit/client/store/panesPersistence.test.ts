@@ -630,6 +630,47 @@ describe('loadInitialPanesState consistency', () => {
   })
 })
 
+describe('orphaned layout cleanup', () => {
+  beforeEach(() => {
+    localStorageMock.clear()
+  })
+
+  it('removes pane layouts for tabs that no longer exist', async () => {
+    // Set up: panes for tab-1 and tab-orphan, but only tab-1 exists in tabs
+    localStorageMock.clear()
+    localStorage.setItem('freshell.tabs.v1', JSON.stringify({
+      tabs: {
+        tabs: [{ id: 'tab-1', title: 'Tab 1', createdAt: 1, status: 'running', mode: 'shell', createRequestId: 'tab-1' }],
+        activeTabId: 'tab-1',
+      },
+    }))
+    localStorage.setItem('freshell.panes.v1', JSON.stringify({
+      version: 4,
+      layouts: {
+        'tab-1': { type: 'leaf', id: 'pane-1', content: { kind: 'terminal', mode: 'shell', createRequestId: 'req-1', status: 'running' } },
+        'tab-orphan': { type: 'leaf', id: 'pane-orphan', content: { kind: 'terminal', mode: 'shell', createRequestId: 'req-orphan', status: 'running' } },
+      },
+      activePane: { 'tab-1': 'pane-1', 'tab-orphan': 'pane-orphan' },
+      paneTitles: { 'tab-1': { 'pane-1': 'Tab 1' }, 'tab-orphan': { 'pane-orphan': 'Orphan' } },
+    }))
+
+    vi.resetModules()
+    const panesReducer = (await import('../../../../src/store/panesSlice')).default
+    const tabsReducer = (await import('../../../../src/store/tabsSlice')).default
+
+    const store = configureStore({ reducer: { tabs: tabsReducer, panes: panesReducer } })
+
+    // tab-1's layout should exist
+    expect(store.getState().panes.layouts['tab-1']).toBeDefined()
+    // tab-orphan's layout should be cleaned up
+    expect(store.getState().panes.layouts['tab-orphan']).toBeUndefined()
+    // activePane should also be cleaned
+    expect(store.getState().panes.activePane['tab-orphan']).toBeUndefined()
+    // paneTitles should also be cleaned
+    expect(store.getState().panes.paneTitles['tab-orphan']).toBeUndefined()
+  })
+})
+
 describe('schema version consistency', () => {
   beforeEach(() => {
     localStorageMock.clear()
