@@ -213,4 +213,56 @@ describe('terminal paste single-ingress (e2e)', () => {
       data: 'paste payload',
     })
   })
+
+  it('does not send on Meta+Alt+V keydown; sends once on paste event', async () => {
+    const store = createStore()
+    const paneContent: TerminalPaneContent = {
+      kind: 'terminal',
+      createRequestId: 'req-1',
+      status: 'running',
+      mode: 'shell',
+      shell: 'system',
+      terminalId: 'term-1',
+      initialCwd: '/tmp',
+    }
+
+    render(
+      <Provider store={store}>
+        <TerminalView tabId="tab-1" paneId="pane-1" paneContent={paneContent} />
+      </Provider>
+    )
+
+    await waitFor(() => {
+      expect(keyHandler).not.toBeNull()
+    })
+    await waitFor(() => {
+      expect(onDataCb).not.toBeNull()
+    })
+
+    wsMocks.send.mockClear()
+
+    const blocked = keyHandler!({
+      key: 'v',
+      code: 'KeyV',
+      ctrlKey: false,
+      metaKey: true,
+      shiftKey: false,
+      altKey: true,
+      type: 'keydown',
+      repeat: false,
+    } as KeyboardEvent)
+
+    expect(blocked).toBe(false)
+    expect(wsMocks.send).not.toHaveBeenCalled()
+
+    expect(openedElement).not.toBeNull()
+    openedElement!.dispatchEvent(createPasteEvent('meta-alt paste payload'))
+
+    expect(wsMocks.send).toHaveBeenCalledTimes(1)
+    expect(wsMocks.send).toHaveBeenCalledWith({
+      type: 'terminal.input',
+      terminalId: 'term-1',
+      data: 'meta-alt paste payload',
+    })
+  })
 })

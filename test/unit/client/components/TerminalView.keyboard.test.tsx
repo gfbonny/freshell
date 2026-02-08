@@ -233,6 +233,28 @@ describe('TerminalView keyboard handling', () => {
       expect(wsMocks.send).toHaveBeenCalledTimes(wsSendCountBefore)
     })
 
+    it('Cmd+Alt+V returns false and does not send input directly', async () => {
+      const { store, tabId, paneId, paneContent } = createTestStore('term-1')
+
+      render(
+        <Provider store={store}>
+          <TerminalView tabId={tabId} paneId={paneId} paneContent={paneContent} />
+        </Provider>
+      )
+
+      await waitFor(() => {
+        expect(capturedKeyHandler).not.toBeNull()
+      })
+
+      const wsSendCountBefore = wsMocks.send.mock.calls.length
+      const event = createKeyboardEvent('v', { metaKey: true, altKey: true })
+      const result = capturedKeyHandler!(event)
+
+      expect(result).toBe(false)
+      expect(clipboardMocks.readText).not.toHaveBeenCalled()
+      expect(wsMocks.send).toHaveBeenCalledTimes(wsSendCountBefore)
+    })
+
     it('repeated Ctrl+V keydown stays blocked and does not send input directly', async () => {
       const { store, tabId, paneId, paneContent } = createTestStore('term-1')
 
@@ -270,6 +292,28 @@ describe('TerminalView keyboard handling', () => {
 
       const wsSendCountBefore = wsMocks.send.mock.calls.length
       const event = createKeyboardEvent('Insert', { shiftKey: true })
+      const result = capturedKeyHandler!(event)
+
+      expect(result).toBe(false)
+      expect(clipboardMocks.readText).not.toHaveBeenCalled()
+      expect(wsMocks.send).toHaveBeenCalledTimes(wsSendCountBefore)
+    })
+
+    it('Shift+Insert by key stays blocked even when code differs', async () => {
+      const { store, tabId, paneId, paneContent } = createTestStore('term-1')
+
+      render(
+        <Provider store={store}>
+          <TerminalView tabId={tabId} paneId={paneId} paneContent={paneContent} />
+        </Provider>
+      )
+
+      await waitFor(() => {
+        expect(capturedKeyHandler).not.toBeNull()
+      })
+
+      const wsSendCountBefore = wsMocks.send.mock.calls.length
+      const event = { ...createKeyboardEvent('Insert', { shiftKey: true }), code: 'Numpad0' } as KeyboardEvent
       const result = capturedKeyHandler!(event)
 
       expect(result).toBe(false)
