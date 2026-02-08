@@ -1,6 +1,7 @@
 import unittest
+from pathlib import Path
 
-from smoke_freshell import _parse_smoke_result
+from smoke_freshell import _build_smoke_task, _parse_smoke_result
 
 
 class SmokeFreshellParseTest(unittest.TestCase):
@@ -30,6 +31,18 @@ class SmokeFreshellParseTest(unittest.TestCase):
     self.assertEqual(err, "final_result_not_single_line")
 
 
+class SmokeFreshellTaskContractTest(unittest.TestCase):
+  def test_task_includes_paste_shortcut_single_ingress_probe(self) -> None:
+    task = _build_smoke_task(
+      base_url="http://localhost:5173",
+      known_text_file=Path("/tmp/README.md"),
+      pane_target=4,
+    )
+    self.assertIn("Paste shortcut regression check", task)
+    self.assertIn("dispatch_paste_shortcut", task)
+    self.assertIn("PASTE_ONCE_PROBE_9C6E", task)
+    self.assertIn("PASTE_PROBE_OK", task)
+
+
 if __name__ == "__main__":
   raise SystemExit(unittest.main())
-
