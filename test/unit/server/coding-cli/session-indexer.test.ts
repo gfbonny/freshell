@@ -6,6 +6,7 @@ import type { CodingCliProvider } from '../../../../server/coding-cli/provider'
 import { CodingCliSessionIndexer } from '../../../../server/coding-cli/session-indexer'
 import { configStore } from '../../../../server/config-store'
 import { makeSessionKey } from '../../../../server/coding-cli/types'
+import { clearRepoRootCache } from '../../../../server/coding-cli/utils'
 
 vi.mock('../../../../server/config-store', () => ({
   configStore: {
@@ -60,6 +61,7 @@ let tempDir: string
 
 beforeEach(async () => {
   tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'freshell-coding-cli-'))
+  clearRepoRootCache()
   vi.mocked(configStore.snapshot).mockResolvedValue({
     sessionOverrides: {},
     settings: {
@@ -333,5 +335,55 @@ describe('CodingCliSessionIndexer', () => {
 
     expect(listSessionFiles).toHaveBeenCalledTimes(1)
     expect(vi.mocked(configStore.snapshot)).toHaveBeenCalledTimes(2)
+  })
+
+  it('groups worktree sessions under the parent repo', async () => {
+    // Set up a real git repo structure in tempDir
+    const repoDir = path.join(tempDir, 'repo')
+    const gitDir = path.join(repoDir, '.git')
+    await fsp.mkdir(gitDir, { recursive: true })
+
+    // Set up two worktrees pointing back to the same repo
+    for (const wtName of ['worktree-a', 'worktree-b']) {
+      const worktreeGitDir = path.join(gitDir, 'worktrees', wtName)
+      await fsp.mkdir(worktreeGitDir, { recursive: true })
+      await fsp.writeFile(path.join(worktreeGitDir, 'commondir'), '../..\n')
+
+      const worktreeDir = path.join(tempDir, '.worktrees', wtName)
+      await fsp.mkdir(worktreeDir, { recursive: true })
+      await fsp.writeFile(
+        path.join(worktreeDir, '.git'),
+        `gitdir: ${worktreeGitDir}\n`,
+      )
+    }
+
+    const worktreeCwdA = path.join(tempDir, '.worktrees', 'worktree-a')
+    const worktreeCwdB = path.join(tempDir, '.worktrees', 'worktree-b')
+
+    const fileA = path.join(tempDir, 'session-a.jsonl')
+    const fileB = path.join(tempDir, 'session-b.jsonl')
+    await fsp.writeFile(fileA, JSON.stringify({ cwd: worktreeCwdA, title: 'Session A' }) + '\n')
+    await fsp.writeFile(fileB, JSON.stringify({ cwd: worktreeCwdB, title: 'Session B' }) + '\n')
+
+    // Use a provider that calls resolveGitRepoRoot via the real import
+    const { resolveGitRepoRoot } = await import('../../../../server/coding-cli/utils')
+    const provider: CodingCliProvider = {
+      ...makeProvider([fileA, fileB]),
+      resolveProjectPath: async (_filePath, meta) => {
+        if (!meta.cwd) return 'unknown'
+        return resolveGitRepoRoot(meta.cwd)
+      },
+    }
+
+    const indexer = new CodingCliSessionIndexer([provider])
+    await indexer.refresh()
+
+    const projects = indexer.getProjects()
+    // Both worktree sessions should be grouped under the same parent repo
+    expect(projects).toHaveLength(1)
+    expect(projects[0].projectPath).toBe(repoDir)
+    expect(projects[0].sessions).toHaveLength(2)
+    const titles = projects[0].sessions.map((s) => s.title).sort()
+    expect(titles).toEqual(['Session A', 'Session B'])
   })
 })

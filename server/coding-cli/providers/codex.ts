@@ -4,7 +4,7 @@ import fsp from 'fs/promises'
 import { extractTitleFromMessage } from '../../title-utils.js'
 import type { CodingCliProvider } from '../provider.js'
 import type { NormalizedEvent, ParsedSessionMeta } from '../types.js'
-import { looksLikePath, isSystemContext, extractFromIdeContext } from '../utils.js'
+import { looksLikePath, isSystemContext, extractFromIdeContext, resolveGitRepoRoot } from '../utils.js'
 
 export function defaultCodexHome(): string {
   return process.env.CODEX_HOME || path.join(os.homedir(), '.codex')
@@ -130,7 +130,8 @@ export const codexProvider: CodingCliProvider = {
   },
 
   async resolveProjectPath(_filePath: string, meta: ParsedSessionMeta): Promise<string> {
-    return meta.cwd || 'unknown'
+    if (!meta.cwd) return 'unknown'
+    return resolveGitRepoRoot(meta.cwd)
   },
 
   extractSessionId(filePath: string, meta?: ParsedSessionMeta): string {
