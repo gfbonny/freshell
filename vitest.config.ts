@@ -11,7 +11,7 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: ['./test/setup/dom.ts'],
-    exclude: ['**/node_modules/**', '**/.worktrees/**'],
+    exclude: ['**/node_modules/**', '**/.worktrees/**', 'docs/plans/**'],
     testTimeout: 30000,
     hookTimeout: 30000,
     alias: {

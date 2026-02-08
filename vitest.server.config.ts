@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['test/server/**/*.test.ts', 'test/unit/server/**/*.test.ts', 'test/integration/server/**/*.test.ts'],
+    exclude: ['docs/plans/**'],
     testTimeout: 30000,
     hookTimeout: 30000,
     // Maximum parallelization settings
