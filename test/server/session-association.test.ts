@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { TerminalRegistry } from '../../server/terminal-registry'
+import { TerminalRegistry, modeSupportsResume } from '../../server/terminal-registry'
 import { ClaudeSessionIndexer, ClaudeSession } from '../../server/claude-indexer'
+import { CodingCliSessionIndexer } from '../../server/coding-cli/session-indexer'
+import type { CodingCliSession } from '../../server/coding-cli/types'
 
 vi.mock('node-pty', () => ({
   spawn: vi.fn(() => ({
@@ -389,6 +391,172 @@ describe('Session-Terminal Association Platform-specific', () => {
 
     expect(broadcasts).toHaveLength(1)
     expect(broadcasts[0].terminalId).toBe(term.terminalId)
+
+    registry.shutdown()
+  })
+})
+
+describe('Codex Session-Terminal Association via CodingCliSessionIndexer', () => {
+  /**
+   * Helper that wires up the codingCliIndexer.onNewSession handler
+   * matching the pattern from server/index.ts for non-Claude providers.
+   */
+  function wireUpCodexAssociation(
+    registry: TerminalRegistry,
+    indexer: CodingCliSessionIndexer,
+    broadcasts: any[],
+  ) {
+    indexer.onNewSession((session) => {
+      // Skip Claude (handled by existing claudeIndexer path)
+      if (session.provider === 'claude') return
+      // Skip providers that don't support resume
+      if (!modeSupportsResume(session.provider)) return
+      if (!session.cwd) return
+
+      const unassociated = registry.findUnassociatedTerminals(session.provider, session.cwd)
+      if (unassociated.length === 0) return
+
+      const term = unassociated[0] // Only oldest
+      registry.setResumeSessionId(term.terminalId, session.sessionId)
+      broadcasts.push({
+        type: 'terminal.session.associated',
+        terminalId: term.terminalId,
+        sessionId: session.sessionId,
+      })
+    })
+  }
+
+  it('codex terminal gets associated when codex session appears', () => {
+    const registry = new TerminalRegistry()
+    const indexer = new CodingCliSessionIndexer([])
+    const broadcasts: any[] = []
+
+    wireUpCodexAssociation(registry, indexer, broadcasts)
+    indexer['initialized'] = true
+
+    // Create an unassociated codex terminal
+    const term = registry.create({ mode: 'codex', cwd: '/home/user/project' })
+    expect(term.resumeSessionId).toBeUndefined()
+
+    // Simulate new codex session detection
+    const newSession: CodingCliSession = {
+      provider: 'codex',
+      sessionId: 'codex-session-abc-123',
+      projectPath: '/home/user/project',
+      updatedAt: Date.now(),
+      cwd: '/home/user/project',
+    }
+    indexer['detectNewSessions']([newSession])
+
+    // Verify association
+    expect(registry.get(term.terminalId)?.resumeSessionId).toBe('codex-session-abc-123')
+    expect(broadcasts).toHaveLength(1)
+    expect(broadcasts[0]).toEqual({
+      type: 'terminal.session.associated',
+      terminalId: term.terminalId,
+      sessionId: 'codex-session-abc-123',
+    })
+
+    registry.shutdown()
+  })
+
+  it('does not cross-associate: codex session does not match claude terminal', () => {
+    const registry = new TerminalRegistry()
+    const indexer = new CodingCliSessionIndexer([])
+    const broadcasts: any[] = []
+
+    wireUpCodexAssociation(registry, indexer, broadcasts)
+    indexer['initialized'] = true
+
+    // Create a claude terminal (not codex)
+    registry.create({ mode: 'claude', cwd: '/home/user/project' })
+
+    // Simulate codex session
+    indexer['detectNewSessions']([{
+      provider: 'codex',
+      sessionId: 'codex-session-abc-123',
+      projectPath: '/home/user/project',
+      updatedAt: Date.now(),
+      cwd: '/home/user/project',
+    }])
+
+    // Should NOT associate - mode mismatch
+    expect(broadcasts).toHaveLength(0)
+
+    registry.shutdown()
+  })
+
+  it('only associates the oldest terminal when multiple match', () => {
+    const registry = new TerminalRegistry()
+    const indexer = new CodingCliSessionIndexer([])
+    const broadcasts: any[] = []
+
+    wireUpCodexAssociation(registry, indexer, broadcasts)
+    indexer['initialized'] = true
+
+    const term1 = registry.create({ mode: 'codex', cwd: '/home/user/project' })
+    const term2 = registry.create({ mode: 'codex', cwd: '/home/user/project' })
+
+    indexer['detectNewSessions']([{
+      provider: 'codex',
+      sessionId: 'codex-session-abc-123',
+      projectPath: '/home/user/project',
+      updatedAt: Date.now(),
+      cwd: '/home/user/project',
+    }])
+
+    expect(broadcasts).toHaveLength(1)
+    expect(broadcasts[0].terminalId).toBe(term1.terminalId)
+    expect(registry.get(term1.terminalId)?.resumeSessionId).toBe('codex-session-abc-123')
+    expect(registry.get(term2.terminalId)?.resumeSessionId).toBeUndefined()
+
+    registry.shutdown()
+  })
+
+  it('skips providers without resume support (e.g., opencode)', () => {
+    const registry = new TerminalRegistry()
+    const indexer = new CodingCliSessionIndexer([])
+    const broadcasts: any[] = []
+
+    wireUpCodexAssociation(registry, indexer, broadcasts)
+    indexer['initialized'] = true
+
+    registry.create({ mode: 'opencode', cwd: '/home/user/project' })
+
+    indexer['detectNewSessions']([{
+      provider: 'opencode',
+      sessionId: 'opencode-session-123',
+      projectPath: '/home/user/project',
+      updatedAt: Date.now(),
+      cwd: '/home/user/project',
+    }])
+
+    // Should NOT associate - opencode doesn't support resume
+    expect(broadcasts).toHaveLength(0)
+
+    registry.shutdown()
+  })
+
+  it('skips claude sessions (handled by existing claudeIndexer path)', () => {
+    const registry = new TerminalRegistry()
+    const indexer = new CodingCliSessionIndexer([])
+    const broadcasts: any[] = []
+
+    wireUpCodexAssociation(registry, indexer, broadcasts)
+    indexer['initialized'] = true
+
+    registry.create({ mode: 'claude', cwd: '/home/user/project' })
+
+    indexer['detectNewSessions']([{
+      provider: 'claude',
+      sessionId: SESSION_ID_ONE,
+      projectPath: '/home/user/project',
+      updatedAt: Date.now(),
+      cwd: '/home/user/project',
+    }])
+
+    // Should NOT associate via this handler - claude is skipped
+    expect(broadcasts).toHaveLength(0)
 
     registry.shutdown()
   })

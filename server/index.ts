@@ -12,7 +12,7 @@ import { logger, setLogLevel } from './logger.js'
 import { requestLogger } from './request-logger.js'
 import { validateStartupSecurity, httpAuthMiddleware } from './auth.js'
 import { configStore } from './config-store.js'
-import { TerminalRegistry } from './terminal-registry.js'
+import { TerminalRegistry, modeSupportsResume } from './terminal-registry.js'
 import { WsHandler } from './ws-handler.js'
 import { SessionsSyncService } from './sessions-sync/service.js'
 import { claudeIndexer } from './claude-indexer.js'
@@ -595,6 +595,37 @@ async function main() {
     const associated = registry.setResumeSessionId(term.terminalId, session.sessionId)
     if (!associated) {
       log.warn({ terminalId: term.terminalId, sessionId: session.sessionId }, 'Skipping invalid Claude session association')
+      return
+    }
+    try {
+      wsHandler.broadcast({
+        type: 'terminal.session.associated' as const,
+        terminalId: term.terminalId,
+        sessionId: session.sessionId,
+      })
+    } catch (err) {
+      log.warn({ err, terminalId: term.terminalId }, 'Failed to broadcast session association')
+    }
+  })
+
+  // Session association for non-Claude coding CLI providers (e.g. Codex)
+  // Mirrors the claudeIndexer.onNewSession pattern above, but uses the generic
+  // CodingCliSessionIndexer which covers all providers.
+  codingCliIndexer.onNewSession((session) => {
+    // Skip Claude - handled by the battle-tested claudeIndexer path above
+    if (session.provider === 'claude') return
+    // Skip providers that don't support session resume
+    if (!modeSupportsResume(session.provider)) return
+    if (!session.cwd) return
+
+    const unassociated = registry.findUnassociatedTerminals(session.provider, session.cwd)
+    if (unassociated.length === 0) return
+
+    const term = unassociated[0]
+    log.info({ terminalId: term.terminalId, sessionId: session.sessionId, provider: session.provider }, 'Associating terminal with new coding CLI session')
+    const associated = registry.setResumeSessionId(term.terminalId, session.sessionId)
+    if (!associated) {
+      log.warn({ terminalId: term.terminalId, sessionId: session.sessionId, provider: session.provider }, 'Skipping invalid coding CLI session association')
       return
     }
     try {
