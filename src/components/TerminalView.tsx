@@ -116,6 +116,12 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     }))
   }, [dispatch, tabId, paneId]) // NO terminalContent dependency - uses ref
 
+  const sendInput = useCallback((data: string) => {
+    const tid = terminalIdRef.current
+    if (!tid) return
+    ws.send({ type: 'terminal.input', terminalId: tid, data })
+  }, [ws])
+
   // Init xterm once
   useEffect(() => {
     if (!isTerminal) return
@@ -172,10 +178,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     })
 
     term.onData((data) => {
-      const tid = terminalIdRef.current
-      if (!tid) return
-      ws.send({ type: 'terminal.input', terminalId: tid, data })
-
+      sendInput(data)
       const currentTab = tabRef.current
       const currentContent = contentRef.current
       if (currentTab) {
