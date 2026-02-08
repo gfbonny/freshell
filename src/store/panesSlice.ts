@@ -256,6 +256,42 @@ function buildGridLayout(leaves: Extract<PaneNode, { type: 'leaf' }>[]): PaneNod
   }
 }
 
+/**
+ * Merge incoming (remote) pane tree with local state, preserving local
+ * terminal assignments that are more advanced. A local terminal pane
+ * with a terminalId beats an incoming pane without one (same createRequestId).
+ */
+function mergeTerminalState(incoming: PaneNode, local: PaneNode): PaneNode {
+  // If same leaf with same createRequestId, prefer local if it has terminalId
+  if (incoming.type === 'leaf' && local.type === 'leaf') {
+    if (
+      incoming.content.kind === 'terminal' &&
+      local.content.kind === 'terminal' &&
+      incoming.content.createRequestId === local.content.createRequestId
+    ) {
+      // Local has terminalId, incoming doesn't → keep local terminal state
+      if (local.content.terminalId && !incoming.content.terminalId) {
+        return { ...incoming, content: local.content }
+      }
+    }
+    return incoming
+  }
+
+  // If both splits with same structure, recurse
+  if (incoming.type === 'split' && local.type === 'split') {
+    return {
+      ...incoming,
+      children: [
+        mergeTerminalState(incoming.children[0], local.children[0]),
+        mergeTerminalState(incoming.children[1], local.children[1]),
+      ],
+    }
+  }
+
+  // Structure changed (leaf↔split) — take incoming
+  return incoming
+}
+
 export const panesSlice = createSlice({
   name: 'panes',
   initialState,
@@ -539,9 +575,29 @@ export const panesSlice = createSlice({
     },
 
     hydratePanes: (state, action: PayloadAction<PanesState>) => {
-      state.layouts = action.payload.layouts || {}
-      state.activePane = action.payload.activePane || {}
-      state.paneTitles = action.payload.paneTitles || {}
+      const incoming = action.payload
+
+      // Merge layouts: preserve local terminal assignments that are more
+      // advanced than the incoming (remote) state. This prevents cross-tab
+      // sync from clobbering in-progress terminal creation/attachment.
+      const mergedLayouts: Record<string, PaneNode> = {}
+      for (const [tabId, incomingNode] of Object.entries(incoming.layouts || {})) {
+        const localNode = state.layouts[tabId]
+        mergedLayouts[tabId] = localNode
+          ? mergeTerminalState(incomingNode as PaneNode, localNode)
+          : incomingNode as PaneNode
+      }
+      // Include any local-only tabs not in incoming (shouldn't normally happen,
+      // but defensive)
+      for (const tabId of Object.keys(state.layouts)) {
+        if (!(tabId in mergedLayouts)) {
+          mergedLayouts[tabId] = state.layouts[tabId]
+        }
+      }
+
+      state.layouts = mergedLayouts
+      state.activePane = incoming.activePane || {}
+      state.paneTitles = incoming.paneTitles || {}
     },
 
     updatePaneTitle: (

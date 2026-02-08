@@ -138,6 +138,60 @@ describe('crossTabSync', () => {
     }
   })
 
+  it('preserves local terminalId when remote layout lacks it', () => {
+    const store = configureStore({
+      reducer: { tabs: tabsReducer, panes: panesReducer },
+    })
+
+    // Local state: terminal has been created (has terminalId)
+    store.dispatch(hydratePanes({
+      layouts: {
+        'tab-1': {
+          type: 'leaf',
+          id: 'pane-1',
+          content: {
+            kind: 'terminal',
+            mode: 'shell',
+            createRequestId: 'req-1',
+            status: 'running',
+            terminalId: 'local-terminal-123',
+          },
+        } as any,
+      },
+      activePane: { 'tab-1': 'pane-1' },
+      paneTitles: {},
+    }))
+
+    // Remote state arrives WITHOUT terminalId (stale data from before creation)
+    const remoteRaw = JSON.stringify({
+      version: 4,
+      layouts: {
+        'tab-1': {
+          type: 'leaf',
+          id: 'pane-1',
+          content: {
+            kind: 'terminal',
+            mode: 'shell',
+            createRequestId: 'req-1',
+            status: 'creating',
+            // NO terminalId
+          },
+        },
+      },
+      activePane: { 'tab-1': 'pane-1' },
+      paneTitles: {},
+      paneTitleSetByUser: {},
+    })
+
+    cleanups.push(installCrossTabSync(store as any))
+    window.dispatchEvent(new StorageEvent('storage', { key: PANES_STORAGE_KEY, newValue: remoteRaw }))
+
+    // Local terminalId should be preserved
+    const content = (store.getState().panes.layouts['tab-1'] as any).content
+    expect(content.terminalId).toBe('local-terminal-123')
+    expect(content.status).toBe('running')
+  })
+
   it('does not permanently dedupe: identical remote payload should hydrate again after a local persisted change', () => {
     const dispatchSpy = vi.fn()
     const storeLike = {
