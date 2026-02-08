@@ -203,8 +203,6 @@ export default function BrowserPane({ paneId, tabId, url, devToolsOpen }: Browse
     }
   }, [dispatch, tabId, paneId, devToolsOpen, history, historyIndex])
 
-  const currentUrl = history[historyIndex] || ''
-
   const refresh = useCallback(() => {
     const iframe = iframeRef.current
     if (!iframe) return

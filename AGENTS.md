@@ -24,6 +24,8 @@ Freshell is a self-hosted, browser-accessible terminal multiplexer and session o
 
 - Never run `git merge` directly on main - merge conflicts write `<<<<<<< HEAD` markers into source files, which crashes the server instantly
 - Always merge main INTO the feature branch in the worktree first, resolve any conflicts there
+- Before fast-forwarding main, run `npm test` and confirm all tests pass (not just related tests)
+- If you find failing tests, you must stop everything to understand them and make improvements, even if you do not think you were responsible for them.
 - Then fast-forward main: `git merge --ff-only feature/branch` - this is atomic (pointer move, no intermediate states)
 - If `--ff-only` fails, go back to the worktree and rebase/merge until it can fast-forward
 
