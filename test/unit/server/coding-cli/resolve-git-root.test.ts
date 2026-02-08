@@ -168,4 +168,32 @@ describe('resolveGitRepoRoot()', () => {
   it('returns original cwd for empty string input', async () => {
     expect(await resolveGitRepoRoot('')).toBe('')
   })
+
+  it('returns relative paths as-is without resolving against server cwd', async () => {
+    expect(await resolveGitRepoRoot('.')).toBe('.')
+    expect(await resolveGitRepoRoot('..')).toBe('..')
+    expect(await resolveGitRepoRoot('relative/path')).toBe('relative/path')
+  })
+
+  it('does not misclassify a worktree in a repo whose path contains "modules"', async () => {
+    // Repo lives under a directory named "modules" — the worktree gitdir
+    // will contain /modules/ in the full path, but NOT as /.git/modules/
+    const repoDir = path.join(tempDir, 'modules', 'my-repo')
+    const gitDir = path.join(repoDir, '.git')
+    await fsp.mkdir(gitDir, { recursive: true })
+
+    const worktreeGitDir = path.join(gitDir, 'worktrees', 'my-wt')
+    await fsp.mkdir(worktreeGitDir, { recursive: true })
+    await fsp.writeFile(path.join(worktreeGitDir, 'commondir'), '../..\n')
+
+    const worktreeDir = path.join(tempDir, 'modules', 'my-repo-wt')
+    await fsp.mkdir(worktreeDir, { recursive: true })
+    await fsp.writeFile(
+      path.join(worktreeDir, '.git'),
+      `gitdir: ${worktreeGitDir}\n`,
+    )
+
+    // Should correctly resolve to the parent repo, not treat as submodule
+    expect(await resolveGitRepoRoot(worktreeDir)).toBe(repoDir)
+  })
 })

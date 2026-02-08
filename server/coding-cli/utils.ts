@@ -26,10 +26,17 @@ export function clearRepoRootCache(): void {
 export async function resolveGitRepoRoot(cwd: string): Promise<string> {
   if (!cwd) return cwd
 
-  // Normalize: expand ~ and resolve
-  const normalized = cwd.startsWith('~')
-    ? path.resolve(os.homedir(), cwd.slice(cwd.startsWith('~/') ? 2 : 1))
-    : path.resolve(cwd)
+  // Only process absolute paths and tilde paths. Relative paths (., ..)
+  // cannot be resolved correctly because we'd resolve against the server's
+  // cwd, not the original CLI session's cwd. Return them as-is.
+  let normalized: string
+  if (cwd.startsWith('~')) {
+    normalized = path.resolve(os.homedir(), cwd.slice(cwd.startsWith('~/') ? 2 : 1))
+  } else if (path.isAbsolute(cwd)) {
+    normalized = path.resolve(cwd)
+  } else {
+    return cwd
+  }
 
   const cached = repoRootCache.get(normalized)
   if (cached !== undefined) return cached
@@ -84,13 +91,16 @@ async function walkForGitRoot(startDir: string): Promise<string> {
 }
 
 async function resolveFromGitFile(dotGitDir: string, gitdir: string): Promise<string> {
-  // Submodule: gitdir contains /modules/ — keep as independent repo
-  if (gitdir.includes('/modules/') || gitdir.includes('\\modules\\')) {
+  // Submodule: gitdir contains /.git/modules/ — keep as independent repo
+  // Anchored to /.git/modules/ to avoid false positives when the repo path
+  // itself contains a "modules" segment (e.g. /home/user/modules/repo)
+  if (gitdir.includes('/.git/modules/') || gitdir.includes('\\.git\\modules\\')) {
     return dotGitDir
   }
 
-  // Worktree: gitdir contains /worktrees/
-  if (gitdir.includes('/worktrees/') || gitdir.includes('\\worktrees\\')) {
+  // Worktree: gitdir contains /.git/worktrees/
+  // Also anchored to /.git/worktrees/ for the same reason
+  if (gitdir.includes('/.git/worktrees/') || gitdir.includes('\\.git\\worktrees\\')) {
     return resolveWorktreeRoot(dotGitDir, gitdir)
   }
 
