@@ -305,21 +305,23 @@ function mergeTerminalState(incoming: PaneNode, local: PaneNode): PaneNode {
   // Guard: bail to incoming if either node is malformed (corrupted localStorage)
   if (!incoming || !local || !incoming.type || !local.type) return incoming
 
-  // If same leaf with same createRequestId, prefer local if it has terminalId
+  // If both leaves with terminal content, apply smart merge
   if (incoming.type === 'leaf' && local.type === 'leaf') {
-    if (
-      incoming.content?.kind === 'terminal' &&
-      local.content?.kind === 'terminal' &&
-      incoming.content.createRequestId === local.content.createRequestId
-    ) {
-      // Local has terminalId, incoming doesn't → keep local terminal state,
-      // but only if incoming is still creating (not exited). An exited state
-      // from another tab must propagate to avoid stale "running" displays.
-      if (
-        local.content.terminalId && !incoming.content.terminalId &&
-        incoming.content.status !== 'exited'
-      ) {
-        return { ...incoming, content: local.content }
+    if (incoming.content?.kind === 'terminal' && local.content?.kind === 'terminal') {
+      if (incoming.content.createRequestId === local.content.createRequestId) {
+        // Same createRequestId: prefer local if it has terminalId and
+        // incoming is still creating (not exited). Exit state must propagate.
+        if (
+          local.content.terminalId && !incoming.content.terminalId &&
+          incoming.content.status !== 'exited'
+        ) {
+          return { ...incoming, content: local.content }
+        }
+      } else if (local.content.status === 'creating') {
+        // Different createRequestId and local is reconnecting: local just
+        // regenerated its ID (e.g. after INVALID_TERMINAL_ID). Stale remote
+        // state must not overwrite the active reconnection.
+        return local
       }
     }
     return incoming

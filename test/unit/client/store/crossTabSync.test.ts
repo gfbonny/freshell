@@ -192,6 +192,61 @@ describe('crossTabSync', () => {
     expect(content.status).toBe('running')
   })
 
+  it('preserves local reconnection state when remote has stale createRequestId', () => {
+    const store = configureStore({
+      reducer: { tabs: tabsReducer, panes: panesReducer },
+    })
+
+    // Local state: terminal just regenerated createRequestId after INVALID_TERMINAL_ID
+    store.dispatch(hydratePanes({
+      layouts: {
+        'tab-1': {
+          type: 'leaf',
+          id: 'pane-1',
+          content: {
+            kind: 'terminal',
+            mode: 'shell',
+            createRequestId: 'req-new',
+            status: 'creating',
+            // No terminalId — reconnecting
+          },
+        } as any,
+      },
+      activePane: { 'tab-1': 'pane-1' },
+      paneTitles: {},
+    }))
+
+    // Remote: stale state with old createRequestId and old terminalId
+    const remoteRaw = JSON.stringify({
+      version: 4,
+      layouts: {
+        'tab-1': {
+          type: 'leaf',
+          id: 'pane-1',
+          content: {
+            kind: 'terminal',
+            mode: 'shell',
+            createRequestId: 'req-old',
+            status: 'running',
+            terminalId: 'stale-terminal-id',
+          },
+        },
+      },
+      activePane: { 'tab-1': 'pane-1' },
+      paneTitles: {},
+      paneTitleSetByUser: {},
+    })
+
+    cleanups.push(installCrossTabSync(store as any))
+    window.dispatchEvent(new StorageEvent('storage', { key: PANES_STORAGE_KEY, newValue: remoteRaw }))
+
+    // Local reconnection state must be preserved — stale remote must not overwrite
+    const content = (store.getState().panes.layouts['tab-1'] as any).content
+    expect(content.createRequestId).toBe('req-new')
+    expect(content.status).toBe('creating')
+    expect(content.terminalId).toBeUndefined()
+  })
+
   it('propagates exit state from remote even when local has terminalId', () => {
     const store = configureStore({
       reducer: { tabs: tabsReducer, panes: panesReducer },
