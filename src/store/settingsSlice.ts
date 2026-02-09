@@ -34,6 +34,7 @@ export const defaultSettings: AppSettings = {
   },
   panes: {
     defaultNewPane: 'ask' as const,
+    snapThreshold: 4,
   },
   codingCli: {
     enabledProviders: ['claude', 'codex'],
