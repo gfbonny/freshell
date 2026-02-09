@@ -43,7 +43,7 @@ describe('persistedState parsers', () => {
         layouts: {},
         activePane: {},
         paneTitles: {},
-        paneTitleSetByUser: {},
+
       })
       expect(parsePersistedPanesRaw(raw)).toBeNull()
     })

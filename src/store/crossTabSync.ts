@@ -98,7 +98,6 @@ function dispatchHydratePanesFromPersisted(store: StoreLike, raw: string) {
       layouts: parsed.layouts as any,
       activePane: nextActive,
       paneTitles: parsed.paneTitles,
-      paneTitleSetByUser: parsed.paneTitleSetByUser,
     } as any),
     meta: { skipPersist: true, source: 'cross-tab' },
   })

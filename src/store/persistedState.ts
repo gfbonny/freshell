@@ -59,7 +59,6 @@ export function parsePersistedTabsRaw(raw: string): ParsedPersistedTabs | null {
 }
 
 const zPaneTitles = z.record(z.record(z.string()))
-const zPaneTitleSetByUser = z.record(z.record(z.boolean()))
 
 const zPersistedPanesPayload = z.object({
   version: z.number().optional(),
@@ -68,7 +67,6 @@ const zPersistedPanesPayload = z.object({
   layouts: z.record(z.unknown()).optional(),
   activePane: z.record(z.string()).optional(),
   paneTitles: zPaneTitles.optional(),
-  paneTitleSetByUser: zPaneTitleSetByUser.optional(),
 }).passthrough()
 
 export type ParsedPersistedPanes = {
@@ -76,7 +74,6 @@ export type ParsedPersistedPanes = {
   layouts: Record<string, unknown>
   activePane: Record<string, string>
   paneTitles: Record<string, Record<string, string>>
-  paneTitleSetByUser: Record<string, Record<string, boolean>>
 }
 
 export function parsePersistedPanesRaw(raw: string): ParsedPersistedPanes | null {
@@ -99,7 +96,6 @@ export function parsePersistedPanesRaw(raw: string): ParsedPersistedPanes | null
     layouts: (res.data.layouts || {}) as Record<string, unknown>,
     activePane: (res.data.activePane || {}) as Record<string, string>,
     paneTitles: (res.data.paneTitles || {}) as Record<string, Record<string, string>>,
-    paneTitleSetByUser: (res.data.paneTitleSetByUser || {}) as Record<string, Record<string, boolean>>,
   }
 }
 

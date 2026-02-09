@@ -68,7 +68,7 @@ describe('crossTabSync', () => {
       },
       activePane: { 'tab-1': 'pane-a' },
       paneTitles: {},
-      paneTitleSetByUser: {},
+
     }))
 
     cleanups.push(installCrossTabSync(store as any))
@@ -89,7 +89,7 @@ describe('crossTabSync', () => {
       },
       activePane: { 'tab-1': 'pane-b' },
       paneTitles: {},
-      paneTitleSetByUser: {},
+
     })
 
     window.dispatchEvent(new StorageEvent('storage', { key: PANES_STORAGE_KEY, newValue: remoteRaw }))
@@ -180,7 +180,7 @@ describe('crossTabSync', () => {
       },
       activePane: { 'tab-1': 'pane-1' },
       paneTitles: {},
-      paneTitleSetByUser: {},
+
     })
 
     cleanups.push(installCrossTabSync(store as any))
@@ -234,7 +234,7 @@ describe('crossTabSync', () => {
       },
       activePane: { 'tab-1': 'pane-1' },
       paneTitles: {},
-      paneTitleSetByUser: {},
+
     })
 
     cleanups.push(installCrossTabSync(store as any))
@@ -289,7 +289,7 @@ describe('crossTabSync', () => {
       },
       activePane: { 'tab-1': 'pane-1' },
       paneTitles: {},
-      paneTitleSetByUser: {},
+
     })
 
     cleanups.push(installCrossTabSync(store as any))
@@ -339,7 +339,7 @@ describe('crossTabSync', () => {
       },
       activePane: { 'tab-1': 'pane-1' },
       paneTitles: {},
-      paneTitleSetByUser: {},
+
     })
 
     cleanups.push(installCrossTabSync(store as any))
@@ -396,7 +396,7 @@ describe('crossTabSync', () => {
       },
       activePane: { 'tab-1': 'pane-1' },
       paneTitles: {},
-      paneTitleSetByUser: {},
+
     })
 
     cleanups.push(installCrossTabSync(store as any))
