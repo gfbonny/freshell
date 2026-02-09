@@ -60,7 +60,7 @@ export default function PaneHeader({
         'flex items-center gap-2 h-7 px-2 text-sm border-b border-border shrink-0',
         isActive ? 'bg-muted' : 'bg-muted/50 text-muted-foreground'
       )}
-      onDoubleClick={onDoubleClick}
+      onDoubleClick={isRenaming ? undefined : onDoubleClick}
       role="banner"
       aria-label={`Pane: ${title}`}
     >

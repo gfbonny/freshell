@@ -1943,6 +1943,32 @@ describe('panesSlice', () => {
       expect(result.paneTitleSetByUser['tab-1']?.['pane-1']).toBe(true)
     })
 
+    it('updatePaneTitle with setByUser=false does NOT set paneTitleSetByUser', () => {
+      const state = makeState(false)
+      const result = panesReducer(state, updatePaneTitle({
+        tabId: 'tab-1',
+        paneId: 'pane-1',
+        title: 'System Title',
+        setByUser: false,
+      }))
+
+      expect(result.paneTitles['tab-1']['pane-1']).toBe('System Title')
+      expect(result.paneTitleSetByUser['tab-1']?.['pane-1']).toBeUndefined()
+    })
+
+    it('updatePaneTitle with setByUser=false skips update when user already set the title', () => {
+      const state = makeState(true)
+      const result = panesReducer(state, updatePaneTitle({
+        tabId: 'tab-1',
+        paneId: 'pane-1',
+        title: 'System Override Attempt',
+        setByUser: false,
+      }))
+
+      // User title should be preserved
+      expect(result.paneTitles['tab-1']['pane-1']).toBe('User Title')
+    })
+
     it('closePane cleans up paneTitleSetByUser entry', () => {
       // Need a split so we can actually close a pane
       const state: PanesState = {

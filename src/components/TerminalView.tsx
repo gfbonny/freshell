@@ -300,7 +300,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       lastTitleUpdateRef.current = now
 
       dispatch(updateTab({ id: currentTab.id, updates: { title: cleanTitle } }))
-      dispatch(updatePaneTitle({ tabId, paneId: paneIdRef.current, title: cleanTitle }))
+      dispatch(updatePaneTitle({ tabId, paneId: paneIdRef.current, title: cleanTitle, setByUser: false }))
     })
 
     return () => disposable.dispose()
@@ -504,7 +504,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           const titleTab = tabRef.current
           if (titleTab && !titleTab.titleSetByUser && msg.title) {
             dispatch(updateTab({ id: titleTab.id, updates: { title: msg.title } }))
-            dispatch(updatePaneTitle({ tabId, paneId: paneIdRef.current, title: msg.title }))
+            dispatch(updatePaneTitle({ tabId, paneId: paneIdRef.current, title: msg.title, setByUser: false }))
           }
         }
 

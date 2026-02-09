@@ -693,20 +693,26 @@ export const panesSlice = createSlice({
 
     updatePaneTitle: (
       state,
-      action: PayloadAction<{ tabId: string; paneId: string; title: string }>
+      action: PayloadAction<{ tabId: string; paneId: string; title: string; setByUser?: boolean }>
     ) => {
-      const { tabId, paneId, title } = action.payload
+      const { tabId, paneId, title, setByUser } = action.payload
+      // Skip programmatic updates when user has explicitly set the title
+      if (setByUser === false && state.paneTitleSetByUser?.[tabId]?.[paneId]) {
+        return
+      }
       if (!state.paneTitles[tabId]) {
         state.paneTitles[tabId] = {}
       }
       state.paneTitles[tabId][paneId] = title
-      if (!state.paneTitleSetByUser) {
-        state.paneTitleSetByUser = {}
+      if (setByUser !== false) {
+        if (!state.paneTitleSetByUser) {
+          state.paneTitleSetByUser = {}
+        }
+        if (!state.paneTitleSetByUser[tabId]) {
+          state.paneTitleSetByUser[tabId] = {}
+        }
+        state.paneTitleSetByUser[tabId][paneId] = true
       }
-      if (!state.paneTitleSetByUser[tabId]) {
-        state.paneTitleSetByUser[tabId] = {}
-      }
-      state.paneTitleSetByUser[tabId][paneId] = true
     },
 
     requestPaneRename: (
