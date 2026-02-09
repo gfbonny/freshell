@@ -240,74 +240,10 @@ function collectLeaves(node: PaneNode): Extract<PaneNode, { type: 'leaf' }>[] {
   return [...collectLeaves(node.children[0]), ...collectLeaves(node.children[1])]
 }
 
-// Helper to create a horizontal split from an array of leaves
-function buildHorizontalRow(leaves: Extract<PaneNode, { type: 'leaf' }>[]): PaneNode {
-  if (leaves.length === 1) return leaves[0]
-  if (leaves.length === 2) {
-    return {
-      type: 'split',
-      id: nanoid(),
-      direction: 'horizontal',
-      sizes: [50, 50],
-      children: [leaves[0], leaves[1]],
-    }
-  }
-  // For 3+ panes in a row, nest horizontally: [a, [b, c]] -> [a, [b, [c, d]]] etc.
-  // Or use a more balanced approach: split in half
-  const mid = Math.ceil(leaves.length / 2)
-  const left = leaves.slice(0, mid)
-  const right = leaves.slice(mid)
-  return {
-    type: 'split',
-    id: nanoid(),
-    direction: 'horizontal',
-    sizes: [50, 50],
-    children: [buildHorizontalRow(left), buildHorizontalRow(right)],
-  }
-}
-
-/**
- * Build a grid layout from leaves.
- * Pattern:
- * - 1 pane: single leaf
- * - 2 panes: [1][2] horizontal
- * - 3 panes: [1][2] top, [3] bottom (full width)
- * - 4 panes: [1][2] top, [3][4] bottom
- * - 5 panes: [1][2][3] top, [4][5] bottom
- * - 6 panes: [1][2][3] top, [4][5][6] bottom
- * - etc.
- */
-function buildGridLayout(leaves: Extract<PaneNode, { type: 'leaf' }>[]): PaneNode {
-  if (leaves.length === 1) return leaves[0]
-  if (leaves.length === 2) {
-    return {
-      type: 'split',
-      id: nanoid(),
-      direction: 'horizontal',
-      sizes: [50, 50],
-      children: [leaves[0], leaves[1]],
-    }
-  }
-
-  // For 3+ panes, use 2 rows with ceiling division for top row
-  // 3 panes: 2 top, 1 bottom
-  // 4 panes: 2 top, 2 bottom
-  // 5 panes: 3 top, 2 bottom
-  // 6 panes: 3 top, 3 bottom
-  const topCount = Math.ceil(leaves.length / 2)
-  const topLeaves = leaves.slice(0, topCount)
-  const bottomLeaves = leaves.slice(topCount)
-
-  const topRow = buildHorizontalRow(topLeaves)
-  const bottomRow = buildHorizontalRow(bottomLeaves)
-
-  return {
-    type: 'split',
-    id: nanoid(),
-    direction: 'vertical',
-    sizes: [50, 50],
-    children: [topRow, bottomRow],
-  }
+// Helper to find a leaf node by id in the tree
+function findLeaf(node: PaneNode, id: string): Extract<PaneNode, { type: 'leaf' }> | null {
+  if (node.type === 'leaf') return node.id === id ? node : null
+  return findLeaf(node.children[0], id) || findLeaf(node.children[1], id)
 }
 
 /**
@@ -421,15 +357,10 @@ export const panesSlice = createSlice({
       if (!root) return
 
       const newPaneId = nanoid()
+      const normalizedContent = normalizeContent(newContent)
 
-      // Find the target pane and get its content
-      function findPane(node: PaneNode, id: string): PaneNode | null {
-        if (node.type === 'leaf') return node.id === id ? node : null
-        return findPane(node.children[0], id) || findPane(node.children[1], id)
-      }
-
-      const targetPane = findPane(root, paneId)
-      if (!targetPane || targetPane.type !== 'leaf') return
+      const targetPane = findLeaf(root, paneId)
+      if (!targetPane) return
 
       // Create the split node
       const splitNode: PaneNode = {
@@ -439,7 +370,7 @@ export const panesSlice = createSlice({
         sizes: [50, 50],
         children: [
           { ...targetPane }, // Keep original pane
-          { type: 'leaf', id: newPaneId, content: normalizeContent(newContent) }, // New pane with normalized content
+          { type: 'leaf', id: newPaneId, content: normalizedContent },
         ],
       }
 
@@ -450,7 +381,6 @@ export const panesSlice = createSlice({
         state.activePane[tabId] = newPaneId
 
         // Initialize title for new pane
-        const normalizedContent = normalizeContent(newContent)
         if (!state.paneTitles[tabId]) {
           state.paneTitles[tabId] = {}
         }
@@ -459,13 +389,9 @@ export const panesSlice = createSlice({
     },
 
     /**
-     * Add a pane using grid layout pattern.
-     * Restructures the entire layout to maintain the grid:
-     * - 2 panes: [1][2] side by side
-     * - 3 panes: [1][2] top, [3] bottom (full width)
-     * - 4 panes: [1][2] / [3][4] (2x2 grid)
-     * - 5 panes: [1][2][3] top, [4][5] bottom
-     * - etc.
+     * Add a pane by splitting the active pane horizontally (to the right).
+     * Preserves the existing layout structure instead of rebuilding a grid.
+     * The new pane is placed to the right of the active pane and becomes active.
      */
     addPane: (
       state,
@@ -478,27 +404,42 @@ export const panesSlice = createSlice({
       const root = state.layouts[tabId]
       if (!root) return
 
-      // Collect existing leaves
-      const existingLeaves = collectLeaves(root)
+      const activePaneId = state.activePane[tabId]
+
+      // Find the active pane; fall back to first leaf if active pane is missing
+      const activeLeaf = (activePaneId && findLeaf(root, activePaneId))
+        || collectLeaves(root)[0]
+      if (!activeLeaf) return
 
       // Create new leaf
       const newPaneId = nanoid()
-      const newLeaf: Extract<PaneNode, { type: 'leaf' }> = {
+      const normalizedContent = normalizeContent(newContent)
+      const newLeaf: PaneNode = {
         type: 'leaf',
         id: newPaneId,
-        content: normalizeContent(newContent),
+        content: normalizedContent,
       }
 
-      // Build new grid layout with all leaves
-      const allLeaves = [...existingLeaves, newLeaf]
-      state.layouts[tabId] = buildGridLayout(allLeaves)
+      // Replace the active pane with a horizontal split: [activePane, newPane]
+      const replacement: PaneNode = {
+        type: 'split',
+        id: nanoid(),
+        direction: 'horizontal',
+        sizes: [50, 50],
+        children: [{ ...activeLeaf }, newLeaf],
+      }
+
+      const newRoot = findAndReplace(root, activeLeaf.id, replacement)
+      if (!newRoot) return
+
+      state.layouts[tabId] = newRoot
       state.activePane[tabId] = newPaneId
 
       // Initialize title for new pane
       if (!state.paneTitles[tabId]) {
         state.paneTitles[tabId] = {}
       }
-      state.paneTitles[tabId][newPaneId] = derivePaneTitle(newLeaf.content)
+      state.paneTitles[tabId][newPaneId] = derivePaneTitle(normalizedContent)
     },
 
     closePane: (

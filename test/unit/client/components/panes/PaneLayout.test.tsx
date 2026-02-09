@@ -450,7 +450,7 @@ describe('PaneLayout', () => {
   })
 
   describe('edge cases', () => {
-    it('adds pane even when no active pane is set (grid layout does not require active pane)', async () => {
+    it('adds pane even when no active pane is set (falls back to first leaf)', async () => {
       const paneId = 'pane-1'
       const store = createStore({
         layouts: {
@@ -468,7 +468,7 @@ describe('PaneLayout', () => {
         store
       )
 
-      // Click FAB to add picker pane - with grid layout, this works without active pane
+      // Click FAB to add picker pane - falls back to first leaf when no active pane is set
       fireEvent.click(screen.getByTitle('Add pane'))
 
       // Layout should now be a split with 2 panes
