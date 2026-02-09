@@ -405,6 +405,9 @@ describe('crossTabSync', () => {
     // Local resumeSessionId must NOT be overwritten by remote
     const content = (store.getState().panes.layouts['tab-1'] as any).content
     expect(content.resumeSessionId).toBe('session-A')
+    // Other incoming fields (lifecycle progress) should still be accepted
+    expect(content.terminalId).toBe('remote-terminal-456')
+    expect(content.status).toBe('running')
   })
 
   it('does not permanently dedupe: identical remote payload should hydrate again after a local persisted change', () => {

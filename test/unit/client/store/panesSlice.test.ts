@@ -1287,6 +1287,54 @@ describe('panesSlice', () => {
       expect(pane2Content.resumeSessionId).toBe('session-X')
     })
 
+    it('preserves local resumeSessionId even when incoming has exited status', () => {
+      const localState: PanesState = {
+        layouts: {
+          'tab-1': {
+            type: 'leaf',
+            id: 'pane-1',
+            content: {
+              kind: 'terminal',
+              mode: 'claude',
+              createRequestId: 'req-1',
+              status: 'running',
+              terminalId: 't1',
+              resumeSessionId: 'session-A',
+            },
+          } as any,
+        },
+        activePane: { 'tab-1': 'pane-1' },
+        paneTitles: {},
+      }
+
+      // Incoming: same createRequestId, exited, but different resumeSessionId
+      const incoming: PanesState = {
+        layouts: {
+          'tab-1': {
+            type: 'leaf',
+            id: 'pane-1',
+            content: {
+              kind: 'terminal',
+              mode: 'claude',
+              createRequestId: 'req-1',
+              status: 'exited',
+              terminalId: 't1',
+              resumeSessionId: 'session-B',
+            },
+          } as any,
+        },
+        activePane: { 'tab-1': 'pane-1' },
+        paneTitles: {},
+      }
+
+      const state = panesReducer(localState, hydratePanes(incoming))
+      const content = (state.layouts['tab-1'] as any).content
+
+      // Session identity preserved, but exit status propagated
+      expect(content.resumeSessionId).toBe('session-A')
+      expect(content.status).toBe('exited')
+    })
+
     it('allows resumeSessionId update when local has no session', () => {
       // Local pane has no resumeSessionId (new terminal, not yet associated)
       const localState: PanesState = {
