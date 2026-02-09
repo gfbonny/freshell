@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils'
 import { getWsClient } from '@/lib/ws-client'
 import { api } from '@/lib/api'
 import { derivePaneTitle } from '@/lib/derivePaneTitle'
+import { snap1D, collectSameOrientationSizes } from '@/lib/pane-snap'
 import { nanoid } from 'nanoid'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
 import type { CodingCliProviderName } from '@/lib/coding-cli-types'
@@ -35,6 +36,11 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
   const zoomedPaneId = useAppSelector((s) => s.panes.zoomedPane?.[tabId])
   const containerRef = useRef<HTMLDivElement>(null)
   const ws = useMemo(() => getWsClient(), [])
+  const snapThreshold = useAppSelector((s) => s.settings?.settings?.panes?.snapThreshold ?? 4)
+
+  // Drag state for snapping: track the original size and accumulated delta
+  const dragStartSizeRef = useRef<number>(0)
+  const accumulatedDeltaRef = useRef<number>(0)
 
   // Check if this is the only pane (root is a leaf)
   const rootNode = useAppSelector((s) => s.panes.layouts[tabId])
@@ -102,25 +108,54 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
     dispatch(toggleZoom({ tabId, paneId }))
   }, [dispatch, tabId])
 
-  const handleResize = useCallback((splitId: string, delta: number, direction: 'horizontal' | 'vertical') => {
+  const handleResizeStart = useCallback(() => {
+    if (node.type !== 'split') return
+    dragStartSizeRef.current = node.sizes[0]
+    accumulatedDeltaRef.current = 0
+  }, [node])
+
+  const handleResize = useCallback((splitId: string, delta: number, direction: 'horizontal' | 'vertical', shiftHeld?: boolean) => {
     if (!containerRef.current) return
+    if (node.type !== 'split' || node.id !== splitId) return
 
     const container = containerRef.current
     const totalSize = direction === 'horizontal' ? container.offsetWidth : container.offsetHeight
     const percentDelta = (delta / totalSize) * 100
 
-    // Get current sizes from the node
-    if (node.type !== 'split' || node.id !== splitId) return
+    let newSize: number
 
-    const [size1] = node.sizes
-    const newSize1 = Math.max(10, Math.min(90, size1 + percentDelta))
-    const newSize2 = 100 - newSize1
+    if (dragStartSizeRef.current === 0) {
+      // Keyboard resize (no drag start): apply delta directly without snapping
+      newSize = node.sizes[0] + percentDelta
+    } else {
+      // Mouse/touch drag: accumulate delta and apply snapping
+      accumulatedDeltaRef.current += percentDelta
+      const rawNewSize = dragStartSizeRef.current + accumulatedDeltaRef.current
 
-    dispatch(resizePanes({ tabId, splitId, sizes: [newSize1, newSize2] }))
-  }, [dispatch, tabId, node])
+      // Collect snap targets from same-orientation splits in the full layout tree
+      const collinearPositions = rootNode
+        ? collectSameOrientationSizes(rootNode, direction, splitId)
+        : []
+
+      // Apply snapping
+      newSize = snap1D(
+        rawNewSize,
+        dragStartSizeRef.current,
+        collinearPositions,
+        snapThreshold,
+        shiftHeld ?? false,
+      )
+    }
+
+    const clampedSize = Math.max(10, Math.min(90, newSize))
+    const newSize2 = 100 - clampedSize
+
+    dispatch(resizePanes({ tabId, splitId, sizes: [clampedSize, newSize2] }))
+  }, [dispatch, tabId, node, rootNode, snapThreshold])
 
   const handleResizeEnd = useCallback(() => {
-    // Could trigger terminal resize here if needed
+    dragStartSizeRef.current = 0
+    accumulatedDeltaRef.current = 0
   }, [])
 
   // Render a leaf pane
@@ -171,7 +206,8 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
 
       <PaneDivider
         direction={node.direction}
-        onResize={(delta) => handleResize(node.id, delta, node.direction)}
+        onResizeStart={handleResizeStart}
+        onResize={(delta, shiftHeld) => handleResize(node.id, delta, node.direction, shiftHeld)}
         onResizeEnd={handleResizeEnd}
         dataContext={ContextIds.PaneDivider}
         dataTabId={tabId}

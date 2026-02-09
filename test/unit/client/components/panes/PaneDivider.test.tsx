@@ -142,11 +142,11 @@ describe('PaneDivider', () => {
 
       // Move to x=150 (delta = 50)
       fireEvent.mouseMove(document, { clientX: 150, clientY: 50 })
-      expect(onResize).toHaveBeenCalledWith(50)
+      expect(onResize).toHaveBeenCalledWith(50, false)
 
       // Move to x=200 (delta = 50 from 150)
       fireEvent.mouseMove(document, { clientX: 200, clientY: 50 })
-      expect(onResize).toHaveBeenCalledWith(50)
+      expect(onResize).toHaveBeenCalledWith(50, false)
 
       // End drag
       fireEvent.mouseUp(document)
@@ -164,7 +164,7 @@ describe('PaneDivider', () => {
 
       // Move to y=180 (delta = 80)
       fireEvent.mouseMove(document, { clientX: 50, clientY: 180 })
-      expect(onResize).toHaveBeenCalledWith(80)
+      expect(onResize).toHaveBeenCalledWith(80, false)
 
       // End drag
       fireEvent.mouseUp(document)
@@ -264,13 +264,13 @@ describe('PaneDivider', () => {
       fireEvent.touchMove(document, {
         touches: [{ clientX: 150, clientY: 50 }],
       })
-      expect(onResize).toHaveBeenCalledWith(50)
+      expect(onResize).toHaveBeenCalledWith(50, false)
 
       // Move to x=200 (delta = 50 from 150)
       fireEvent.touchMove(document, {
         touches: [{ clientX: 200, clientY: 50 }],
       })
-      expect(onResize).toHaveBeenCalledWith(50)
+      expect(onResize).toHaveBeenCalledWith(50, false)
 
       // End touch
       fireEvent.touchEnd(document)
@@ -292,7 +292,7 @@ describe('PaneDivider', () => {
       fireEvent.touchMove(document, {
         touches: [{ clientX: 50, clientY: 180 }],
       })
-      expect(onResize).toHaveBeenCalledWith(80)
+      expect(onResize).toHaveBeenCalledWith(80, false)
 
       // End touch
       fireEvent.touchEnd(document)
@@ -378,6 +378,73 @@ describe('PaneDivider', () => {
       fireEvent.keyDown(divider, { key: 'ArrowUp' })
       expect(onResize).toHaveBeenCalledWith(-10)
       expect(onResizeEnd).toHaveBeenCalled()
+    })
+  })
+
+  describe('snap integration', () => {
+    it('calls onResizeStart on mouse drag begin', () => {
+      const onResizeStart = vi.fn()
+      render(
+        <PaneDivider
+          direction="horizontal"
+          onResize={onResize}
+          onResizeStart={onResizeStart}
+          onResizeEnd={onResizeEnd}
+        />
+      )
+      const divider = screen.getByRole('separator')
+
+      fireEvent.mouseDown(divider, { clientX: 100, clientY: 50 })
+      expect(onResizeStart).toHaveBeenCalledOnce()
+
+      fireEvent.mouseUp(document)
+    })
+
+    it('calls onResizeStart on touch drag begin', () => {
+      const onResizeStart = vi.fn()
+      render(
+        <PaneDivider
+          direction="horizontal"
+          onResize={onResize}
+          onResizeStart={onResizeStart}
+          onResizeEnd={onResizeEnd}
+        />
+      )
+      const divider = screen.getByRole('separator')
+
+      fireEvent.touchStart(divider, {
+        touches: [{ clientX: 100, clientY: 50 }],
+      })
+      expect(onResizeStart).toHaveBeenCalledOnce()
+
+      fireEvent.touchEnd(document)
+    })
+
+    it('forwards shiftKey=true during mouse drag', () => {
+      render(
+        <PaneDivider direction="horizontal" onResize={onResize} onResizeEnd={onResizeEnd} />
+      )
+      const divider = screen.getByRole('separator')
+
+      fireEvent.mouseDown(divider, { clientX: 100, clientY: 50 })
+      fireEvent.mouseMove(document, { clientX: 150, clientY: 50, shiftKey: true })
+      expect(onResize).toHaveBeenCalledWith(50, true)
+
+      fireEvent.mouseUp(document)
+    })
+
+    it('works without onResizeStart prop', () => {
+      render(
+        <PaneDivider direction="horizontal" onResize={onResize} onResizeEnd={onResizeEnd} />
+      )
+      const divider = screen.getByRole('separator')
+
+      // Should not throw when onResizeStart is not provided
+      fireEvent.mouseDown(divider, { clientX: 100, clientY: 50 })
+      fireEvent.mouseMove(document, { clientX: 150, clientY: 50 })
+      expect(onResize).toHaveBeenCalledWith(50, false)
+
+      fireEvent.mouseUp(document)
     })
   })
 

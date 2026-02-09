@@ -3,7 +3,8 @@ import { cn } from '@/lib/utils'
 
 interface PaneDividerProps {
   direction: 'horizontal' | 'vertical'
-  onResize: (delta: number) => void
+  onResize: (delta: number, shiftHeld?: boolean) => void
+  onResizeStart?: () => void
   onResizeEnd: () => void
   dataContext?: string
   dataTabId?: string
@@ -13,6 +14,7 @@ interface PaneDividerProps {
 export default function PaneDivider({
   direction,
   onResize,
+  onResizeStart,
   onResizeEnd,
   dataContext,
   dataTabId,
@@ -23,17 +25,19 @@ export default function PaneDivider({
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
+    onResizeStart?.()
     setIsDragging(true)
     startPosRef.current = direction === 'horizontal' ? e.clientX : e.clientY
-  }, [direction])
+  }, [direction, onResizeStart])
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     e.preventDefault()
     if (e.touches.length === 0) return
+    onResizeStart?.()
     setIsDragging(true)
     const touch = e.touches[0]
     startPosRef.current = direction === 'horizontal' ? touch.clientX : touch.clientY
-  }, [direction])
+  }, [direction, onResizeStart])
 
   useEffect(() => {
     if (!isDragging) return
@@ -42,7 +46,7 @@ export default function PaneDivider({
       const currentPos = direction === 'horizontal' ? e.clientX : e.clientY
       const delta = currentPos - startPosRef.current
       startPosRef.current = currentPos
-      onResize(delta)
+      onResize(delta, e.shiftKey)
     }
 
     const handleMouseUp = () => {
@@ -57,7 +61,7 @@ export default function PaneDivider({
       const currentPos = direction === 'horizontal' ? touch.clientX : touch.clientY
       const delta = currentPos - startPosRef.current
       startPosRef.current = currentPos
-      onResize(delta)
+      onResize(delta, false)
     }
 
     const handleTouchEnd = () => {
