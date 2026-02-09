@@ -111,10 +111,10 @@ export default function PaneDivider({
 
   return (
     <div
-      role="button"
+      role="separator"
       tabIndex={0}
+      aria-orientation={direction === 'horizontal' ? 'vertical' : 'horizontal'}
       aria-label={`Pane divider (${direction === 'horizontal' ? 'horizontal' : 'vertical'} resize)`}
-      aria-pressed={isDragging}
       onMouseDown={handleMouseDown}
       onTouchStart={handleTouchStart}
       onKeyDown={handleKeyDown}
@@ -122,12 +122,42 @@ export default function PaneDivider({
       data-tab-id={dataTabId}
       data-split-id={dataSplitId}
       className={cn(
-        'flex-shrink-0 bg-border hover:bg-muted-foreground transition-colors touch-none',
+        'flex-shrink-0 relative group touch-none',
         direction === 'horizontal'
-          ? 'w-1 cursor-col-resize'
-          : 'h-1 cursor-row-resize',
-        isDragging && 'bg-muted-foreground'
+          ? 'w-3 cursor-col-resize'
+          : 'h-3 cursor-row-resize',
       )}
-    />
+    >
+      {/* Visible bar */}
+      <div
+        data-visible-bar
+        className={cn(
+          'absolute bg-border transition-all',
+          direction === 'horizontal'
+            ? 'w-px h-full left-1/2 -translate-x-1/2 group-hover:w-[3px]'
+            : 'h-px w-full top-1/2 -translate-y-1/2 group-hover:h-[3px]',
+          isDragging && (direction === 'horizontal' ? 'w-[3px]' : 'h-[3px]'),
+          isDragging ? 'bg-muted-foreground' : 'group-hover:bg-muted-foreground',
+        )}
+      />
+      {/* Grab dots (visible on hover and during drag) */}
+      <div
+        data-grab-handle
+        className={cn(
+          'absolute inset-0 flex items-center justify-center',
+          'opacity-0 group-hover:opacity-40 transition-opacity',
+          isDragging && 'opacity-40',
+        )}
+      >
+        <div className={cn(
+          'flex gap-0.5',
+          direction === 'horizontal' ? 'flex-col' : 'flex-row',
+        )}>
+          <div className="w-1 h-1 rounded-full bg-muted-foreground" />
+          <div className="w-1 h-1 rounded-full bg-muted-foreground" />
+          <div className="w-1 h-1 rounded-full bg-muted-foreground" />
+        </div>
+      </div>
+    </div>
   )
 }
