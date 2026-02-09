@@ -512,28 +512,51 @@ export const panesSlice = createSlice({
       // Can't close the only pane
       if (root.type === 'leaf') return
 
-      // Collect all leaves except the one being closed
-      const allLeaves = collectLeaves(root)
-      const remainingLeaves = allLeaves.filter(leaf => leaf.id !== paneId)
+      // Find the parent split containing the target pane and replace it
+      // with the surviving sibling. This preserves the rest of the tree
+      // structure exactly as the user arranged it.
+      // Returns [newTree, siblingNode] where siblingNode is the promoted sibling.
+      function removePane(node: PaneNode, targetId: string): [PaneNode, PaneNode] | null {
+        if (node.type === 'leaf') return null
 
-      // If no leaves remain (shouldn't happen), bail out
-      if (remainingLeaves.length === 0) return
+        const [left, right] = node.children
 
-      // Rebuild layout with remaining leaves using grid pattern
-      state.layouts[tabId] = buildGridLayout(remainingLeaves)
+        // Check if target is a direct child (leaf or split)
+        if (left.id === targetId) return [right, right]
+        if (right.id === targetId) return [left, left]
 
-      // Update active pane if needed
-      if (state.activePane[tabId] === paneId) {
-        // Set active to the last remaining leaf (similar to where the new pane would be)
-        state.activePane[tabId] = remainingLeaves[remainingLeaves.length - 1].id
+        // Recurse into children
+        const leftResult = removePane(left, targetId)
+        if (leftResult) {
+          return [{ ...node, children: [leftResult[0], right] }, leftResult[1]]
+        }
+        const rightResult = removePane(right, targetId)
+        if (rightResult) {
+          return [{ ...node, children: [left, rightResult[0]] }, rightResult[1]]
+        }
+        return null
       }
 
-      // Clean up pane title and user-set flag
-      if (state.paneTitles[tabId]?.[paneId]) {
-        delete state.paneTitles[tabId][paneId]
-      }
-      if (state.paneTitleSetByUser?.[tabId]?.[paneId]) {
-        delete state.paneTitleSetByUser[tabId][paneId]
+      const result = removePane(root, paneId)
+      if (result) {
+        const [newRoot, sibling] = result
+        state.layouts[tabId] = newRoot
+
+        // Update active pane if the closed pane was active.
+        // Focus the first leaf in the promoted sibling subtree — that's the
+        // pane that now occupies the space where the closed pane was.
+        if (state.activePane[tabId] === paneId) {
+          const siblingLeaves = collectLeaves(sibling)
+          state.activePane[tabId] = siblingLeaves[0].id
+        }
+
+        // Clean up pane title and user-set flag
+        if (state.paneTitles[tabId]?.[paneId]) {
+          delete state.paneTitles[tabId][paneId]
+        }
+        if (state.paneTitleSetByUser?.[tabId]?.[paneId]) {
+          delete state.paneTitleSetByUser[tabId][paneId]
+        }
       }
     },
 

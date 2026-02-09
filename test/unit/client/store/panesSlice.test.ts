@@ -508,6 +508,25 @@ describe('panesSlice', () => {
   })
 
   describe('closePane', () => {
+    // Helpers for constructing pane trees directly
+    function terminalContent(createRequestId: string): PaneContent {
+      return { kind: 'terminal', createRequestId, status: 'running', mode: 'shell' }
+    }
+
+    function makeClosePaneState(
+      layouts: Record<string, PaneNode>,
+      activePane: Record<string, string>
+    ): PanesState {
+      return {
+        layouts,
+        activePane,
+        paneTitles: {},
+        paneTitleSetByUser: {},
+        renameRequestTabId: null,
+        renameRequestPaneId: null,
+      }
+    }
+
     it('does nothing when there is only one pane', () => {
       const content: PaneContent = { kind: 'terminal', mode: 'shell' }
       let state = panesReducer(
@@ -717,6 +736,104 @@ describe('panesSlice', () => {
 
       expect(result.paneTitles['tab-1']['pane-1']).toBeUndefined()
       expect(result.paneTitles['tab-1']['pane-2']).toBe('Second')
+    })
+
+    // --- Sibling promotion tests ---
+
+    it('promotes sibling when closing right child of a split', () => {
+      const tabId = 'tab1'
+      const leftLeaf: PaneNode = { type: 'leaf', id: 'left', content: terminalContent('left-req') }
+      const rightLeaf: PaneNode = { type: 'leaf', id: 'right', content: terminalContent('right-req') }
+      const root: PaneNode = {
+        type: 'split', id: 'split1', direction: 'horizontal',
+        sizes: [60, 40], children: [leftLeaf, rightLeaf],
+      }
+      const state = makeClosePaneState({ [tabId]: root }, { [tabId]: 'right' })
+      const result = panesReducer(state, closePane({ tabId, paneId: 'right' }))
+      // Root should now be the left leaf directly (promoted)
+      expect(result.layouts[tabId]).toEqual(leftLeaf)
+      expect(result.activePane[tabId]).toBe('left')
+    })
+
+    it('promotes sibling when closing left child of a split', () => {
+      const tabId = 'tab1'
+      const leftLeaf: PaneNode = { type: 'leaf', id: 'left', content: terminalContent('left-req') }
+      const rightLeaf: PaneNode = { type: 'leaf', id: 'right', content: terminalContent('right-req') }
+      const root: PaneNode = {
+        type: 'split', id: 'split1', direction: 'vertical',
+        sizes: [50, 50], children: [leftLeaf, rightLeaf],
+      }
+      const state = makeClosePaneState({ [tabId]: root }, { [tabId]: 'left' })
+      const result = panesReducer(state, closePane({ tabId, paneId: 'left' }))
+      expect(result.layouts[tabId]).toEqual(rightLeaf)
+      expect(result.activePane[tabId]).toBe('right')
+    })
+
+    it('preserves tree structure when closing a pane in a nested split', () => {
+      // Setup: root is V-split(H-split(A, B), C)
+      // Action: close A
+      // Expected: root becomes V-split(B, C) -- B promoted to replace H-split
+      const tabId = 'tab1'
+      const a: PaneNode = { type: 'leaf', id: 'a', content: terminalContent('a-req') }
+      const b: PaneNode = { type: 'leaf', id: 'b', content: terminalContent('b-req') }
+      const c: PaneNode = { type: 'leaf', id: 'c', content: terminalContent('c-req') }
+      const innerSplit: PaneNode = {
+        type: 'split', id: 'inner', direction: 'horizontal',
+        sizes: [50, 50], children: [a, b],
+      }
+      const root: PaneNode = {
+        type: 'split', id: 'outer', direction: 'vertical',
+        sizes: [70, 30], children: [innerSplit, c],
+      }
+      const state = makeClosePaneState({ [tabId]: root }, { [tabId]: 'a' })
+      const result = panesReducer(state, closePane({ tabId, paneId: 'a' }))
+      // Outer split should remain with same sizes, but inner replaced by b
+      expect(result.layouts[tabId]).toEqual({
+        type: 'split', id: 'outer', direction: 'vertical',
+        sizes: [70, 30], children: [b, c],
+      })
+      expect(result.activePane[tabId]).toBe('b')
+    })
+
+    it('preserves deeply nested tree structure', () => {
+      // Setup: root = V-split(H-split(A, B), H-split(C, D))
+      // Close B
+      // Expected: root = V-split(A, H-split(C, D))
+      // H-split(C, D) is completely untouched including sizes
+      const tabId = 'tab1'
+      const a: PaneNode = { type: 'leaf', id: 'a', content: terminalContent('a-req') }
+      const b: PaneNode = { type: 'leaf', id: 'b', content: terminalContent('b-req') }
+      const c: PaneNode = { type: 'leaf', id: 'c', content: terminalContent('c-req') }
+      const d: PaneNode = { type: 'leaf', id: 'd', content: terminalContent('d-req') }
+      const top: PaneNode = {
+        type: 'split', id: 'top', direction: 'horizontal',
+        sizes: [40, 60], children: [a, b],
+      }
+      const bottom: PaneNode = {
+        type: 'split', id: 'bottom', direction: 'horizontal',
+        sizes: [30, 70], children: [c, d],
+      }
+      const root: PaneNode = {
+        type: 'split', id: 'root', direction: 'vertical',
+        sizes: [50, 50], children: [top, bottom],
+      }
+      const state = makeClosePaneState({ [tabId]: root }, { [tabId]: 'b' })
+      const result = panesReducer(state, closePane({ tabId, paneId: 'b' }))
+      expect(result.layouts[tabId]).toEqual({
+        type: 'split', id: 'root', direction: 'vertical',
+        sizes: [50, 50], children: [a, bottom],
+      })
+      // Untouched subtree should preserve referential identity (Immer structural sharing)
+      const resultRoot = result.layouts[tabId] as Extract<PaneNode, { type: 'split' }>
+      expect(resultRoot.children[1]).toBe(bottom)
+    })
+
+    it('does nothing when closing the only pane (leaf root)', () => {
+      const tabId = 'tab1'
+      const leaf: PaneNode = { type: 'leaf', id: 'only', content: terminalContent('only-req') }
+      const state = makeClosePaneState({ [tabId]: leaf }, { [tabId]: 'only' })
+      const result = panesReducer(state, closePane({ tabId, paneId: 'only' }))
+      expect(result.layouts[tabId]).toEqual(leaf)
     })
   })
 
