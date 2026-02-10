@@ -209,19 +209,29 @@ fn ws_schema_covers_all_required_message_families() {
         let re = serde_json::to_string(&parsed).unwrap();
         assert!(re.contains("\"type\""));
     }
+    let key_shape = serde_json::to_value(WsClientMessage::TerminalCreate {
+        request_id: "shape-1".to_string(),
+        mode: TerminalMode::Shell,
+        shell: ShellType::System,
+        cwd: None,
+        resume_session_id: None,
+        restore: None,
+    }).unwrap();
+    assert!(key_shape.get("requestId").is_some());
+    assert!(key_shape.get("request_id").is_none());
 
     let server_types = [
         r#"{"type":"ready","timestamp":"2026-02-10T00:00:00Z"}"#,
         r#"{"type":"terminal.created","requestId":"r1","terminalId":"t1","snapshot":"","createdAt":1}"#,
         r#"{"type":"terminal.attached","terminalId":"t1","snapshot":"hello\n"}"#,
-        r#"{"type":"terminal.attached.start","terminalId":"t1","totalBytes":12}"#,
-        r#"{"type":"terminal.attached.chunk","terminalId":"t1","seq":0,"data":"aGVsbG8K","isLast":false}"#,
-        r#"{"type":"terminal.attached.end","terminalId":"t1","chunks":1}"#,
+        r#"{"type":"terminal.attached.start","terminalId":"t1","totalCodeUnits":12,"totalChunks":2}"#,
+        r#"{"type":"terminal.attached.chunk","terminalId":"t1","chunk":"aGVsbG8K"}"#,
+        r#"{"type":"terminal.attached.end","terminalId":"t1","totalCodeUnits":12,"totalChunks":2}"#,
         r#"{"type":"terminal.detached","terminalId":"t1"}"#,
         r#"{"type":"terminal.output","terminalId":"t1","data":"hi\n"}"#,
         r#"{"type":"terminal.exit","terminalId":"t1","exitCode":0}"#,
-        r#"{"type":"terminal.meta.updated","terminalId":"t1","title":"Shell","description":"bash","updatedAt":2}"#,
-        r#"{"type":"terminal.meta.list.response","requestId":"r2m","items":[{"terminalId":"t1","title":"Shell","description":"bash","updatedAt":2}]}"#,
+        r#"{"type":"terminal.meta.updated","upsert":[{"terminalId":"t1","cwd":"/tmp","checkoutRoot":"/tmp","repoRoot":"/tmp","displaySubdir":".","branch":"main","isDirty":false,"provider":"codex","sessionId":"sess-1","tokenUsage":{"inputTokens":1,"outputTokens":2,"cachedTokens":0,"totalTokens":3,"contextTokens":0,"modelContextWindow":200000,"compactThresholdTokens":180000,"compactPercent":1},"updatedAt":2}],"remove":[]}"#,
+        r#"{"type":"terminal.meta.list.response","requestId":"r2m","terminals":[{"terminalId":"t1","cwd":"/tmp","checkoutRoot":"/tmp","repoRoot":"/tmp","displaySubdir":".","branch":"main","isDirty":false,"provider":"codex","sessionId":"sess-1","tokenUsage":{"inputTokens":1,"outputTokens":2,"cachedTokens":0,"totalTokens":3,"contextTokens":0,"modelContextWindow":200000,"compactThresholdTokens":180000,"compactPercent":1},"updatedAt":2}]}"#,
         r#"{"type":"terminal.list.response","requestId":"r2","terminals":[{"terminalId":"t1","title":"Shell","description":"bash","mode":"shell","resumeSessionId":"abc","createdAt":1,"lastActivityAt":2,"status":"running","hasClients":true,"cwd":"/tmp"}]}"#,
         r#"{"type":"terminal.list.updated"}"#,
         r#"{"type":"terminal.title.updated","terminalId":"t1","title":"New Title"}"#,
@@ -237,7 +247,7 @@ fn ws_schema_covers_all_required_message_families() {
         r#"{"type":"session.repair.activity","event":"scanned","sessionId":"abc"}"#,
         r#"{"type":"settings.updated","settings":{}}"#,
         r#"{"type":"perf.logging","enabled":false}"#,
-        r#"{"type":"terminal.idle.warning","terminalId":"t1","secondsRemaining":30}"#,
+        r#"{"type":"terminal.idle.warning","terminalId":"t1","killMinutes":180,"warnMinutes":5,"lastActivityAt":1739145600000}"#,
         r#"{"type":"terminal.session.associated","terminalId":"t1","sessionId":"abc"}"#,
         r#"{"type":"pong","timestamp":"2026-02-10T00:00:00Z"}"#,
         r#"{"type":"error","code":"INVALID_MESSAGE","message":"bad payload","requestId":"r1","terminalId":"t1","timestamp":"2026-02-10T00:00:00Z"}"#,
@@ -365,11 +375,11 @@ pub enum WsServerMessage {
     #[serde(rename = "terminal.attached")]
     TerminalAttached { terminal_id: String, snapshot: String },
     #[serde(rename = "terminal.attached.start")]
-    TerminalAttachedStart { terminal_id: String, total_bytes: usize },
+    TerminalAttachedStart { terminal_id: String, total_code_units: usize, total_chunks: usize },
     #[serde(rename = "terminal.attached.chunk")]
-    TerminalAttachedChunk { terminal_id: String, seq: u32, data: String, is_last: bool },
+    TerminalAttachedChunk { terminal_id: String, chunk: String },
     #[serde(rename = "terminal.attached.end")]
-    TerminalAttachedEnd { terminal_id: String, chunks: u32 },
+    TerminalAttachedEnd { terminal_id: String, total_code_units: usize, total_chunks: usize },
     #[serde(rename = "terminal.detached")]
     TerminalDetached { terminal_id: String },
     #[serde(rename = "terminal.output")]
@@ -377,14 +387,9 @@ pub enum WsServerMessage {
     #[serde(rename = "terminal.exit")]
     TerminalExit { terminal_id: String, exit_code: i32 },
     #[serde(rename = "terminal.meta.updated")]
-    TerminalMetaUpdated {
-        terminal_id: String,
-        title: String,
-        description: Option<String>,
-        updated_at: u64,
-    },
+    TerminalMetaUpdated { upsert: Vec<TerminalMetaRecord>, remove: Vec<String> },
     #[serde(rename = "terminal.meta.list.response")]
-    TerminalMetaListResponse { request_id: String, items: Vec<TerminalMetaItem> },
+    TerminalMetaListResponse { request_id: String, terminals: Vec<TerminalMetaRecord> },
     #[serde(rename = "terminal.list.response")]
     TerminalListResponse { request_id: String, terminals: Vec<TerminalListItem> },
     #[serde(rename = "terminal.list.updated")]
@@ -420,7 +425,7 @@ pub enum WsServerMessage {
     #[serde(rename = "perf.logging")]
     PerfLogging { enabled: bool },
     #[serde(rename = "terminal.idle.warning")]
-    TerminalIdleWarning { terminal_id: String, seconds_remaining: u64 },
+    TerminalIdleWarning { terminal_id: String, kill_minutes: u64, warn_minutes: u64, last_activity_at: u64 },
     #[serde(rename = "terminal.session.associated")]
     TerminalSessionAssociated { terminal_id: String, session_id: String },
     #[serde(rename = "pong")]
@@ -452,16 +457,37 @@ pub struct TerminalListItem {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct TerminalMetaItem {
+pub struct TerminalMetaRecord {
     pub terminal_id: String,
-    pub title: String,
-    pub description: Option<String>,
+    pub cwd: Option<String>,
+    pub checkout_root: Option<String>,
+    pub repo_root: Option<String>,
+    pub display_subdir: Option<String>,
+    pub branch: Option<String>,
+    pub is_dirty: Option<bool>,
+    pub provider: Option<String>,
+    pub session_id: Option<String>,
+    pub token_usage: Option<TokenUsageSummary>,
     pub updated_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TokenUsageSummary {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cached_tokens: u64,
+    pub total_tokens: u64,
+    pub context_tokens: Option<u64>,
+    pub model_context_window: Option<u64>,
+    pub compact_threshold_tokens: Option<u64>,
+    pub compact_percent: Option<u8>,
 }
 ```
 
 Also implement a single outbound WS serializer in `freshell-server` so every server frame, including `terminal.output`, is emitted from `WsServerMessage` instead of ad-hoc JSON payloads.
 Attach compatibility rule: emit `terminal.attached` for non-chunk-capable clients (and small-snapshot fast path), and `terminal.attached.start/chunk/end` for chunk-capable large snapshots.
+In the protocol tests, add explicit key-name assertions for `requestId`, `terminalId`, `resumeSessionId`, and `lastActivityAt` to ensure camelCase wire keys stay correct.
 
 **Step 4: Run test to verify it passes**
 
@@ -596,6 +622,23 @@ async fn settings_requires_auth_and_supports_patch_put_roundtrip() {
     assert_eq!(body["defaultShell"], "wsl");
     assert_eq!(body["fontSize"], 16);
 }
+
+#[tokio::test]
+async fn api_routes_are_rate_limited_per_ip() {
+    let app = freshell_server::http::build_test_router_with_rate_limit_for_test(3, 60_000);
+    for _ in 0..3 {
+        let ok = app.clone()
+            .oneshot(Request::builder().method("GET").uri("/api/health").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(ok.status(), StatusCode::OK);
+    }
+    let throttled = app
+        .oneshot(Request::builder().method("GET").uri("/api/health").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(throttled.status(), StatusCode::TOO_MANY_REQUESTS);
+}
 ```
 
 **Step 2: Run test to verify it fails**
@@ -612,6 +655,7 @@ Expected: FAIL
 // - GET /api/settings (auth)
 // - PATCH /api/settings (auth)
 // - PUT /api/settings alias (auth; same semantics as PATCH)
+// - /api/* request-rate middleware parity (default 300 requests / 60 seconds, test-configurable)
 // auth middleware reads x-auth-token
 // config writes are serialized through a single-writer async mutex to preserve atomic file semantics.
 // optional harness helpers can be added later; this test should compile/run with only tower::ServiceExt and axum primitives.
@@ -696,6 +740,21 @@ async fn output_during_attach_window_is_queued_and_flushed_after_snapshot() {
     assert_eq!(flushed["type"], "terminal.output");
     assert_eq!(flushed["data"], "during-attach\n");
 }
+
+#[tokio::test]
+async fn registry_enforces_max_running_and_exited_terminal_limits() {
+    let mut reg = freshell_pty::TerminalRegistry::new_for_test_with_limits(2, 3);
+    reg.create_test_terminal("a\n").await;
+    reg.create_test_terminal("b\n").await;
+    let err = reg.try_create_test_terminal("c\n").await.unwrap_err();
+    assert!(err.to_string().contains("MAX_TERMINALS"));
+
+    reg.mark_test_terminal_exited_oldest_first().await;
+    reg.mark_test_terminal_exited_oldest_first().await;
+    reg.mark_test_terminal_exited_oldest_first().await;
+    reg.mark_test_terminal_exited_oldest_first().await;
+    assert!(reg.exited_terminal_count_for_test() <= 3);
+}
 ```
 
 **Step 2: Run test to verify it fails**
@@ -714,6 +773,9 @@ Expected: FAIL
 // - attach-begin/finish flow to avoid output loss during snapshot send
 // - detach, input, resize, kill
 // - ring buffer sized by character count (default 64 * 1024 chars, not bytes)
+// - scrollback chars derived from settings.scrollback lines using approx 200 chars/line, then clamped to [64 * 1024, 2 * 1024 * 1024]
+// - support env overrides for max scrollback chars where parity source does
+// - enforce MAX_TERMINALS (default 50) and MAX_EXITED_TERMINALS (default 200) with exited-terminal reaping
 // - pending snapshot queue + bounded overflow handling
 // - negotiated chunking via hello.capabilities.terminalAttachChunkV1
 ```
@@ -761,6 +823,15 @@ async fn ws_closes_with_4009_on_server_shutdown() {
     let close = client.wait_close().await;
     assert_eq!(close.code, 4009);
 }
+
+#[tokio::test]
+async fn ws_keepalive_ping_closes_stale_connection_without_pong() {
+    let harness = freshell_server::tests::WsHarness::spawn().await;
+    let mut client = harness.authed_client().await;
+    harness.disable_client_pong_for_test(&mut client).await;
+    let close = client.wait_close().await;
+    assert!(close.code == 1001 || close.code == 1006);
+}
 ```
 
 **Step 2: Run test to verify it fails**
@@ -776,6 +847,7 @@ Expected: FAIL
 // - start hello timer (default 5s)
 // - parse hello, verify token, store capabilities (sessionsPatchV1 + terminalAttachChunkV1)
 // - send ready + initial snapshot messages
+// - protocol-level ping interval (30s) with liveness tracking; terminate stale sockets
 // - close with 4001/4002/4003/4008/4009 codes as needed
 ```
 
@@ -946,7 +1018,8 @@ Expected: FAIL
 // Add WS dispatch for:
 // terminal.create, terminal.attach, terminal.detach,
 // terminal.input, terminal.resize, terminal.kill, terminal.list, terminal.meta.list
-// plus request-id idempotency map and create rate limiter (10 terminal.create messages per 10s window).
+// plus request-id idempotency map and create rate limiter (default 10 terminal.create messages per 10s window;
+// env-configurable via TERMINAL_CREATE_RATE_LIMIT and TERMINAL_CREATE_RATE_WINDOW_MS).
 // all outbound events must be sent through a typed send_ws(WsServerMessage) helper (no raw JSON bypasses).
 ```
 
@@ -1623,6 +1696,60 @@ Expected: PASS
 cd .worktrees/rust-port
 git add rust/crates/freshell-web/src/state rust/crates/freshell-web/tests/pane_tree_ops.rs
 git commit -m "feat(web): port tabs and pane-tree state with local persistence"
+```
+
+### Task 13A: Port Cross-Tab Sync (BroadcastChannel + Storage Event)
+
+**Files:**
+- Create: `.worktrees/rust-port/rust/crates/freshell-web/src/state/cross_tab_sync.rs`
+- Create: `.worktrees/rust-port/rust/crates/freshell-web/src/state/persist_broadcast.rs`
+- Test: `.worktrees/rust-port/rust/crates/freshell-web/tests/cross_tab_sync.rs`
+
+**Step 1: Write the failing test**
+
+```rust
+#[test]
+fn pane_state_change_in_one_tab_propagates_to_second_tab_context() {
+    let mut a = freshell_web::tests::TabContext::new("tab-a");
+    let mut b = freshell_web::tests::TabContext::new("tab-b");
+    a.enable_cross_tab_sync();
+    b.enable_cross_tab_sync();
+
+    a.dispatch_split_right("tab-1");
+    b.process_pending_cross_tab_events();
+
+    assert_eq!(a.snapshot(), b.snapshot());
+}
+```
+
+**Step 2: Run test to verify it fails**
+
+Run: `cd .worktrees/rust-port/rust && cargo test -p freshell-web pane_state_change_in_one_tab_propagates_to_second_tab_context`
+
+Expected: FAIL
+
+**Step 3: Write minimal implementation**
+
+```rust
+// Port cross-tab sync behavior from src/store/crossTabSync.ts + src/store/persistBroadcast.ts:
+// - publish persisted workspace mutations to BroadcastChannel when available
+// - fallback to storage events when BroadcastChannel unavailable
+// - ignore self-originated events via sender-id tagging
+// - debounce/merge updates to avoid event storms
+```
+
+**Step 4: Run test to verify it passes**
+
+Run: `cd .worktrees/rust-port/rust && cargo test -p freshell-web cross_tab_sync`
+
+Expected: PASS
+
+**Step 5: Commit**
+
+```bash
+cd .worktrees/rust-port
+git add rust/crates/freshell-web/src/state/cross_tab_sync.rs rust/crates/freshell-web/src/state/persist_broadcast.rs rust/crates/freshell-web/tests/cross_tab_sync.rs
+git commit -m "feat(web): port broadcast and storage-event cross-tab workspace sync"
 ```
 
 ### Task 14: Port Terminal Pane + WS Terminal Wiring
