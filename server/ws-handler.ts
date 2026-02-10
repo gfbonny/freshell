@@ -9,6 +9,7 @@ import type { TerminalRegistry, TerminalMode } from './terminal-registry.js'
 import { configStore, type AppSettings } from './config-store.js'
 import type { CodingCliSessionManager } from './coding-cli/session-manager.js'
 import type { ProjectGroup } from './coding-cli/types.js'
+import type { TerminalMeta } from './terminal-metadata-service.js'
 import type { SessionRepairService } from './session-scanner/service.js'
 import type { SessionScanResult, SessionRepairResult } from './session-scanner/types.js'
 import { isValidClaudeSessionId } from './claude-session-id.js'
@@ -159,7 +160,49 @@ const TerminalListSchema = z.object({
   requestId: z.string().min(1),
 })
 
+const TerminalMetaListSchema = z.object({
+  type: z.literal('terminal.meta.list'),
+  requestId: z.string().min(1),
+})
+
 const CodingCliProviderSchema = z.enum(['claude', 'codex', 'opencode', 'gemini', 'kimi'])
+
+const TokenSummarySchema = z.object({
+  inputTokens: z.number().int().nonnegative(),
+  outputTokens: z.number().int().nonnegative(),
+  cachedTokens: z.number().int().nonnegative(),
+  totalTokens: z.number().int().nonnegative(),
+  contextTokens: z.number().int().nonnegative().optional(),
+  modelContextWindow: z.number().int().positive().optional(),
+  compactThresholdTokens: z.number().int().positive().optional(),
+  compactPercent: z.number().int().min(0).max(100).optional(),
+})
+
+const TerminalMetaRecordSchema = z.object({
+  terminalId: z.string().min(1),
+  cwd: z.string().optional(),
+  checkoutRoot: z.string().optional(),
+  repoRoot: z.string().optional(),
+  displaySubdir: z.string().optional(),
+  branch: z.string().optional(),
+  isDirty: z.boolean().optional(),
+  provider: CodingCliProviderSchema.optional(),
+  sessionId: z.string().optional(),
+  tokenUsage: TokenSummarySchema.optional(),
+  updatedAt: z.number().int().nonnegative(),
+})
+
+const TerminalMetaListResponseSchema = z.object({
+  type: z.literal('terminal.meta.list.response'),
+  requestId: z.string().min(1),
+  terminals: z.array(TerminalMetaRecordSchema),
+})
+
+const TerminalMetaUpdatedSchema = z.object({
+  type: z.literal('terminal.meta.updated'),
+  upsert: z.array(TerminalMetaRecordSchema),
+  remove: z.array(z.string().min(1)),
+})
 
 // Coding CLI session schemas
 const CodingCliCreateSchema = z.object({
@@ -196,6 +239,7 @@ const ClientMessageSchema = z.discriminatedUnion('type', [
   TerminalResizeSchema,
   TerminalKillSchema,
   TerminalListSchema,
+  TerminalMetaListSchema,
   CodingCliCreateSchema,
   CodingCliInputSchema,
   CodingCliKillSchema,
@@ -230,6 +274,7 @@ export class WsHandler {
   private closed = false
   private sessionRepairService?: SessionRepairService
   private handshakeSnapshotProvider?: HandshakeSnapshotProvider
+  private terminalMetaListProvider?: () => TerminalMeta[]
   private sessionRepairListeners?: {
     scanned: (result: SessionScanResult) => void
     repaired: (result: SessionRepairResult) => void
@@ -241,10 +286,12 @@ export class WsHandler {
     private registry: TerminalRegistry,
     private codingCliManager?: CodingCliSessionManager,
     sessionRepairService?: SessionRepairService,
-    handshakeSnapshotProvider?: HandshakeSnapshotProvider
+    handshakeSnapshotProvider?: HandshakeSnapshotProvider,
+    terminalMetaListProvider?: () => TerminalMeta[]
   ) {
     this.sessionRepairService = sessionRepairService
     this.handshakeSnapshotProvider = handshakeSnapshotProvider
+    this.terminalMetaListProvider = terminalMetaListProvider
     this.wss = new WebSocketServer({
       server,
       path: '/ws',
@@ -922,6 +969,26 @@ export class WsHandler {
         return
       }
 
+      case 'terminal.meta.list': {
+        const terminals = this.terminalMetaListProvider ? this.terminalMetaListProvider() : []
+        const response = TerminalMetaListResponseSchema.safeParse({
+          type: 'terminal.meta.list.response',
+          requestId: m.requestId,
+          terminals,
+        })
+        if (!response.success) {
+          log.warn({ issues: response.error.issues }, 'Invalid terminal.meta.list.response payload')
+          this.sendError(ws, {
+            code: 'INTERNAL_ERROR',
+            message: 'Terminal metadata unavailable',
+            requestId: m.requestId,
+          })
+          return
+        }
+        this.send(ws, response.data)
+        return
+      }
+
       case 'codingcli.create': {
         if (!this.codingCliManager) {
           this.sendError(ws, {
@@ -1115,6 +1182,21 @@ export class WsHandler {
       if (!state.sessionsSnapshotSent) continue
       this.safeSend(ws, msg)
     }
+  }
+
+  broadcastTerminalMetaUpdated(msg: { upsert?: TerminalMeta[]; remove?: string[] }): void {
+    const parsed = TerminalMetaUpdatedSchema.safeParse({
+      type: 'terminal.meta.updated',
+      upsert: msg.upsert || [],
+      remove: msg.remove || [],
+    })
+
+    if (!parsed.success) {
+      log.warn({ issues: parsed.error.issues }, 'Invalid terminal.meta.updated payload')
+      return
+    }
+
+    this.broadcast(parsed.data)
   }
 
   /**
