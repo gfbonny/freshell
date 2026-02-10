@@ -77,9 +77,10 @@
 - Add explicit TypeScript types/guards in client paths handling new attach chunk messages.
 
 7. **Chunking algorithm cost is bounded for current limits.**
-- With `MAX_CHUNK_BYTES` (from env `MAX_WS_CHUNK_BYTES`) defaulting to ~500KB and snapshot upper bound 2MB, attach chunking is typically <= 4 chunks.
+- With `MAX_CHUNK_BYTES` (from env `MAX_WS_CHUNK_BYTES`) defaulting to ~500KB and snapshot upper bound 2M UTF-16 code units, chunk counts vary by serialized byte size.
+- ANSI/control-character-heavy content can expand significantly under JSON escaping, so chunk count can exceed 4 for the same character count.
 - The helper should avoid wasteful repeated full-object envelope serialization in hot loops; precompute stable envelope fragments where possible.
-- Acceptance target: chunking a 2MB snapshot should stay within practical single-digit to low-double-digit milliseconds on dev hardware; treat >100ms as a regression to optimize.
+- Acceptance target: chunking time should scale roughly linearly with serialized payload size; treat >100ms per MiB serialized payload as a regression to optimize.
 
 ---
 
@@ -172,11 +173,6 @@ export function chunkTerminalSnapshot(snapshot: string, maxBytes: number, termin
   const suffix = '}'
   const payloadBytes = (chunk: string) =>
     Buffer.byteLength(prefix) + Buffer.byteLength(JSON.stringify(chunk)) + Buffer.byteLength(suffix)
-  const envelopeBytes = payloadBytes('')
-
-  if (envelopeBytes + 1 > maxBytes) {
-    throw new Error('MAX_WS_CHUNK_BYTES too small for terminal.attached.chunk envelope')
-  }
 
   const chunks: string[] = []
   let cursor = 0
@@ -263,9 +259,10 @@ In `server/ws-handler.ts`:
 - Keep existing `send(ws, msg)` signature unchanged.
 - Add `queueAttachFrame(ws, msg): Promise<boolean>` helper for attach snapshot flow only:
   - resolves `false` if socket is not open before send.
+  - performs the same backpressure guard behavior as `send` (including `4008` close on overflow) before enqueue.
   - enqueues with `ws.send(payload, callback)` and resolves `false` on callback error.
   - resolves `false` if socket transitions out of `OPEN` before callback completes.
-  - keeps backpressure-close behavior consistent with existing guard logic.
+  - this helper is dedicated to attach snapshot sequencing and should not change non-attach send semantics.
 - Add a private class method (inside `WsHandler`) that sends snapshot inline or chunked and finalizes attach only after a complete snapshot send:
 
 ```ts
@@ -340,6 +337,7 @@ Add lifecycle tests for chunk flow:
 - `terminal.created` with `snapshotChunked: true` does not prematurely clear attaching state.
 - `totalCodeUnits` mismatch on `terminal.attached.end` drops snapshot (no partial render).
 - `totalChunks` mismatch between advertised and received chunk count drops snapshot (no partial render).
+- `start` vs `end` metadata mismatch (`totalCodeUnits` or `totalChunks`) drops snapshot (no partial render).
 - incomplete stream cleanup:
   - on websocket reconnect/disconnect, buffered chunks for that terminal are dropped.
   - on timeout (no `terminal.attached.end` within `ATTACH_CHUNK_TIMEOUT_MS = 10_000`), buffered chunks are dropped and attach spinner is cleared.
@@ -364,6 +362,7 @@ In `TerminalView.tsx`:
 - On chunk timeout, drop buffered chunks, clear timer, and set `isAttaching` false (do not render partial snapshot).
 - On `terminal.attached.end`, validate `reassembled.length === totalCodeUnits`; if mismatch, discard snapshot and log warning/debug event.
 - On `terminal.attached.end`, validate received chunk count matches `totalChunks`; if mismatch, discard snapshot and log warning/debug event.
+- Validate `start` metadata and `end` metadata agree; on mismatch, discard snapshot and log warning/debug event.
 - Timeout path should not mark pane as errored; keep normal runtime/output handling active.
 
 Suggested local types:
@@ -418,6 +417,12 @@ type SessionsSyncWs = {
 type SessionsSyncOptions = { coalesceMs?: number }
 ```
 
+Constructor signature:
+
+```ts
+constructor(ws: SessionsSyncWs, options: SessionsSyncOptions = {})
+```
+
 Add fields:
 - `private pendingTrailing: ProjectGroup[] | null = null`
 - `private timer: NodeJS.Timeout | null = null`
@@ -433,6 +438,7 @@ Publish logic:
 - timer callback flushes pendingTrailing once (if present); if it flushed, start next window; if nothing pending, stop timer.
 - In `flush(next)`, preserve existing patch-size fallback:
   - compute patch diff.
+  - read `MAX_WS_CHUNK_BYTES` the same way current service does (per-flush, not constructor-cached), to preserve existing runtime/env behavior.
   - if patch payload exceeds `MAX_CHUNK_BYTES`, send full `sessions.updated` fallback (`broadcastSessionsUpdated(next)`) exactly as current behavior.
   - otherwise keep patch-first (`broadcastSessionsPatch`) + legacy snapshot (`broadcastSessionsUpdatedToLegacy`) behavior.
 
@@ -446,7 +452,7 @@ Add:
 
 ### Step 3. Wire shutdown
 
-In `server/index.ts` shutdown flow, call `sessionsSync.shutdown()` before exiting.
+In `server/index.ts` shutdown flow, call `sessionsSync.shutdown()` **before** `wsHandler.close()` so no coalesced timer fires after websocket shutdown starts.
 
 ### Step 4. Run tests (green)
 
