@@ -599,6 +599,16 @@ export default function SettingsView() {
                 }}
               />
             </SettingsRow>
+
+            <SettingsRow label="Icons on tabs">
+              <Toggle
+                checked={settings.panes?.iconsOnTabs ?? true}
+                onChange={(checked) => {
+                  dispatch(updateSettingsLocal({ panes: { iconsOnTabs: checked } } as any))
+                  scheduleSave({ panes: { iconsOnTabs: checked } })
+                }}
+              />
+            </SettingsRow>
           </SettingsSection>
 
           {/* Terminal */}

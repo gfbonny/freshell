@@ -12,6 +12,16 @@ vi.mock('lucide-react', () => ({
   ),
 }))
 
+vi.mock('@/components/icons/PaneIcon', () => ({
+  default: ({ content, className }: { content: any; className?: string }) => (
+    <svg data-testid="pane-icon" data-content-kind={content.kind} className={className} />
+  ),
+}))
+
+function makeTerminalContent(mode = 'shell') {
+  return { kind: 'terminal' as const, mode, shell: 'system' as const, createRequestId: 'r1', status: 'running' as const }
+}
+
 describe('Pane', () => {
   afterEach(() => {
     cleanup()
@@ -260,6 +270,7 @@ describe('Pane', () => {
           isOnlyPane={false}
           title="My Terminal"
           status="running"
+          content={makeTerminalContent()}
           onClose={vi.fn()}
           onFocus={vi.fn()}
         >
@@ -277,6 +288,7 @@ describe('Pane', () => {
           isOnlyPane={true}
           title="My Terminal"
           status="running"
+          content={makeTerminalContent()}
           onClose={vi.fn()}
           onFocus={vi.fn()}
         >
@@ -310,6 +322,7 @@ describe('Pane', () => {
           isOnlyPane={false}
           title="My Terminal"
           status="running"
+          content={makeTerminalContent()}
           onClose={onClose}
           onFocus={vi.fn()}
         >

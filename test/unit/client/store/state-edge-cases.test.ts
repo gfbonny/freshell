@@ -822,6 +822,7 @@ describe('State Edge Cases', () => {
           panes: {
             defaultNewPane: 'shell',
             snapThreshold: 3,
+            iconsOnTabs: true,
           },
           codingCli: {
             enabledProviders: ['claude', 'codex'],

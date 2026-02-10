@@ -181,6 +181,7 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
         isOnlyPane={isOnlyPane}
         title={paneTitle}
         status={paneStatus}
+        content={node.content}
         onClose={() => handleClose(node.id, node.content)}
         onFocus={() => handleFocus(node.id)}
         onToggleZoom={() => handleToggleZoom(node.id)}

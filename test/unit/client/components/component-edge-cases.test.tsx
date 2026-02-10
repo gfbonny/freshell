@@ -76,6 +76,8 @@ vi.mock('lucide-react', () => ({
   History: ({ className }: { className?: string }) => <svg data-testid="history-icon" className={className} />,
   Settings: ({ className }: { className?: string }) => <svg data-testid="settings-icon" className={className} />,
   LayoutGrid: ({ className }: { className?: string }) => <svg data-testid="layout-icon" className={className} />,
+  Globe: ({ className }: { className?: string }) => <svg data-testid="globe-icon" className={className} />,
+  FileText: ({ className }: { className?: string }) => <svg data-testid="file-text-icon" className={className} />,
   Search: ({ className }: { className?: string }) => <svg data-testid="search-icon" className={className} />,
   Moon: ({ className }: { className?: string }) => <svg data-testid="moon-icon" className={className} />,
   Sun: ({ className }: { className?: string }) => <svg data-testid="sun-icon" className={className} />,
@@ -89,6 +91,13 @@ vi.mock('lucide-react', () => ({
   ExternalLink: ({ className }: { className?: string }) => <svg data-testid="external-icon" className={className} />,
   ChevronDown: ({ className }: { className?: string }) => <svg data-testid="chevron-down-icon" className={className} />,
   MessageSquare: ({ className }: { className?: string }) => <svg data-testid="message-square-icon" className={className} />,
+}))
+
+// Mock PaneIcon component
+vi.mock('@/components/icons/PaneIcon', () => ({
+  default: ({ content, className }: any) => (
+    <svg data-testid="pane-icon" data-content-kind={content?.kind} data-content-mode={content?.mode} className={className} />
+  ),
 }))
 
 // Mock react-window to avoid hook usage in JSDOM edge case tests
@@ -747,8 +756,9 @@ describe('Component Edge Cases', () => {
 
         renderWithStore(<TabBar />, store)
 
-        const circles = screen.getAllByTestId('circle-icon')
-        const hasError = circles.some((c) => c.getAttribute('class')?.includes('fill-destructive'))
+        // With iconsOnTabs=true (default), tabs with mode render PaneIcon with status class
+        const icons = screen.getAllByTestId('pane-icon')
+        const hasError = icons.some((c) => c.getAttribute('class')?.includes('text-destructive'))
         expect(hasError).toBe(true)
       })
     })
@@ -803,8 +813,8 @@ describe('Component Edge Cases', () => {
           </Provider>
         )
 
-        // Should not crash and should show tabs
-        expect(screen.getAllByTestId('circle-icon').length).toBeGreaterThan(0)
+        // Should not crash and should show tabs (pane-icon with iconsOnTabs default)
+        expect(screen.getAllByTestId('pane-icon').length).toBeGreaterThan(0)
       })
 
       it('handles rapid tab removals without crash', () => {

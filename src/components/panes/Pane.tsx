@@ -1,6 +1,7 @@
 import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { TerminalStatus } from '@/store/types'
+import type { PaneContent } from '@/store/paneTypes'
 import PaneHeader from './PaneHeader'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
 
@@ -11,6 +12,7 @@ interface PaneProps {
   isOnlyPane: boolean
   title?: string
   status?: TerminalStatus
+  content?: PaneContent
   onClose: () => void
   onFocus: () => void
   onToggleZoom?: () => void
@@ -31,6 +33,7 @@ export default function Pane({
   isOnlyPane,
   title,
   status,
+  content,
   onClose,
   onFocus,
   onToggleZoom,
@@ -73,6 +76,7 @@ export default function Pane({
             onClose={onClose}
             onToggleZoom={onToggleZoom}
             isZoomed={isZoomed}
+            content={content!}
             isRenaming={isRenaming}
             renameValue={renameValue}
             onRenameChange={onRenameChange}

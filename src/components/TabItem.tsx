@@ -2,11 +2,13 @@ import { X, Circle } from 'lucide-react'
 import { useRef, useEffect } from 'react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
+import PaneIcon from '@/components/icons/PaneIcon'
 import type { Tab } from '@/store/types'
+import type { PaneContent } from '@/store/paneTypes'
 import type { MouseEvent, KeyboardEvent } from 'react'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
 
-function StatusIndicator({ status }: { status: string }) {
+function StatusDot({ status }: { status: string }) {
   if (status === 'running') {
     return <Circle className="h-2 w-2 fill-success text-success" />
   }
@@ -20,6 +22,17 @@ function StatusIndicator({ status }: { status: string }) {
   return <Circle className="h-2 w-2 text-muted-foreground/20 animate-pulse" />
 }
 
+function statusClassName(status: string): string {
+  switch (status) {
+    case 'running': return 'text-success'
+    case 'exited': return 'text-muted-foreground/40'
+    case 'error': return 'text-destructive'
+    default: return 'text-muted-foreground/20 animate-pulse'
+  }
+}
+
+const MAX_TAB_ICONS = 6
+
 export interface TabItemProps {
   tab: Tab
   isActive: boolean
@@ -27,6 +40,8 @@ export interface TabItemProps {
   isDragging: boolean
   isRenaming: boolean
   renameValue: string
+  paneContents?: PaneContent[]
+  iconsOnTabs?: boolean
   onRenameChange: (value: string) => void
   onRenameBlur: () => void
   onRenameKeyDown: (e: KeyboardEvent<HTMLInputElement>) => void
@@ -42,6 +57,8 @@ export default function TabItem({
   isDragging,
   isRenaming,
   renameValue,
+  paneContents,
+  iconsOnTabs = true,
   onRenameChange,
   onRenameBlur,
   onRenameKeyDown,
@@ -56,6 +73,33 @@ export default function TabItem({
       inputRef.current.focus()
     }
   }, [isRenaming])
+
+  const renderIcons = () => {
+    if (!iconsOnTabs || !paneContents || paneContents.length === 0) {
+      return <StatusDot status={tab.status} />
+    }
+
+    const visible = paneContents.slice(0, MAX_TAB_ICONS)
+    const overflow = paneContents.length - MAX_TAB_ICONS
+
+    return (
+      <span className="flex items-center gap-0.5">
+        {visible.map((content, i) => {
+          const status = content.kind === 'terminal' ? content.status : 'running'
+          return (
+            <PaneIcon
+              key={i}
+              content={content}
+              className={cn('h-3 w-3 shrink-0', statusClassName(status))}
+            />
+          )
+        })}
+        {overflow > 0 && (
+          <span className="text-[10px] text-muted-foreground leading-none">+{overflow}</span>
+        )}
+      </span>
+    )
+  }
 
   return (
     <div
@@ -82,7 +126,7 @@ export default function TabItem({
         }
       }}
     >
-      <StatusIndicator status={tab.status} />
+      {renderIcons()}
 
       {isRenaming ? (
         <input

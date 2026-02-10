@@ -49,6 +49,16 @@ vi.mock('lucide-react', () => ({
   Minimize2: ({ className }: { className?: string }) => (
     <svg data-testid="minimize-icon" className={className} />
   ),
+  LayoutGrid: ({ className }: { className?: string }) => (
+    <svg data-testid="layout-grid-icon" className={className} />
+  ),
+}))
+
+// Mock PaneIcon to avoid transitive dependency issues
+vi.mock('@/components/icons/PaneIcon', () => ({
+  default: ({ content, className }: { content: any; className?: string }) => (
+    <svg data-testid="pane-icon" data-content-kind={content.kind} className={className} />
+  ),
 }))
 
 // Mock TerminalView component to avoid xterm.js dependencies

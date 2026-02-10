@@ -36,6 +36,16 @@ export function collectTerminalIds(node: PaneNode): string[] {
   ]
 }
 
+export function collectPaneContents(node: PaneNode): PaneContent[] {
+  if (node.type === 'leaf') {
+    return [node.content]
+  }
+  return [
+    ...collectPaneContents(node.children[0]),
+    ...collectPaneContents(node.children[1]),
+  ]
+}
+
 export function findPaneContent(node: PaneNode, paneId: string): PaneContent | null {
   if (node.type === 'leaf') {
     return node.id === paneId ? node.content : null

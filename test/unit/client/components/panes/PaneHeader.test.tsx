@@ -17,6 +17,16 @@ vi.mock('lucide-react', () => ({
   ),
 }))
 
+vi.mock('@/components/icons/PaneIcon', () => ({
+  default: ({ content, className }: { content: any; className?: string }) => (
+    <svg data-testid="pane-icon" data-content-kind={content.kind} data-content-mode={content.mode} className={className} />
+  ),
+}))
+
+function makeTerminalContent(mode = 'shell') {
+  return { kind: 'terminal' as const, mode, shell: 'system' as const, createRequestId: 'r1', status: 'running' as const }
+}
+
 describe('PaneHeader', () => {
   afterEach(() => {
     cleanup()
@@ -30,6 +40,7 @@ describe('PaneHeader', () => {
           status="running"
           isActive={true}
           onClose={vi.fn()}
+          content={makeTerminalContent()}
         />
       )
 
@@ -43,10 +54,11 @@ describe('PaneHeader', () => {
           status="running"
           isActive={true}
           onClose={vi.fn()}
+          content={makeTerminalContent()}
         />
       )
 
-      expect(screen.getByTestId('circle-icon')).toBeInTheDocument()
+      expect(screen.getByTestId('pane-icon')).toBeInTheDocument()
     })
 
     it('renders close button', () => {
@@ -56,10 +68,55 @@ describe('PaneHeader', () => {
           status="running"
           isActive={true}
           onClose={vi.fn()}
+          content={makeTerminalContent()}
         />
       )
 
       expect(screen.getByTitle('Close pane')).toBeInTheDocument()
+    })
+  })
+
+  describe('PaneIcon rendering', () => {
+    it('renders PaneIcon with content instead of a plain circle', () => {
+      const content = makeTerminalContent('claude')
+      render(
+        <PaneHeader title="My Terminal" status="running" isActive={true} onClose={vi.fn()} content={content} />
+      )
+      const paneIcon = screen.getByTestId('pane-icon')
+      expect(paneIcon).toBeInTheDocument()
+      expect(paneIcon.getAttribute('data-content-mode')).toBe('claude')
+    })
+
+    it('applies success color to icon when status is running', () => {
+      render(
+        <PaneHeader title="Test" status="running" isActive={true} onClose={vi.fn()} content={makeTerminalContent()} />
+      )
+      const paneIcon = screen.getByTestId('pane-icon')
+      expect(paneIcon.getAttribute('class')).toContain('text-success')
+    })
+
+    it('applies destructive color to icon when status is error', () => {
+      render(
+        <PaneHeader title="Test" status="error" isActive={true} onClose={vi.fn()} content={makeTerminalContent()} />
+      )
+      const paneIcon = screen.getByTestId('pane-icon')
+      expect(paneIcon.getAttribute('class')).toContain('text-destructive')
+    })
+
+    it('applies muted color to icon when status is exited', () => {
+      render(
+        <PaneHeader title="Test" status="exited" isActive={true} onClose={vi.fn()} content={makeTerminalContent()} />
+      )
+      const paneIcon = screen.getByTestId('pane-icon')
+      expect(paneIcon.getAttribute('class')).toContain('text-muted-foreground/40')
+    })
+
+    it('applies pulse animation to icon when status is creating', () => {
+      render(
+        <PaneHeader title="Test" status="creating" isActive={true} onClose={vi.fn()} content={makeTerminalContent()} />
+      )
+      const paneIcon = screen.getByTestId('pane-icon')
+      expect(paneIcon.getAttribute('class')).toContain('animate-pulse')
     })
   })
 
@@ -72,6 +129,7 @@ describe('PaneHeader', () => {
           status="running"
           isActive={true}
           onClose={onClose}
+          content={makeTerminalContent()}
         />
       )
 
@@ -90,6 +148,7 @@ describe('PaneHeader', () => {
             status="running"
             isActive={true}
             onClose={onClose}
+            content={makeTerminalContent()}
           />
         </div>
       )
@@ -108,6 +167,7 @@ describe('PaneHeader', () => {
           status="running"
           isActive={true}
           onClose={vi.fn()}
+          content={makeTerminalContent()}
           isRenaming={true}
           renameValue="My Terminal"
           onRenameChange={vi.fn()}
@@ -130,6 +190,7 @@ describe('PaneHeader', () => {
           status="running"
           isActive={true}
           onClose={vi.fn()}
+          content={makeTerminalContent()}
           isRenaming={false}
         />
       )
@@ -146,6 +207,7 @@ describe('PaneHeader', () => {
           status="running"
           isActive={true}
           onClose={vi.fn()}
+          content={makeTerminalContent()}
           isRenaming={true}
           renameValue="My Terminal"
           onRenameChange={onRenameChange}
@@ -166,6 +228,7 @@ describe('PaneHeader', () => {
           status="running"
           isActive={true}
           onClose={vi.fn()}
+          content={makeTerminalContent()}
           isRenaming={true}
           renameValue="My Terminal"
           onRenameChange={vi.fn()}
@@ -186,6 +249,7 @@ describe('PaneHeader', () => {
           status="running"
           isActive={true}
           onClose={vi.fn()}
+          content={makeTerminalContent()}
           isRenaming={true}
           renameValue="My Terminal"
           onRenameChange={vi.fn()}
@@ -207,6 +271,7 @@ describe('PaneHeader', () => {
             status="running"
             isActive={true}
             onClose={vi.fn()}
+            content={makeTerminalContent()}
             isRenaming={true}
             renameValue="My Terminal"
             onRenameChange={vi.fn()}
@@ -228,6 +293,7 @@ describe('PaneHeader', () => {
           status="running"
           isActive={true}
           onClose={vi.fn()}
+          content={makeTerminalContent()}
           onDoubleClick={onDoubleClick}
         />
       )
@@ -245,6 +311,7 @@ describe('PaneHeader', () => {
           status="running"
           isActive={true}
           onClose={vi.fn()}
+          content={makeTerminalContent()}
           onToggleZoom={vi.fn()}
           isZoomed={false}
         />
@@ -263,6 +330,7 @@ describe('PaneHeader', () => {
           status="running"
           isActive={true}
           onClose={vi.fn()}
+          content={makeTerminalContent()}
           onToggleZoom={vi.fn()}
           isZoomed={true}
         />
@@ -282,6 +350,7 @@ describe('PaneHeader', () => {
           status="running"
           isActive={true}
           onClose={vi.fn()}
+          content={makeTerminalContent()}
           onToggleZoom={onToggleZoom}
           isZoomed={false}
         />
@@ -300,6 +369,7 @@ describe('PaneHeader', () => {
             status="running"
             isActive={true}
             onClose={vi.fn()}
+            content={makeTerminalContent()}
             onToggleZoom={vi.fn()}
             isZoomed={false}
           />
@@ -317,6 +387,7 @@ describe('PaneHeader', () => {
           status="running"
           isActive={true}
           onClose={vi.fn()}
+          content={makeTerminalContent()}
         />
       )
 
@@ -333,6 +404,7 @@ describe('PaneHeader', () => {
           status="running"
           isActive={true}
           onClose={vi.fn()}
+          content={makeTerminalContent()}
         />
       )
 
@@ -348,6 +420,7 @@ describe('PaneHeader', () => {
           status="running"
           isActive={false}
           onClose={vi.fn()}
+          content={makeTerminalContent()}
         />
       )
 

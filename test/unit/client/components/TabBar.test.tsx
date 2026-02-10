@@ -41,6 +41,13 @@ vi.mock('lucide-react', () => ({
   ),
 }))
 
+// Mock PaneIcon component
+vi.mock('@/components/icons/PaneIcon', () => ({
+  default: ({ content, className }: any) => (
+    <svg data-testid="pane-icon" data-content-kind={content?.kind} data-content-mode={content?.mode} className={className} />
+  ),
+}))
+
 function createTab(overrides: Partial<Tab> = {}): Tab {
   return {
     id: `tab-${Math.random().toString(36).slice(2)}`,
@@ -514,6 +521,7 @@ describe('TabBar', () => {
       return element.getAttribute('class') || ''
     }
 
+    // With iconsOnTabs=true (default), tabs with mode use PaneIcon with status classes
     it('shows running status indicator for running terminal', () => {
       const tab = createTab({ id: 'tab-1', status: 'running' })
 
@@ -524,10 +532,9 @@ describe('TabBar', () => {
 
       renderWithStore(<TabBar />, store)
 
-      const circles = screen.getAllByTestId('circle-icon')
-      // Find the one with fill-success class
-      const runningIndicator = circles.find((c) =>
-        getClassString(c).includes('fill-success')
+      const icons = screen.getAllByTestId('pane-icon')
+      const runningIndicator = icons.find((c) =>
+        getClassString(c).includes('text-success')
       )
       expect(runningIndicator).toBeDefined()
     })
@@ -542,8 +549,8 @@ describe('TabBar', () => {
 
       renderWithStore(<TabBar />, store)
 
-      const circles = screen.getAllByTestId('circle-icon')
-      const exitedIndicator = circles.find((c) =>
+      const icons = screen.getAllByTestId('pane-icon')
+      const exitedIndicator = icons.find((c) =>
         getClassString(c).includes('text-muted-foreground/40')
       )
       expect(exitedIndicator).toBeDefined()
@@ -559,9 +566,9 @@ describe('TabBar', () => {
 
       renderWithStore(<TabBar />, store)
 
-      const circles = screen.getAllByTestId('circle-icon')
-      const errorIndicator = circles.find((c) =>
-        getClassString(c).includes('fill-destructive')
+      const icons = screen.getAllByTestId('pane-icon')
+      const errorIndicator = icons.find((c) =>
+        getClassString(c).includes('text-destructive')
       )
       expect(errorIndicator).toBeDefined()
     })
@@ -576,8 +583,8 @@ describe('TabBar', () => {
 
       renderWithStore(<TabBar />, store)
 
-      const circles = screen.getAllByTestId('circle-icon')
-      const creatingIndicator = circles.find((c) =>
+      const icons = screen.getAllByTestId('pane-icon')
+      const creatingIndicator = icons.find((c) =>
         getClassString(c).includes('animate-pulse')
       )
       expect(creatingIndicator).toBeDefined()
@@ -595,23 +602,23 @@ describe('TabBar', () => {
 
       renderWithStore(<TabBar />, store)
 
-      const circles = screen.getAllByTestId('circle-icon')
+      const icons = screen.getAllByTestId('pane-icon')
 
       // We should have 3 status indicators (one per tab)
-      expect(circles).toHaveLength(3)
+      expect(icons).toHaveLength(3)
 
       // Check for running indicator
-      const hasRunning = circles.some((c) => getClassString(c).includes('fill-success'))
+      const hasRunning = icons.some((c) => getClassString(c).includes('text-success'))
       expect(hasRunning).toBe(true)
 
       // Check for exited indicator
-      const hasExited = circles.some((c) =>
+      const hasExited = icons.some((c) =>
         getClassString(c).includes('text-muted-foreground/40')
       )
       expect(hasExited).toBe(true)
 
       // Check for error indicator
-      const hasError = circles.some((c) => getClassString(c).includes('fill-destructive'))
+      const hasError = icons.some((c) => getClassString(c).includes('text-destructive'))
       expect(hasError).toBe(true)
     })
   })
@@ -891,6 +898,147 @@ describe('TabBar', () => {
       const state = store.getState().tabs
       expect(state.tabs[0].id).toBe('tab-1')
       expect(state.tabs[1].id).toBe('tab-2')
+    })
+  })
+
+  describe('pane type icons on tabs', () => {
+    // Helper to get class attribute from SVG elements
+    const getClassString = (element: Element): string => {
+      return element.getAttribute('class') || ''
+    }
+
+    it('renders one icon per pane when iconsOnTabs is enabled', () => {
+      const tab = createTab({ id: 'tab-1', title: 'Split Tab' })
+
+      const store = createStore(
+        {
+          tabs: [tab],
+          activeTabId: 'tab-1',
+        },
+        {},
+        {
+          layouts: {
+            'tab-1': createTwoTerminalSplitLayout('term-a', 'term-b'),
+          },
+          activePane: {
+            'tab-1': 'pane-1',
+          },
+        },
+      )
+
+      renderWithStore(<TabBar />, store)
+
+      const icons = screen.getAllByTestId('pane-icon')
+      expect(icons).toHaveLength(2)
+      expect(icons[0].getAttribute('data-content-kind')).toBe('terminal')
+      expect(icons[1].getAttribute('data-content-kind')).toBe('terminal')
+    })
+
+    it('renders single status dot when iconsOnTabs is disabled', () => {
+      const tab = createTab({ id: 'tab-1', title: 'Tab 1', status: 'running' })
+
+      const store = createStore({
+        tabs: [tab],
+        activeTabId: 'tab-1',
+      })
+
+      // Disable iconsOnTabs via settings
+      store.dispatch({
+        type: 'settings/updateSettingsLocal',
+        payload: { panes: { defaultNewPane: 'ask', iconsOnTabs: false } },
+      })
+
+      renderWithStore(<TabBar />, store)
+
+      // Should have circle-icon (StatusDot), not pane-icon
+      const circles = screen.getAllByTestId('circle-icon')
+      expect(circles.length).toBeGreaterThanOrEqual(1)
+      const hasSuccess = circles.some((c) =>
+        getClassString(c).includes('fill-success')
+      )
+      expect(hasSuccess).toBe(true)
+
+      // No pane-icon should be rendered
+      expect(screen.queryByTestId('pane-icon')).toBeNull()
+    })
+
+    it('caps at 6 icons and shows overflow indicator', () => {
+      const tab = createTab({ id: 'tab-1', title: 'Many Panes' })
+
+      // Build a deeply nested layout with 7 panes
+      // Structure: split(split(split(split(split(split(leaf, leaf), leaf), leaf), leaf), leaf), leaf)
+      function makeLeaf(id: string, termId: string): PaneNode {
+        return {
+          type: 'leaf',
+          id,
+          content: {
+            kind: 'terminal',
+            mode: 'shell',
+            shell: 'system',
+            status: 'running',
+            createRequestId: `req-${id}`,
+            terminalId: termId,
+          },
+        }
+      }
+
+      let tree: PaneNode = makeLeaf('pane-1', 'term-1')
+      for (let i = 2; i <= 7; i++) {
+        tree = {
+          type: 'split',
+          id: `split-${i - 1}`,
+          direction: 'horizontal',
+          sizes: [50, 50],
+          children: [tree, makeLeaf(`pane-${i}`, `term-${i}`)],
+        }
+      }
+
+      const store = createStore(
+        {
+          tabs: [tab],
+          activeTabId: 'tab-1',
+        },
+        {},
+        {
+          layouts: {
+            'tab-1': tree,
+          },
+          activePane: {
+            'tab-1': 'pane-1',
+          },
+        },
+      )
+
+      renderWithStore(<TabBar />, store)
+
+      // Should show 6 icons + overflow indicator
+      const icons = screen.getAllByTestId('pane-icon')
+      expect(icons).toHaveLength(6)
+
+      // Overflow indicator shows +1
+      expect(screen.getByText('+1')).toBeInTheDocument()
+    })
+
+    it('renders single icon for tab with single pane (no layout)', () => {
+      // Tab with mode but no paneLayout entry -> fallback synthesis
+      const tab = createTab({
+        id: 'tab-1',
+        title: 'Single Pane',
+        mode: 'claude',
+        status: 'running',
+      })
+
+      const store = createStore({
+        tabs: [tab],
+        activeTabId: 'tab-1',
+      })
+
+      renderWithStore(<TabBar />, store)
+
+      const icons = screen.getAllByTestId('pane-icon')
+      expect(icons).toHaveLength(1)
+      expect(icons[0].getAttribute('data-content-kind')).toBe('terminal')
+      expect(icons[0].getAttribute('data-content-mode')).toBe('claude')
     })
   })
 })

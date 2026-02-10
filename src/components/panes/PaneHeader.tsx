@@ -1,23 +1,17 @@
 import { useRef, useEffect } from 'react'
-import { X, Circle, Maximize2, Minimize2 } from 'lucide-react'
+import { X, Maximize2, Minimize2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { TerminalStatus } from '@/store/types'
+import type { PaneContent } from '@/store/paneTypes'
+import PaneIcon from '@/components/icons/PaneIcon'
 
-function StatusIndicator({ status }: { status: TerminalStatus }) {
-  if (status === 'running') {
-    return (
-      <div className="relative">
-        <Circle className="h-2 w-2 fill-success text-success" />
-      </div>
-    )
+function statusClassName(status: TerminalStatus): string {
+  switch (status) {
+    case 'running': return 'text-success'
+    case 'exited': return 'text-muted-foreground/40'
+    case 'error': return 'text-destructive'
+    default: return 'text-muted-foreground/20 animate-pulse'
   }
-  if (status === 'exited') {
-    return <Circle className="h-2 w-2 text-muted-foreground/40" />
-  }
-  if (status === 'error') {
-    return <Circle className="h-2 w-2 fill-destructive text-destructive" />
-  }
-  return <Circle className="h-2 w-2 text-muted-foreground/20 animate-pulse" />
 }
 
 interface PaneHeaderProps {
@@ -27,6 +21,7 @@ interface PaneHeaderProps {
   onClose: () => void
   onToggleZoom?: () => void
   isZoomed?: boolean
+  content: PaneContent
   isRenaming?: boolean
   renameValue?: string
   onRenameChange?: (value: string) => void
@@ -42,6 +37,7 @@ export default function PaneHeader({
   onClose,
   onToggleZoom,
   isZoomed,
+  content,
   isRenaming,
   renameValue,
   onRenameChange,
@@ -68,7 +64,7 @@ export default function PaneHeader({
       role="banner"
       aria-label={`Pane: ${title}`}
     >
-      <StatusIndicator status={status} />
+      <PaneIcon content={content} className={cn('h-3.5 w-3.5 shrink-0', statusClassName(status))} />
 
       {isRenaming ? (
         <input

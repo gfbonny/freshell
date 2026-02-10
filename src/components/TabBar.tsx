@@ -3,7 +3,7 @@ import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { addTab, closeTab, setActiveTab, updateTab, reorderTabs, clearTabRenameRequest } from '@/store/tabsSlice'
 import { getWsClient } from '@/lib/ws-client'
 import { getTabDisplayTitle } from '@/lib/tab-title'
-import { collectTerminalIds } from '@/lib/pane-utils'
+import { collectTerminalIds, collectPaneContents } from '@/lib/pane-utils'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import TabItem from './TabItem'
 import { cancelCodingCliRequest } from '@/store/codingCliSlice'
@@ -27,6 +27,7 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { Tab } from '@/store/types'
+import type { PaneContent } from '@/store/paneTypes'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
 
 interface SortableTabProps {
@@ -37,6 +38,8 @@ interface SortableTabProps {
   isDragging: boolean
   isRenaming: boolean
   renameValue: string
+  paneContents?: PaneContent[]
+  iconsOnTabs?: boolean
   onRenameChange: (value: string) => void
   onRenameBlur: () => void
   onRenameKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void
@@ -53,6 +56,8 @@ function SortableTab({
   isDragging,
   isRenaming,
   renameValue,
+  paneContents,
+  iconsOnTabs,
   onRenameChange,
   onRenameBlur,
   onRenameKeyDown,
@@ -88,6 +93,8 @@ function SortableTab({
         isDragging={isDragging}
         isRenaming={isRenaming}
         renameValue={renameValue}
+        paneContents={paneContents}
+        iconsOnTabs={iconsOnTabs}
         onRenameChange={onRenameChange}
         onRenameBlur={onRenameBlur}
         onRenameKeyDown={onRenameKeyDown}
@@ -113,6 +120,7 @@ export default function TabBar() {
   const renameRequestTabId = tabsState?.renameRequestTabId ?? null
   const paneLayouts = useAppSelector((s) => s.panes?.layouts) ?? EMPTY_LAYOUTS
   const attentionByTab = useAppSelector((s) => s.turnCompletion?.attentionByTab) ?? EMPTY_ATTENTION
+  const iconsOnTabs = useAppSelector((s) => s.settings?.settings?.panes?.iconsOnTabs ?? true)
 
   const ws = useMemo(() => getWsClient(), [])
 
@@ -122,6 +130,24 @@ export default function TabBar() {
     (tab: Tab): string => getTabDisplayTitle(tab, paneLayouts[tab.id]),
     [paneLayouts]
   )
+
+  const getPaneContents = useCallback((tab: Tab): PaneContent[] | undefined => {
+    const layout = paneLayouts[tab.id]
+    if (layout) {
+      return collectPaneContents(layout)
+    }
+    // Fallback: synthesize a single content from tab.mode
+    if (tab.mode) {
+      return [{
+        kind: 'terminal' as const,
+        mode: tab.mode,
+        shell: tab.shell,
+        createRequestId: tab.createRequestId,
+        status: tab.status,
+      }]
+    }
+    return undefined
+  }, [paneLayouts])
 
   const getTerminalIdsForTab = useCallback((tab: Tab): string[] => {
     const layout = paneLayouts[tab.id]
@@ -225,6 +251,8 @@ export default function TabBar() {
                 isDragging={activeId === tab.id}
                 isRenaming={renamingId === tab.id}
                 renameValue={renameValue}
+                paneContents={getPaneContents(tab)}
+                iconsOnTabs={iconsOnTabs}
                 onRenameChange={setRenameValue}
                 onRenameBlur={() => {
                   dispatch(
@@ -299,6 +327,8 @@ export default function TabBar() {
                 isDragging={false}
                 isRenaming={false}
                 renameValue=""
+                paneContents={getPaneContents(activeTab)}
+                iconsOnTabs={iconsOnTabs}
                 onRenameChange={() => {}}
                 onRenameBlur={() => {}}
                 onRenameKeyDown={() => {}}
