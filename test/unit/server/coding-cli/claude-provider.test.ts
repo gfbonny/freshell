@@ -47,6 +47,140 @@ describe('claudeProvider.getStreamArgs()', () => {
   })
 })
 
+describe('parseSessionContent() - token usage aggregation', () => {
+  const originalAutocompactOverride = process.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE
+
+  afterEach(() => {
+    if (originalAutocompactOverride === undefined) {
+      delete process.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE
+    } else {
+      process.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = originalAutocompactOverride
+    }
+  })
+
+  it('aggregates assistant usage with uuid -> message.id -> line-hash dedupe priority', () => {
+    const content = [
+      JSON.stringify({
+        type: 'assistant',
+        uuid: 'uuid-a',
+        message: {
+          role: 'assistant',
+          usage: {
+            input_tokens: 10,
+            output_tokens: 4,
+            cache_read_input_tokens: 5,
+            cache_creation_input_tokens: 0,
+          },
+        },
+      }),
+      // Duplicate by uuid (must be ignored)
+      JSON.stringify({
+        type: 'assistant',
+        uuid: 'uuid-a',
+        message: {
+          role: 'assistant',
+          usage: {
+            input_tokens: 99,
+            output_tokens: 99,
+            cache_read_input_tokens: 99,
+            cache_creation_input_tokens: 99,
+          },
+        },
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          id: 'message-b',
+          role: 'assistant',
+          usage: {
+            input_tokens: 6,
+            output_tokens: 3,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 4,
+          },
+        },
+      }),
+      // Duplicate by message.id (must be ignored)
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          id: 'message-b',
+          role: 'assistant',
+          usage: {
+            input_tokens: 77,
+            output_tokens: 77,
+            cache_read_input_tokens: 77,
+            cache_creation_input_tokens: 77,
+          },
+        },
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          usage: {
+            input_tokens: 4,
+            output_tokens: 2,
+            cache_read_input_tokens: 1,
+            cache_creation_input_tokens: 2,
+          },
+        },
+      }),
+      // Duplicate with no uuid/message.id (line hash fallback must dedupe)
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          usage: {
+            input_tokens: 4,
+            output_tokens: 2,
+            cache_read_input_tokens: 1,
+            cache_creation_input_tokens: 2,
+          },
+        },
+      }),
+    ].join('\n')
+
+    const meta = parseSessionContent(content)
+
+    expect(meta.tokenUsage).toEqual({
+      inputTokens: 20,
+      outputTokens: 9,
+      cachedTokens: 12,
+      totalTokens: 41,
+      contextTokens: 41,
+      modelContextWindow: 200000,
+      compactThresholdTokens: 190000,
+      compactPercent: 0,
+    })
+  })
+
+  it('caps CLAUDE_AUTOCOMPACT_PCT_OVERRIDE above default threshold', () => {
+    process.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = '99'
+
+    const content = [
+      JSON.stringify({
+        type: 'assistant',
+        uuid: 'uuid-threshold',
+        message: {
+          role: 'assistant',
+          usage: {
+            input_tokens: 100000,
+            output_tokens: 90000,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+          },
+        },
+      }),
+    ].join('\n')
+
+    const meta = parseSessionContent(content)
+
+    expect(meta.tokenUsage?.compactThresholdTokens).toBe(190000)
+    expect(meta.tokenUsage?.compactPercent).toBe(100)
+  })
+})
+
 describe('claude provider cross-platform tests', () => {
   describe('getClaudeHome()', () => {
     const originalEnv = process.env.CLAUDE_HOME

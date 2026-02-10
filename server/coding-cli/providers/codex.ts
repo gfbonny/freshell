@@ -3,7 +3,7 @@ import os from 'os'
 import fsp from 'fs/promises'
 import { extractTitleFromMessage } from '../../title-utils.js'
 import type { CodingCliProvider } from '../provider.js'
-import type { NormalizedEvent, ParsedSessionMeta } from '../types.js'
+import type { NormalizedEvent, ParsedSessionMeta, TokenPayload, TokenSummary } from '../types.js'
 import { looksLikePath, isSystemContext, extractFromIdeContext, resolveGitRepoRoot } from '../utils.js'
 
 export function defaultCodexHome(): string {
@@ -18,6 +18,123 @@ function extractTextContent(items: any[] | undefined): string {
     .join('\n')
 }
 
+function toFiniteNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return undefined
+}
+
+function normalizeCompactPercent(numerator: number, denominator?: number): number | undefined {
+  if (!denominator || denominator <= 0) return undefined
+  const ratio = Math.round((numerator / denominator) * 100)
+  return Math.max(0, Math.min(100, ratio))
+}
+
+type CodexUsage = {
+  inputTokens: number
+  outputTokens: number
+  cachedTokens: number
+  totalTokens: number
+}
+
+function parseUsagePayload(payload: any): CodexUsage | undefined {
+  if (!payload || typeof payload !== 'object') return undefined
+
+  const inputTokens = toFiniteNumber(payload.input_tokens ?? payload.inputTokens ?? payload.input) ?? 0
+  const outputTokens = toFiniteNumber(payload.output_tokens ?? payload.outputTokens ?? payload.output) ?? 0
+  const cachedTokens =
+    toFiniteNumber(
+      payload.cached_input_tokens ??
+      payload.cache_read_input_tokens ??
+      payload.cache_creation_input_tokens ??
+      payload.cachedTokens ??
+      payload.cached_tokens,
+    ) ?? 0
+
+  const explicitTotal = toFiniteNumber(payload.total_tokens ?? payload.totalTokens ?? payload.total)
+  const totalTokens = explicitTotal ?? (inputTokens + outputTokens + cachedTokens)
+
+  if (inputTokens === 0 && outputTokens === 0 && cachedTokens === 0 && totalTokens === 0) {
+    return undefined
+  }
+
+  return { inputTokens, outputTokens, cachedTokens, totalTokens }
+}
+
+function parseCodexTokenEnvelope(payload: any): {
+  eventTokens?: TokenPayload
+  summary?: TokenSummary
+} {
+  const info = payload?.info
+  if (info && typeof info === 'object') {
+    const lastUsage = parseUsagePayload(info.last_token_usage)
+    const totalUsage = parseUsagePayload(info.total_token_usage)
+
+    const modelContextWindow = toFiniteNumber(info.model_context_window)
+    const explicitCompactLimit =
+      toFiniteNumber(info.model_auto_compact_token_limit) ??
+      toFiniteNumber(info.auto_compact_limit) ??
+      toFiniteNumber(info.auto_compact_token_limit) ??
+      toFiniteNumber(info.compact_token_limit)
+
+    const compactThresholdTokens =
+      explicitCompactLimit ??
+      (modelContextWindow ? Math.round(modelContextWindow * (90 / 95)) : undefined)
+
+    const contextTokens =
+      toFiniteNumber(info.total_usage_tokens) ??
+      toFiniteNumber(info.total_token_usage?.total_tokens) ??
+      totalUsage?.totalTokens
+
+    const aggregate = totalUsage ?? lastUsage
+    const summary = aggregate
+      ? {
+          inputTokens: aggregate.inputTokens,
+          outputTokens: aggregate.outputTokens,
+          cachedTokens: aggregate.cachedTokens,
+          totalTokens: aggregate.totalTokens,
+          contextTokens,
+          modelContextWindow,
+          compactThresholdTokens,
+          compactPercent:
+            contextTokens !== undefined
+              ? normalizeCompactPercent(contextTokens, compactThresholdTokens)
+              : undefined,
+        }
+      : undefined
+
+    const eventUsage = lastUsage ?? totalUsage
+    const eventTokens = eventUsage
+      ? {
+          inputTokens: eventUsage.inputTokens,
+          outputTokens: eventUsage.outputTokens,
+          ...(eventUsage.cachedTokens > 0 ? { cachedTokens: eventUsage.cachedTokens } : {}),
+        }
+      : undefined
+
+    return { eventTokens, summary }
+  }
+
+  const legacyUsage = parseUsagePayload(payload)
+  if (!legacyUsage) return {}
+  return {
+    eventTokens: {
+      inputTokens: legacyUsage.inputTokens,
+      outputTokens: legacyUsage.outputTokens,
+      ...(legacyUsage.cachedTokens > 0 ? { cachedTokens: legacyUsage.cachedTokens } : {}),
+    },
+    summary: {
+      inputTokens: legacyUsage.inputTokens,
+      outputTokens: legacyUsage.outputTokens,
+      cachedTokens: legacyUsage.cachedTokens,
+      totalTokens: legacyUsage.totalTokens,
+    },
+  }
+}
+
 export function parseCodexSessionContent(content: string): ParsedSessionMeta {
   const lines = content.split(/\r?\n/).filter(Boolean)
   let sessionId: string | undefined
@@ -25,6 +142,9 @@ export function parseCodexSessionContent(content: string): ParsedSessionMeta {
   let title: string | undefined
   let summary: string | undefined
   let isNonInteractive: boolean | undefined
+  let gitBranch: string | undefined
+  let isDirty: boolean | undefined
+  let tokenUsage: TokenSummary | undefined
 
   for (const line of lines) {
     let obj: any
@@ -39,6 +159,15 @@ export function parseCodexSessionContent(content: string): ParsedSessionMeta {
       if (!sessionId && typeof payload.id === 'string') sessionId = payload.id
       if (!cwd && typeof payload.cwd === 'string' && looksLikePath(payload.cwd)) {
         cwd = payload.cwd
+      }
+      if (!gitBranch && typeof payload?.git?.branch === 'string' && payload.git.branch.trim()) {
+        gitBranch = payload.git.branch.trim()
+      }
+      if (isDirty === undefined && typeof payload?.git?.dirty === 'boolean') {
+        isDirty = payload.git.dirty
+      }
+      if (isDirty === undefined && typeof payload?.git?.isDirty === 'boolean') {
+        isDirty = payload.git.isDirty
       }
       if (payload.source === 'exec') {
         isNonInteractive = true
@@ -72,12 +201,15 @@ export function parseCodexSessionContent(content: string): ParsedSessionMeta {
       }
     }
 
+    if (obj?.type === 'event_msg' && obj?.payload?.type === 'token_count') {
+      const parsedToken = parseCodexTokenEnvelope(obj.payload)
+      if (parsedToken.summary) tokenUsage = parsedToken.summary
+    }
+
     if (!cwd && obj?.type === 'turn_context' && typeof obj?.payload?.cwd === 'string') {
       const ctxCwd = obj.payload.cwd
       if (looksLikePath(ctxCwd)) cwd = ctxCwd
     }
-
-    if (sessionId && cwd && title && summary) break
   }
 
   return {
@@ -87,6 +219,9 @@ export function parseCodexSessionContent(content: string): ParsedSessionMeta {
     summary,
     messageCount: lines.length,
     isNonInteractive,
+    gitBranch,
+    isDirty,
+    tokenUsage,
   }
 }
 
@@ -289,14 +424,18 @@ export const codexProvider: CodingCliProvider = {
     }
 
     if (obj?.type === 'event_msg' && obj?.payload?.type === 'token_count') {
-      const input = Number(obj.payload.input || 0)
-      const output = Number(obj.payload.output || 0)
-      const total = Number(obj.payload.total || input + output)
+      const parsedToken = parseCodexTokenEnvelope(obj.payload)
+      if (!parsedToken.eventTokens) {
+        return []
+      }
+      const input = parsedToken.eventTokens.inputTokens
+      const output = parsedToken.eventTokens.outputTokens
+      const total = input + output + (parsedToken.eventTokens.cachedTokens || 0)
       return [
         {
           ...base,
           type: 'token.usage',
-          tokens: { inputTokens: input, outputTokens: output },
+          tokens: parsedToken.eventTokens,
           tokenUsage: { input, output, total }, // Legacy alias
         },
       ]

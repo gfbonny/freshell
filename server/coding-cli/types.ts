@@ -96,6 +96,21 @@ export interface TokenPayload {
   totalCost?: number             // USD
 }
 
+/**
+ * Session-level token aggregate used for runtime metadata.
+ * `TokenPayload` above remains the live event payload shape.
+ */
+export interface TokenSummary {
+  inputTokens: number
+  outputTokens: number
+  cachedTokens: number
+  totalTokens: number
+  contextTokens?: number
+  modelContextWindow?: number
+  compactThresholdTokens?: number
+  compactPercent?: number
+}
+
 export interface ErrorPayload {
   message: string
   code?: string
@@ -117,6 +132,9 @@ export interface ParsedSessionMeta {
   messageCount?: number
   projectPath?: string
   isNonInteractive?: boolean
+  gitBranch?: string
+  isDirty?: boolean
+  tokenUsage?: TokenSummary
 }
 
 export interface CodingCliSessionInfo {
@@ -143,6 +161,9 @@ export interface CodingCliSession {
   title?: string
   summary?: string
   cwd?: string
+  gitBranch?: string
+  isDirty?: boolean
+  tokenUsage?: TokenSummary
   sourceFile?: string
   isSubagent?: boolean
   isNonInteractive?: boolean

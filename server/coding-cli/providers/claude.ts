@@ -1,10 +1,11 @@
 import path from 'path'
+import { createHash } from 'crypto'
 import fsp from 'fs/promises'
 import { extractTitleFromMessage } from '../../title-utils.js'
 import { isValidClaudeSessionId } from '../../claude-session-id.js'
 import { getClaudeHome } from '../../claude-home.js'
 import type { CodingCliProvider } from '../provider.js'
-import type { NormalizedEvent, ParsedSessionMeta } from '../types.js'
+import type { NormalizedEvent, ParsedSessionMeta, TokenSummary } from '../types.js'
 import { parseClaudeEvent, isMessageEvent, isResultEvent, isToolResultContent, isToolUseContent, isTextContent } from '../../claude-stream-types.js'
 import { looksLikePath, isSystemContext, extractFromIdeContext, resolveGitRepoRoot } from '../utils.js'
 
@@ -14,6 +15,64 @@ export type JsonlMeta = {
   title?: string
   summary?: string
   messageCount?: number
+  gitBranch?: string
+  isDirty?: boolean
+  tokenUsage?: TokenSummary
+}
+
+const CLAUDE_DEFAULT_CONTEXT_WINDOW = 200_000
+const CLAUDE_DEFAULT_COMPACT_PERCENT = 95
+
+const CLAUDE_MODEL_CONTEXT_WINDOWS: Record<string, number> = {
+  'claude-opus-4-20250514': 200_000,
+  'claude-sonnet-4-20250514': 200_000,
+  'claude-3-7-sonnet-latest': 200_000,
+  'claude-3-7-sonnet-20250219': 200_000,
+  'claude-3-5-sonnet-latest': 200_000,
+  'claude-3-5-sonnet-20241022': 200_000,
+  'claude-3-5-sonnet-20240620': 200_000,
+  'claude-3-5-haiku-latest': 200_000,
+  'claude-3-5-haiku-20241022': 200_000,
+  'claude-3-opus-20240229': 200_000,
+  'claude-3-sonnet-20240229': 200_000,
+  'claude-3-haiku-20240307': 200_000,
+}
+
+function toFiniteNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return undefined
+}
+
+function resolveClaudeCompactPercentThreshold(): number {
+  const override = toFiniteNumber(process.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE)
+  if (!override || override < 1) return CLAUDE_DEFAULT_COMPACT_PERCENT
+  return Math.min(Math.round(override), CLAUDE_DEFAULT_COMPACT_PERCENT)
+}
+
+function resolveClaudeContextWindow(model: string | undefined): number {
+  if (!model) return CLAUDE_DEFAULT_CONTEXT_WINDOW
+  const normalized = model.toLowerCase().trim()
+  return CLAUDE_MODEL_CONTEXT_WINDOWS[normalized] ?? CLAUDE_DEFAULT_CONTEXT_WINDOW
+}
+
+function normalizeCompactPercent(numerator: number, denominator: number): number {
+  if (!Number.isFinite(denominator) || denominator <= 0) return 0
+  const ratio = Math.round((numerator / denominator) * 100)
+  return Math.max(0, Math.min(100, ratio))
+}
+
+function assistantUsageDedupKey(obj: any, line: string): string {
+  const uuid = typeof obj?.uuid === 'string' ? obj.uuid.trim() : ''
+  if (uuid) return `uuid:${uuid}`
+
+  const messageId = typeof obj?.message?.id === 'string' ? obj.message.id.trim() : ''
+  if (messageId) return `message:${messageId}`
+
+  return `line:${createHash('sha1').update(line).digest('hex')}`
 }
 
 /** Parse session metadata from jsonl content (pure function for testing) */
@@ -23,6 +82,13 @@ export function parseSessionContent(content: string): JsonlMeta {
   let cwd: string | undefined
   let title: string | undefined
   let summary: string | undefined
+  let gitBranch: string | undefined
+  let isDirty: boolean | undefined
+  let model: string | undefined
+  const usageSeen = new Set<string>()
+  let usageInputTokens = 0
+  let usageOutputTokens = 0
+  let usageCachedTokens = 0
 
   for (const line of lines) {
     let obj: any
@@ -43,6 +109,11 @@ export function parseSessionContent(content: string): JsonlMeta {
       ].filter((v: any) => typeof v === 'string') as string[]
       const valid = candidates.find((v) => isValidClaudeSessionId(v))
       if (valid) sessionId = valid
+    }
+
+    if (!model) {
+      const modelCandidate = [obj?.model, obj?.message?.model].find((v: any) => typeof v === 'string' && v.trim())
+      if (typeof modelCandidate === 'string') model = modelCandidate
     }
 
     const candidates = [
@@ -83,7 +154,62 @@ export function parseSessionContent(content: string): JsonlMeta {
       if (typeof s === 'string' && s.trim()) summary = s.trim().slice(0, 240)
     }
 
-    if (cwd && title && summary && sessionId) break
+    if (!gitBranch) {
+      const branchCandidate = [
+        obj?.git?.branch,
+        obj?.payload?.git?.branch,
+        obj?.message?.git?.branch,
+      ].find((v: any) => typeof v === 'string' && v.trim())
+      if (typeof branchCandidate === 'string') gitBranch = branchCandidate.trim()
+    }
+
+    if (isDirty === undefined) {
+      const dirtyCandidate = [
+        obj?.git?.dirty,
+        obj?.git?.isDirty,
+        obj?.payload?.git?.dirty,
+        obj?.payload?.git?.isDirty,
+        obj?.message?.git?.dirty,
+        obj?.message?.git?.isDirty,
+      ].find((v: any) => typeof v === 'boolean')
+      if (typeof dirtyCandidate === 'boolean') isDirty = dirtyCandidate
+    }
+
+    const isAssistantEntry =
+      obj?.type === 'assistant' ||
+      obj?.role === 'assistant' ||
+      obj?.message?.role === 'assistant'
+
+    const usage = obj?.message?.usage
+    if (isAssistantEntry && usage && typeof usage === 'object') {
+      const dedupeKey = assistantUsageDedupKey(obj, line)
+      if (!usageSeen.has(dedupeKey)) {
+        usageSeen.add(dedupeKey)
+        usageInputTokens += toFiniteNumber(usage.input_tokens) ?? 0
+        usageOutputTokens += toFiniteNumber(usage.output_tokens) ?? 0
+        usageCachedTokens +=
+          (toFiniteNumber(usage.cache_read_input_tokens) ?? 0) +
+          (toFiniteNumber(usage.cache_creation_input_tokens) ?? 0)
+      }
+    }
+  }
+
+  let tokenUsage: TokenSummary | undefined
+  if (usageSeen.size > 0) {
+    const contextTokens = usageInputTokens + usageOutputTokens + usageCachedTokens
+    const modelContextWindow = resolveClaudeContextWindow(model)
+    const compactPercentThreshold = resolveClaudeCompactPercentThreshold()
+    const compactThresholdTokens = Math.round((modelContextWindow * compactPercentThreshold) / 100)
+    tokenUsage = {
+      inputTokens: usageInputTokens,
+      outputTokens: usageOutputTokens,
+      cachedTokens: usageCachedTokens,
+      totalTokens: contextTokens,
+      contextTokens,
+      modelContextWindow,
+      compactThresholdTokens,
+      compactPercent: normalizeCompactPercent(contextTokens, compactThresholdTokens),
+    }
   }
 
   return {
@@ -92,6 +218,9 @@ export function parseSessionContent(content: string): JsonlMeta {
     title,
     summary,
     messageCount: lines.length,
+    gitBranch,
+    isDirty,
+    tokenUsage,
   }
 }
 

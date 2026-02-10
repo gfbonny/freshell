@@ -113,6 +113,109 @@ describe('codex-provider', () => {
     expect(events[0].reasoning).toBe('Reasoning here')
   })
 
+  it('parses nested token_count.info payload and keeps legacy token_count fallback', () => {
+    const nestedLine = JSON.stringify({
+      type: 'event_msg',
+      session_id: 'session-1',
+      payload: {
+        type: 'token_count',
+        info: {
+          last_token_usage: {
+            input_tokens: 120,
+            output_tokens: 30,
+            cached_input_tokens: 40,
+            total_tokens: 190,
+          },
+          total_token_usage: {
+            input_tokens: 30000,
+            output_tokens: 20000,
+            cached_input_tokens: 1200,
+            total_tokens: 51200,
+          },
+          model_context_window: 200000,
+        },
+      },
+    })
+
+    const legacyLine = JSON.stringify({
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        input: 5,
+        output: 6,
+        total: 11,
+      },
+    })
+
+    const nestedEvents = codexProvider.parseEvent(nestedLine)
+    const legacyEvents = codexProvider.parseEvent(legacyLine)
+
+    expect(nestedEvents).toHaveLength(1)
+    expect(nestedEvents[0]).toMatchObject({
+      type: 'token.usage',
+      tokens: { inputTokens: 120, outputTokens: 30, cachedTokens: 40 },
+      tokenUsage: { input: 120, output: 30, total: 190 },
+    })
+
+    expect(legacyEvents).toHaveLength(1)
+    expect(legacyEvents[0]).toMatchObject({
+      type: 'token.usage',
+      tokens: { inputTokens: 5, outputTokens: 6 },
+      tokenUsage: { input: 5, output: 6, total: 11 },
+    })
+  })
+
+  it('parses codex session metadata git branch and compact-threshold token usage', () => {
+    const explicitLimit = 90000
+    const content = [
+      JSON.stringify({
+        type: 'session_meta',
+        payload: {
+          id: 'session-token-meta',
+          cwd: '/project/a',
+          git: { branch: 'main', dirty: true },
+        },
+      }),
+      JSON.stringify({
+        type: 'event_msg',
+        payload: {
+          type: 'token_count',
+          info: {
+            last_token_usage: {
+              input_tokens: 120,
+              output_tokens: 30,
+              cached_input_tokens: 40,
+              total_tokens: 190,
+            },
+            total_token_usage: {
+              input_tokens: 30000,
+              output_tokens: 20000,
+              cached_input_tokens: 1200,
+              total_tokens: 51200,
+            },
+            model_context_window: 200000,
+            model_auto_compact_token_limit: explicitLimit,
+          },
+        },
+      }),
+    ].join('\n')
+
+    const meta = parseCodexSessionContent(content)
+
+    expect(meta.gitBranch).toBe('main')
+    expect(meta.isDirty).toBe(true)
+    expect(meta.tokenUsage).toEqual({
+      inputTokens: 30000,
+      outputTokens: 20000,
+      cachedTokens: 1200,
+      totalTokens: 51200,
+      contextTokens: 51200,
+      modelContextWindow: 200000,
+      compactThresholdTokens: explicitLimit,
+      compactPercent: Math.round((51200 / explicitLimit) * 100),
+    })
+  })
+
   it('builds stream args with model and sandbox', () => {
     const args = codexProvider.getStreamArgs({
       prompt: 'Hello',
