@@ -222,7 +222,7 @@ fn ws_schema_covers_all_required_message_families() {
 
     let server_types = [
         r#"{"type":"ready","timestamp":"2026-02-10T00:00:00Z"}"#,
-        r#"{"type":"terminal.created","requestId":"r1","terminalId":"t1","snapshot":"","createdAt":1}"#,
+        r#"{"type":"terminal.created","requestId":"r1","terminalId":"t1","snapshot":"","createdAt":1,"effectiveResumeSessionId":"sess-prev"}"#,
         r#"{"type":"terminal.attached","terminalId":"t1","snapshot":"hello\n"}"#,
         r#"{"type":"terminal.attached.start","terminalId":"t1","totalCodeUnits":12,"totalChunks":2}"#,
         r#"{"type":"terminal.attached.chunk","terminalId":"t1","chunk":"aGVsbG8K"}"#,
@@ -743,17 +743,15 @@ async fn output_during_attach_window_is_queued_and_flushed_after_snapshot() {
 
 #[tokio::test]
 async fn registry_enforces_max_running_and_exited_terminal_limits() {
-    let mut reg = freshell_pty::TerminalRegistry::new_for_test_with_limits(2, 3);
-    reg.create_test_terminal("a\n").await;
-    reg.create_test_terminal("b\n").await;
+    let mut reg = freshell_pty::TerminalRegistry::new_for_test_with_limits(2, 1);
+    let t1 = reg.create_test_terminal("a\n").await;
+    let t2 = reg.create_test_terminal("b\n").await;
     let err = reg.try_create_test_terminal("c\n").await.unwrap_err();
     assert!(err.to_string().contains("MAX_TERMINALS"));
 
-    reg.mark_test_terminal_exited_oldest_first().await;
-    reg.mark_test_terminal_exited_oldest_first().await;
-    reg.mark_test_terminal_exited_oldest_first().await;
-    reg.mark_test_terminal_exited_oldest_first().await;
-    assert!(reg.exited_terminal_count_for_test() <= 3);
+    reg.mark_test_terminal_exited_for_test(&t1).await;
+    reg.mark_test_terminal_exited_for_test(&t2).await;
+    assert_eq!(reg.exited_terminal_count_for_test(), 1);
 }
 ```
 
@@ -830,7 +828,7 @@ async fn ws_keepalive_ping_closes_stale_connection_without_pong() {
     let mut client = harness.authed_client().await;
     harness.disable_client_pong_for_test(&mut client).await;
     let close = client.wait_close().await;
-    assert!(close.code == 1001 || close.code == 1006);
+    assert_eq!(close.code, 1006);
 }
 ```
 
@@ -890,7 +888,7 @@ async fn pending_snapshot_queue_closes_attach_on_overflow_when_policy_requires_i
         freshell_pty::OverflowPolicy::CloseAttachOnOverflow,
     );
     let term_id = reg.create_test_terminal("seed\n").await;
-    let (_snapshot, _stream, attach_token) = reg.attach_begin_for_test(&term_id).await.unwrap();
+    let (_stream, attach_token) = reg.attach_begin_for_test(&term_id).await.unwrap();
     reg.push_many_outputs_for_test(&term_id, 100_000).await;
     let outcome = reg.finish_attach_snapshot_for_test(&term_id, attach_token).await;
     assert!(matches!(
@@ -1103,7 +1101,8 @@ Expected: FAIL
 // Provider contract source:
 // - claude/codex: parity from existing provider implementations in server/coding-cli/providers/*
 // - opencode/gemini/kimi: explicit contract doc + golden fixtures in docs/provider-contracts.md and provider_contract.rs
-//   (spawn, stream event shape, stderr text field, kill semantics, unavailable-binary behavior)
+//   (binary command names from CODING_CLI_COMMANDS, required env/cwd wiring, stream event shape,
+//    stderr text field, kill semantics, unavailable-binary behavior)
 // Wire WS commands/events: codingcli.create/input/kill + created/event/exit/stderr/killed.
 ```
 
@@ -1502,7 +1501,9 @@ async fn http_route_parity_smoke_covers_existing_surface() {
     freshell_server::tests::assert_route_exists(&app, "PATCH", "/api/terminals/:terminalId").await;
     freshell_server::tests::assert_route_exists(&app, "DELETE", "/api/terminals/:terminalId").await;
     freshell_server::tests::assert_route_exists(&app, "GET", "/api/debug").await;
-    freshell_server::tests::assert_route_exists(&app, "GET", "/api/perf").await;
+    freshell_server::tests::assert_route_exists(&app, "POST", "/api/perf").await;
+    freshell_server::tests::assert_route_exists(&app, "POST", "/api/ai/terminals/:terminalId/summary").await;
+    freshell_server::tests::assert_route_exists(&app, "DELETE", "/api/proxy/forward/:port").await;
     freshell_server::tests::assert_route_exists(&app, "GET", "/api/files/candidate-dirs").await;
 }
 ```
@@ -1520,7 +1521,8 @@ Expected: FAIL
 // - /api/lan-info, /api/platform
 // - /api/sessions, /api/sessions/search, /api/sessions/:sessionId (patch/delete), /api/project-colors
 // - /api/terminals, /api/terminals/:terminalId (patch/delete)
-// - /api/debug, /api/perf, /api/files/candidate-dirs
+// - /api/debug, /api/perf (POST), /api/ai/terminals/:terminalId/summary (POST)
+// - /api/proxy/forward/:port (DELETE), /api/files/candidate-dirs
 ```
 
 **Step 4: Run tests to verify pass**
@@ -2016,7 +2018,7 @@ Expected: FAIL
 
 ```rust
 // Tauri shell:
-// - launch embedded freshell-server child process
+// - launch embedded freshell-server in-process via Rust crate API (single binary runtime model)
 // - close event keeps server alive by default
 // - first-run network wizard forces bind-mode choice
 // - optional remote-connect mode
