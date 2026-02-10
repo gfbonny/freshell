@@ -16,7 +16,7 @@
 
 ---
 
-![freshell screenshot](docs/freshell-screenshot.jpg)
+![freshell screenshot](docs/fresheyes-demo-moog.png)
 
 ## Features
 
