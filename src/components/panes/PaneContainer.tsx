@@ -36,7 +36,7 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
   const zoomedPaneId = useAppSelector((s) => s.panes.zoomedPane?.[tabId])
   const containerRef = useRef<HTMLDivElement>(null)
   const ws = useMemo(() => getWsClient(), [])
-  const snapThreshold = useAppSelector((s) => s.settings?.settings?.panes?.snapThreshold ?? 4)
+  const snapThreshold = useAppSelector((s) => s.settings?.settings?.panes?.snapThreshold ?? 2)
 
   // Drag state for snapping: track the original size and accumulated delta
   const dragStartSizeRef = useRef<number>(0)
