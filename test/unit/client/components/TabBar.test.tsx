@@ -208,6 +208,22 @@ describe('TabBar', () => {
       const closeButtons = screen.getAllByTitle('Close (Shift+Click to kill)')
       expect(closeButtons).toHaveLength(2)
     })
+
+    it('renders a bottom separator line behind tabs', () => {
+      const tab = createTab({ id: 'tab-1', title: 'Terminal 1' })
+      const store = createStore({
+        tabs: [tab],
+        activeTabId: 'tab-1',
+      })
+
+      const { container } = renderWithStore(<TabBar />, store)
+      const separator = container.querySelector(
+        'div.pointer-events-none.absolute.inset-x-0.bottom-0.h-px'
+      ) as HTMLDivElement | null
+
+      expect(separator).toBeInTheDocument()
+      expect(separator?.className).toContain('bg-muted-foreground/45')
+    })
   })
 
   describe('active tab highlighting', () => {

@@ -106,7 +106,7 @@ export default function TabItem({
       className={cn(
         'group relative flex items-center gap-2 h-8 px-3 rounded-t-md border-x border-t border-muted-foreground/45 text-sm cursor-pointer transition-colors',
         isActive
-          ? "z-20 -mb-px border-b border-b-background bg-background text-foreground after:pointer-events-none after:absolute after:inset-x-0 after:-bottom-px after:h-[2px] after:bg-background after:content-['']"
+          ? "z-30 -mb-px border-b border-b-background bg-background text-foreground after:pointer-events-none after:absolute after:inset-x-0 after:-bottom-px after:h-[2px] after:bg-background after:content-['']"
           : needsAttention
             ? 'border-b-0 bg-emerald-100 text-emerald-900 hover:bg-emerald-200 mt-1 dark:bg-emerald-900/40 dark:text-emerald-100 dark:hover:bg-emerald-900/55'
             : 'border-b-0 bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/90 mt-1',

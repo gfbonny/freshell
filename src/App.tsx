@@ -408,9 +408,14 @@ export default function App() {
       <div className="flex flex-col h-full">
         <TabBar />
         <div
-          className="flex-1 min-h-0 relative border-t border-muted-foreground/45 bg-background"
+          className="flex-1 min-h-0 relative bg-background"
           data-testid="terminal-work-area"
         >
+          <div
+            className="pointer-events-none absolute inset-x-0 top-0 z-10 h-[3px] bg-background"
+            data-testid="terminal-work-area-connector"
+            aria-hidden="true"
+          />
           {tabs.map((t) => (
             <TabContent key={t.id} tabId={t.id} hidden={t.id !== activeTabId} />
           ))}

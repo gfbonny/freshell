@@ -229,7 +229,11 @@ export default function TabBar() {
   if (tabs.length === 0) return null
 
   return (
-    <div className="h-10 flex items-end px-2 bg-background" data-context={ContextIds.Global}>
+    <div className="relative z-20 h-10 flex items-end px-2 bg-background" data-context={ContextIds.Global}>
+      <div
+        className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-muted-foreground/45"
+        aria-hidden="true"
+      />
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
@@ -240,7 +244,7 @@ export default function TabBar() {
           items={tabs.map((t: Tab) => t.id)}
           strategy={horizontalListSortingStrategy}
         >
-          <div className="flex items-end gap-0.5 overflow-x-auto flex-1">
+          <div className="relative z-10 flex items-end gap-0.5 overflow-x-auto flex-1">
             {tabs.map((tab: Tab) => (
               <SortableTab
                 key={tab.id}

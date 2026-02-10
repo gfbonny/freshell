@@ -163,14 +163,16 @@ describe('App Component - Share Button', () => {
     expect(shareButton).toBeInTheDocument()
   })
 
-  it('renders the outlined terminal work area top border without a connector overlay', () => {
+  it('renders the outlined terminal work area top border with a thin connector strip', () => {
     renderApp()
 
     const workArea = screen.getByTestId('terminal-work-area')
+    const connector = screen.getByTestId('terminal-work-area-connector')
 
-    expect(workArea.className).toContain('border-t')
-    expect(workArea.className).toContain('border-muted-foreground/45')
-    expect(screen.queryByTestId('terminal-work-area-connector')).not.toBeInTheDocument()
+    expect(workArea.className).toContain('relative')
+    expect(workArea.className).toContain('bg-background')
+    expect(connector.className).toContain('h-[3px]')
+    expect(connector.className).toContain('bg-background')
   })
 
   it('uses Web Share API when available (non-Windows)', async () => {
