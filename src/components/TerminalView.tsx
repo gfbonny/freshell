@@ -502,7 +502,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           }
           const isSnapshotChunked = msg.snapshotChunked === true
           if (isSnapshotChunked) {
-            markSnapshotChunkedCreated(newId)
+            markSnapshotChunkedCreated()
           } else if (msg.snapshot) {
             try { term.clear(); term.write(msg.snapshot) } catch { /* disposed */ }
           }

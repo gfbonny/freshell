@@ -54,7 +54,7 @@ type UseChunkedAttachResult = {
   snapshotState: SnapshotState
   snapshotWarning: string | null
   handleChunkLifecycleMessage: (msg: unknown) => boolean
-  markSnapshotChunkedCreated: (terminalId: string) => void
+  markSnapshotChunkedCreated: () => void
   bumpConnectionGeneration: () => void
   clearChunkedAttachState: () => void
 }
