@@ -238,18 +238,19 @@ describe('pane header runtime metadata flow (e2e)', () => {
       wsMocks.emitMessage({ type: 'ready' })
     })
 
+    let requestId = ''
     await waitFor(() => {
-      expect(wsMocks.send).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: 'terminal.meta.list',
-        })
-      )
+      const metaCall = wsMocks.send.mock.calls
+        .map((call) => call[0])
+        .find((msg) => msg?.type === 'terminal.meta.list')
+      expect(metaCall).toBeDefined()
+      requestId = metaCall.requestId
     })
 
     act(() => {
       wsMocks.emitMessage({
         type: 'terminal.meta.list.response',
-        requestId: 'req-meta',
+        requestId,
         terminals: [
           {
             terminalId: 'term-codex',
