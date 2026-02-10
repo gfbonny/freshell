@@ -125,8 +125,11 @@ export default function PaneDivider({
   }, [direction, onResize, onResizeEnd])
 
   return (
+    // A focusable separator is the ARIA pattern for keyboard-resizable splitters.
+    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
     <div
       role="separator"
+      // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
       tabIndex={0}
       aria-orientation={direction === 'horizontal' ? 'vertical' : 'horizontal'}
       aria-label={`Pane divider (${direction === 'horizontal' ? 'horizontal' : 'vertical'} resize)`}

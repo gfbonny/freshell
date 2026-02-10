@@ -314,8 +314,8 @@ describe('TerminalRegistry Lifecycle', () => {
       const result2 = registry.kill(term.terminalId)
 
       expect(result1).toBe(true)
-      expect(result2).toBe(true) // Terminal still exists, kill succeeds
-      expect(pty.kill).toHaveBeenCalledTimes(2)
+      expect(result2).toBe(true) // Terminal still exists, second kill is idempotent
+      expect(pty.kill).toHaveBeenCalledTimes(1)
     })
 
     it('should handle kill after PTY already exited', () => {

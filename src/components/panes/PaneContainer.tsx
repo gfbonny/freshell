@@ -20,9 +20,11 @@ import { nanoid } from 'nanoid'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
 import type { CodingCliProviderName } from '@/lib/coding-cli-types'
 import { updateSettingsLocal } from '@/store/settingsSlice'
+import type { TerminalMetaRecord } from '@/store/terminalMetaSlice'
 
 // Stable empty object to avoid selector memoization issues
 const EMPTY_PANE_TITLES: Record<string, string> = {}
+const EMPTY_TERMINAL_META_BY_ID: Record<string, TerminalMetaRecord> = {}
 
 interface PaneContainerProps {
   tabId: string
@@ -34,7 +36,9 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
   const dispatch = useAppDispatch()
   const activePane = useAppSelector((s) => s.panes.activePane[tabId])
   const paneTitles = useAppSelector((s) => s.panes.paneTitles[tabId] ?? EMPTY_PANE_TITLES)
-  const terminalMetaById = useAppSelector((s) => s.terminalMeta.byTerminalId)
+  const terminalMetaById = useAppSelector(
+    (s) => s.terminalMeta?.byTerminalId ?? EMPTY_TERMINAL_META_BY_ID
+  )
   const zoomedPaneId = useAppSelector((s) => s.panes.zoomedPane?.[tabId])
   const containerRef = useRef<HTMLDivElement>(null)
   const ws = useMemo(() => getWsClient(), [])

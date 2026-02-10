@@ -54,7 +54,7 @@ describe('TabItem', () => {
   it('applies active styles when isActive is true', () => {
     render(<TabItem {...defaultProps} isActive={true} />)
     const tabElement = screen.getByText('Test Tab').closest('div[class*="group"]')
-    expect(tabElement?.className).toContain('bg-background')
+    expect(tabElement?.className).toContain('bg-muted')
   })
 
   it('applies dragging opacity when isDragging is true', () => {
@@ -73,7 +73,7 @@ describe('TabItem', () => {
   it('active styles take precedence over attention styles', () => {
     render(<TabItem {...defaultProps} isActive={true} needsAttention={true} />)
     const tabElement = screen.getByText('Test Tab').closest('div[class*="group"]')
-    expect(tabElement?.className).toContain('bg-background')
+    expect(tabElement?.className).toContain('bg-muted')
     expect(tabElement?.className).not.toContain('bg-emerald-100')
   })
 

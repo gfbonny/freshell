@@ -31,7 +31,7 @@ export default function Pane({
   tabId,
   paneId,
   isActive,
-  isOnlyPane,
+  isOnlyPane: _isOnlyPane,
   title,
   metaLabel,
   status,
@@ -68,7 +68,7 @@ export default function Pane({
         }
       }}
     >
-      {/* Pane header - shown when multiple panes and title available */}
+      {/* Pane header */}
       {showHeader && (
         <div data-context={ContextIds.Pane} data-tab-id={tabId} data-pane-id={paneId}>
           <PaneHeader

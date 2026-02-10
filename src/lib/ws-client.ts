@@ -1,4 +1,4 @@
-import { getClientPerfConfig, isClientPerfLoggingEnabled, logClientPerf } from '@/lib/perf-logger'
+import { getClientPerfConfig, logClientPerf } from '@/lib/perf-logger'
 import { getAuthToken } from '@/lib/auth'
 
 type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'ready'
