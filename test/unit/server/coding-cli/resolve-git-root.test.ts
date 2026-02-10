@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import path from 'path'
 import os from 'os'
 import fsp from 'fs/promises'
-import { resolveGitRepoRoot, clearRepoRootCache } from '../../../../server/coding-cli/utils'
+import { resolveGitRepoRoot, resolveGitCheckoutRoot, clearRepoRootCache } from '../../../../server/coding-cli/utils'
 
 let tempDir: string
 
@@ -195,5 +195,54 @@ describe('resolveGitRepoRoot()', () => {
 
     // Should correctly resolve to the parent repo, not treat as submodule
     expect(await resolveGitRepoRoot(worktreeDir)).toBe(repoDir)
+  })
+})
+
+describe('resolveGitCheckoutRoot()', () => {
+  it('returns the directory containing .git for a regular repo', async () => {
+    const repoDir = path.join(tempDir, 'repo')
+    await fsp.mkdir(path.join(repoDir, '.git'), { recursive: true })
+
+    expect(await resolveGitCheckoutRoot(repoDir)).toBe(repoDir)
+  })
+
+  it('returns worktree checkout root while resolveGitRepoRoot returns canonical parent repo', async () => {
+    const repoDir = path.join(tempDir, 'repo')
+    const gitDir = path.join(repoDir, '.git')
+    await fsp.mkdir(gitDir, { recursive: true })
+
+    const worktreeGitDir = path.join(gitDir, 'worktrees', 'feature')
+    await fsp.mkdir(worktreeGitDir, { recursive: true })
+    await fsp.writeFile(path.join(worktreeGitDir, 'commondir'), '../..\n')
+
+    const worktreeDir = path.join(tempDir, 'repo-feature')
+    const nestedDir = path.join(worktreeDir, 'src', 'deep')
+    await fsp.mkdir(nestedDir, { recursive: true })
+    await fsp.writeFile(
+      path.join(worktreeDir, '.git'),
+      `gitdir: ${worktreeGitDir}\n`,
+    )
+
+    expect(await resolveGitCheckoutRoot(nestedDir)).toBe(worktreeDir)
+    expect(await resolveGitRepoRoot(nestedDir)).toBe(repoDir)
+  })
+
+  it('keeps submodule checkout root as submodule directory', async () => {
+    const superDir = path.join(tempDir, 'super')
+    const superGitDir = path.join(superDir, '.git')
+    await fsp.mkdir(superGitDir, { recursive: true })
+
+    const submoduleGitDir = path.join(superGitDir, 'modules', 'sub')
+    await fsp.mkdir(submoduleGitDir, { recursive: true })
+
+    const subDir = path.join(superDir, 'sub')
+    const nestedDir = path.join(subDir, 'src')
+    await fsp.mkdir(nestedDir, { recursive: true })
+    await fsp.writeFile(
+      path.join(subDir, '.git'),
+      `gitdir: ${submoduleGitDir}\n`,
+    )
+
+    expect(await resolveGitCheckoutRoot(nestedDir)).toBe(subDir)
   })
 })

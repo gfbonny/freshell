@@ -1,6 +1,8 @@
 import path from 'path'
 import os from 'os'
 import fsp from 'fs/promises'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
 
 /**
  * Resolve a working directory to its git repo root, collapsing worktree paths
@@ -18,31 +20,25 @@ import fsp from 'fs/promises'
  */
 
 const repoRootCache = new Map<string, string>()
+const checkoutRootCache = new Map<string, string>()
+const execFileAsync = promisify(execFile)
 
 export function clearRepoRootCache(): void {
   repoRootCache.clear()
+  checkoutRootCache.clear()
 }
 
 export async function resolveGitRepoRoot(cwd: string): Promise<string> {
   if (!cwd) return cwd
 
-  // Only process absolute paths and tilde paths. Relative paths (., ..)
-  // cannot be resolved correctly because we'd resolve against the server's
-  // cwd, not the original CLI session's cwd. Return them as-is.
-  let normalized: string
-  if (cwd.startsWith('~')) {
-    normalized = path.resolve(os.homedir(), cwd.slice(cwd.startsWith('~/') ? 2 : 1))
-  } else if (path.isAbsolute(cwd)) {
-    normalized = path.resolve(cwd)
-  } else {
-    return cwd
-  }
+  const normalized = normalizeGitPathInput(cwd)
+  if (!normalized) return cwd
 
   const cached = repoRootCache.get(normalized)
   if (cached !== undefined) return cached
 
   try {
-    const result = await walkForGitRoot(normalized)
+    const result = await walkForGitRoot(normalized, 'repo')
     repoRootCache.set(normalized, result)
     return result
   } catch {
@@ -51,7 +47,82 @@ export async function resolveGitRepoRoot(cwd: string): Promise<string> {
   }
 }
 
-async function walkForGitRoot(startDir: string): Promise<string> {
+export async function resolveGitCheckoutRoot(cwd: string): Promise<string> {
+  if (!cwd) return cwd
+
+  const normalized = normalizeGitPathInput(cwd)
+  if (!normalized) return cwd
+
+  const cached = checkoutRootCache.get(normalized)
+  if (cached !== undefined) return cached
+
+  try {
+    const result = await walkForGitRoot(normalized, 'checkout')
+    checkoutRootCache.set(normalized, result)
+    return result
+  } catch {
+    checkoutRootCache.set(normalized, normalized)
+    return normalized
+  }
+}
+
+export async function resolveGitBranchAndDirty(cwd: string): Promise<{ branch?: string; isDirty?: boolean }> {
+  const normalized = normalizeGitPathInput(cwd)
+  if (!normalized) return {}
+
+  const checkoutRoot = await resolveGitCheckoutRoot(normalized)
+
+  try {
+    const [branch, status] = await Promise.all([
+      resolveGitBranch(checkoutRoot),
+      execFileAsync('git', ['-C', checkoutRoot, 'status', '--porcelain']),
+    ])
+
+    if (!branch && !status.stdout.trim()) {
+      return {}
+    }
+
+    return {
+      ...(branch ? { branch } : {}),
+      isDirty: status.stdout.trim().length > 0,
+    }
+  } catch {
+    return {}
+  }
+}
+
+function normalizeGitPathInput(cwd: string): string | undefined {
+  // Only process absolute paths and tilde paths. Relative paths (., ..)
+  // cannot be resolved correctly because we'd resolve against the server's
+  // cwd, not the original CLI session's cwd.
+  if (cwd.startsWith('~')) {
+    return path.resolve(os.homedir(), cwd.slice(cwd.startsWith('~/') ? 2 : 1))
+  }
+  if (path.isAbsolute(cwd)) {
+    return path.resolve(cwd)
+  }
+  return undefined
+}
+
+async function resolveGitBranch(checkoutRoot: string): Promise<string | undefined> {
+  try {
+    const symbolic = await execFileAsync('git', ['-C', checkoutRoot, 'symbolic-ref', '--short', 'HEAD'])
+    const branch = symbolic.stdout.trim()
+    if (branch) return branch
+  } catch {
+    // Detached heads or older Git layouts can fail symbolic-ref.
+  }
+
+  try {
+    const revParse = await execFileAsync('git', ['-C', checkoutRoot, 'rev-parse', '--abbrev-ref', 'HEAD'])
+    const branch = revParse.stdout.trim()
+    return branch || undefined
+  } catch {
+    return undefined
+  }
+}
+
+async function walkForGitRoot(startDir: string, mode: 'repo' | 'checkout'): Promise<string> {
   let current = startDir
 
   // eslint-disable-next-line no-constant-condition
@@ -68,6 +139,11 @@ async function walkForGitRoot(startDir: string): Promise<string> {
 
       if (stat.isFile()) {
         // .git file — could be worktree or submodule
+        if (mode === 'checkout') {
+          // For checkout-root semantics, worktrees/submodules resolve to the
+          // directory containing the .git file.
+          return current
+        }
         const content = await fsp.readFile(gitPath, 'utf-8')
         const match = content.match(/^gitdir:\s*(.+)/m)
         if (match) {
