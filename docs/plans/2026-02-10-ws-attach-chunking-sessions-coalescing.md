@@ -1,138 +1,196 @@
 # WS Attach Snapshot Chunking + Sessions Publish Coalescing Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **For Claude:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` to implement this plan task-by-task.
 
-**Goal:** Eliminate WebSocket backpressure disconnects and reduce update storms by chunking large terminal attach snapshots and coalescing rapid session publish bursts, while preserving all existing product behavior.
+**Goal:** Remove attach-time websocket backpressure spikes and reduce session update storms without removing any existing behavior.
 
-**Architecture:** Keep existing terminal/session features and semantics, but change transport behavior under load. Terminal attach snapshots move from one large message to a chunked stream for oversized payloads; normal small snapshots keep current behavior for compatibility. Sessions sync keeps the same patch schema but introduces short publish-window coalescing so repeated indexer updates collapse to the latest state before diff/broadcast.
+**Architecture:** Keep terminal/session semantics unchanged; change transport behavior under load.
+- Oversized terminal attach snapshots become chunked streams.
+- Small snapshots keep existing inline messages.
+- Sessions sync keeps `sessions.patch` semantics but coalesces burst updates.
 
-**Tech Stack:** Node.js, TypeScript, Express, ws WebSocket server, React 18 + xterm.js, Vitest (unit + integration).
+**Tech Stack:** Node.js, TypeScript, Express, ws, React 18, xterm.js, Vitest.
 
 ---
 
 ## Detailed Justification
 
-1. **Current attach transport can exceed safe socket buffer limits.**
-- Observed `terminal.attached` payloads around 1.5MB to 1.9MB.
-- Observed `ws_backpressure_close` event with buffered bytes > 3.4MB and close code 4008.
-- Root cause: `terminal.attached` currently sends full snapshot in one message (`server/ws-handler.ts:865`).
+1. **Attach snapshots are currently sent as one large frame.**
+- `WsHandler` sends full snapshots inline in four places:
+  - `terminal.create` reused-by-request path
+  - `terminal.create` reused-by-session path
+  - `terminal.create` new terminal path
+  - `terminal.attach` path
+- These inline sends can exceed safe buffered thresholds and trigger backpressure closes.
 
-2. **Session updates are emitted too frequently during bursty indexer activity.**
-- Observed >200 `sessions.patch` sends in a 10-minute window, many around 300KB+.
-- Root cause: every `codingCliIndexer.onUpdate` invokes `sessionsSync.publish` immediately (`server/index.ts:551`), even when updates happen in quick succession.
+2. **Bursty index updates publish too often.**
+- `codingCliIndexer.onUpdate` calls `sessionsSync.publish(projects)` for every update callback.
+- Under churn, this produces many large `sessions.patch` messages close together.
 
-3. **Performance issue is transport/scheduling, not missing functionality.**
-- We do not need to drop sessions, reduce scrollback, or remove patching.
-- We can preserve behavior and improve throughput by shaping how data is sent (chunking + coalescing).
+3. **The issue is send shape and scheduling, not missing features.**
+- We should not drop scrollback or remove patch behavior.
+- We can preserve functionality and improve stability by chunking attach payloads and coalescing publish bursts.
 
-4. **This is the most idiomatic near-term fix for current architecture.**
-- Existing code already uses chunking strategy for `sessions.updated` (`sendChunkedSessions` in `server/ws-handler.ts`).
-- Extending same pattern to terminal snapshots and introducing bounded coalescing is consistent, low-risk, and testable.
-
-## Expected Results
-
-1. **No single oversized terminal attach message:**
-- Oversized snapshots are split so each WS frame stays under `MAX_WS_CHUNK_BYTES` envelope.
-
-2. **Lower backpressure disconnect probability:**
-- Attach-time send spikes should no longer push client bufferedAmount over backpressure threshold from one snapshot frame.
-
-3. **Lower message churn for session sync bursts:**
-- Rapid indexer updates should collapse to one publish per coalescing window (instead of one publish per update callback).
-
-4. **Preserved UX and semantics:**
-- Attach still renders historical snapshot before queued live output.
-- Sessions patch behavior and client state model remain functionally unchanged.
-
-5. **Quantitative acceptance targets (post-implementation validation):**
-- `ws_send_large` events for `terminal.attached` should disappear or reduce to chunk-sized messages.
-- Burst periods should show significantly fewer `sessions.patch` sends.
-- No regression in existing attach ordering and patch-capability tests.
-
-## Non-Goals
-
-1. No schema redesign for `sessions.patch` payload content (that is a separate v2 protocol effort).
-2. No reduction in configured terminal scrollback size.
-3. No feature removal or user-facing settings change.
-
-## Rollout Strategy
-
-1. Backward-compatible server behavior for small snapshots (`terminal.attached` unchanged).
-2. New chunked attach message types supported by updated client.
-3. Coalescing defaults to enabled with conservative window, configurable by env.
-4. Full test suite run before merge.
+4. **This is idiomatic for the current architecture.**
+- Existing websocket code already has chunking behavior (`sendChunkedSessions`), so extending that pattern is low risk.
+- Existing attach queueing in `TerminalRegistry` already enforces snapshot-before-live-output ordering; we just need to preserve that invariant during chunked send.
 
 ---
 
-### Task 1: Add Failing Unit Tests For Terminal Snapshot Chunking Helper
+## Expected Results
 
-**Files:**
-- Modify: `test/unit/server/ws-chunking.test.ts`
-- Target implementation: `server/ws-handler.ts`
+1. No oversized single-frame terminal snapshot sends for chunk-capable clients.
+2. Reduced probability of `4008` backpressure closes during terminal attach.
+3. Lower `sessions.patch` burst volume during indexer churn.
+4. No regression in snapshot-first attach semantics.
+5. No reduction in terminal/session feature set.
 
-**Step 1: Write the failing tests**
+---
 
-Add tests for new helper `chunkTerminalSnapshot(snapshot, maxBytes)`:
+## Design Decisions
+
+1. **Chunk protocol gated by capability.**
+- Add `hello.capabilities.terminalAttachChunkV1`.
+- New clients advertise support; server uses chunked attach only when supported.
+- Non-capable clients keep current inline behavior (compatibility fallback).
+
+2. **Race-free attach completion.**
+- Do not yield between snapshot chunks.
+- Do not call `setImmediate(() => finishAttachSnapshot(...))` for attach/create snapshot sends.
+- Instead, call `finishAttachSnapshot` synchronously after the final inline or chunked snapshot frame is sent.
+
+3. **Byte-safe chunk sizing uses actual envelope fields.**
+- Chunk helper must account for the real `terminalId` and message envelope when enforcing `maxBytes`.
+- Include guard behavior when `maxBytes` is too small for even minimal chunk envelope.
+
+4. **Coalescing policy: immediate-first, trailing-coalesced.**
+- First `publish` in a window flushes immediately (keeps low latency for isolated updates).
+- Additional publishes during the window collapse to latest state.
+- At window end, latest pending state flushes once; if new pending exists, continue another window.
+
+5. **Type safety for new server->client message shapes.**
+- No server-side incoming Zod change is required for outbound-only messages.
+- Add explicit TypeScript types/guards in client paths handling new attach chunk messages.
+
+---
+
+## Protocol Changes
+
+### Hello capability extension
+
+Add optional capability in `server/ws-handler.ts` hello schema:
 
 ```ts
-import { chunkProjects, chunkTerminalSnapshot } from '../../../server/ws-handler.js'
-
-it('returns one chunk for small snapshot', () => {
-  const chunks = chunkTerminalSnapshot('hello', 512 * 1024)
-  expect(chunks).toEqual(['hello'])
-})
-
-it('splits large snapshot into bounded chunks', () => {
-  const snapshot = 'x'.repeat(1_200_000)
-  const maxBytes = 256 * 1024
-  const chunks = chunkTerminalSnapshot(snapshot, maxBytes)
-
-  expect(chunks.length).toBeGreaterThan(1)
-  for (const chunk of chunks) {
-    const payloadSize = Buffer.byteLength(JSON.stringify({ type: 'terminal.attached.chunk', terminalId: 't1', chunk }))
-    expect(payloadSize).toBeLessThanOrEqual(maxBytes)
-  }
-  expect(chunks.join('')).toBe(snapshot)
-})
-
-it('preserves unicode characters across chunk boundaries', () => {
-  const snapshot = '🙂'.repeat(200_000)
-  const chunks = chunkTerminalSnapshot(snapshot, 64 * 1024)
-  expect(chunks.join('')).toBe(snapshot)
-})
+capabilities: z.object({
+  sessionsPatchV1: z.boolean().optional(),
+  terminalAttachChunkV1: z.boolean().optional(),
+}).optional(),
 ```
 
-**Step 2: Run test to verify it fails**
-
-Run: `npm test -- test/unit/server/ws-chunking.test.ts`
-Expected: FAIL with missing export/function for `chunkTerminalSnapshot`.
-
-**Step 3: Write minimal implementation**
-
-In `server/ws-handler.ts`, add exported helper:
+Add client advertisement in `src/lib/ws-client.ts` hello payload:
 
 ```ts
-export function chunkTerminalSnapshot(snapshot: string, maxBytes: number): string[] {
+capabilities: {
+  sessionsPatchV1: true,
+  terminalAttachChunkV1: true,
+}
+```
+
+### New server->client attach chunk messages
+
+For chunk-capable clients and oversized snapshots:
+
+```ts
+{ type: 'terminal.attached.start', terminalId, totalChars, totalChunks }
+{ type: 'terminal.attached.chunk', terminalId, chunk }
+{ type: 'terminal.attached.end', terminalId, totalChars, totalChunks }
+```
+
+For `terminal.create`, keep `terminal.created` but allow chunk follow-up:
+
+```ts
+{ type: 'terminal.created', requestId, terminalId, createdAt, effectiveResumeSessionId, snapshotChunked: true }
+```
+
+`terminal.created.snapshot` remains unchanged for inline/small snapshots.
+
+---
+
+## Task 1: Add Failing Unit Tests for Snapshot Chunking Helper
+
+**Files:**
+- Modify `test/unit/server/ws-chunking.test.ts`
+- Target `server/ws-handler.ts`
+
+### Step 1. Write failing tests
+
+Add tests for `chunkTerminalSnapshot(snapshot, maxBytes, terminalId)`:
+- returns single chunk for small snapshot.
+- splits large snapshot into multiple chunks under byte limit using real envelope.
+- handles unicode text and round-trips exactly.
+- honors long terminal IDs (simulate nanoid-length IDs).
+- throws clear error when `maxBytes` is too small for minimal chunk envelope.
+
+Use exact envelope check in test:
+
+```ts
+const bytes = Buffer.byteLength(JSON.stringify({
+  type: 'terminal.attached.chunk',
+  terminalId: termId,
+  chunk,
+}))
+expect(bytes).toBeLessThanOrEqual(maxBytes)
+```
+
+### Step 2. Run test (red)
+
+`npm test -- test/unit/server/ws-chunking.test.ts`
+
+### Step 3. Implement minimal helper
+
+In `server/ws-handler.ts`:
+
+```ts
+export function chunkTerminalSnapshot(snapshot: string, maxBytes: number, terminalId: string): string[] {
   if (!snapshot) return ['']
+
+  const envelopeBytes = Buffer.byteLength(JSON.stringify({
+    type: 'terminal.attached.chunk',
+    terminalId,
+    chunk: '',
+  }))
+
+  if (envelopeBytes + 1 > maxBytes) {
+    throw new Error('MAX_WS_CHUNK_BYTES too small for terminal.attached.chunk envelope')
+  }
+
   const chunks: string[] = []
   let cursor = 0
-  const envelopeBase = Buffer.byteLength(JSON.stringify({ type: 'terminal.attached.chunk', terminalId: '', chunk: '' }))
 
   while (cursor < snapshot.length) {
     let lo = cursor + 1
     let hi = snapshot.length
-    let best = lo
+    let best = cursor
 
     while (lo <= hi) {
       const mid = Math.floor((lo + hi) / 2)
       const candidate = snapshot.slice(cursor, mid)
-      const bytes = envelopeBase + Buffer.byteLength(candidate)
+      const bytes = Buffer.byteLength(JSON.stringify({
+        type: 'terminal.attached.chunk',
+        terminalId,
+        chunk: candidate,
+      }))
       if (bytes <= maxBytes) {
         best = mid
         lo = mid + 1
       } else {
         hi = mid - 1
       }
+    }
+
+    if (best === cursor) {
+      // Safety guard: should not happen due envelope check, but avoid infinite loop.
+      best = cursor + 1
     }
 
     chunks.push(snapshot.slice(cursor, best))
@@ -143,408 +201,270 @@ export function chunkTerminalSnapshot(snapshot: string, maxBytes: number): strin
 }
 ```
 
-**Step 4: Run test to verify it passes**
+### Step 4. Run test (green)
 
-Run: `npm test -- test/unit/server/ws-chunking.test.ts`
-Expected: PASS.
+`npm test -- test/unit/server/ws-chunking.test.ts`
 
-**Step 5: Commit**
+### Step 5. Commit
 
 ```bash
 git add test/unit/server/ws-chunking.test.ts server/ws-handler.ts
-git commit -m "test(ws): add terminal snapshot chunking helper coverage"
+git commit -m "test(ws): add byte-accurate terminal snapshot chunking helper coverage"
 ```
 
 ---
 
-### Task 2: Add Failing Integration Tests For Chunked Attach Ordering
+## Task 2: Implement Chunked Attach Sending and Wire All Snapshot Codepaths
 
 **Files:**
-- Modify: `test/server/ws-edge-cases.test.ts`
-- Target implementation: `server/ws-handler.ts`
+- Modify `server/ws-handler.ts`
 
-**Step 1: Write the failing tests**
+### Step 1. Add failing integration tests first (red)
 
-Add tests that assert:
-1. large snapshot attach emits `terminal.attached.start`, one or more `terminal.attached.chunk`, then `terminal.attached.end`.
-2. queued `terminal.output` messages are only emitted after `terminal.attached.end`.
+In `test/server/ws-edge-cases.test.ts`, add tests asserting:
+1. Large `terminal.attach` sends `start -> chunk+ -> end` in order.
+2. `terminal.output` queued during attach is emitted only after `terminal.attached.end`.
+3. Large `terminal.create` snapshot paths also use chunk flow (at minimum one create path; ideally cover reused + new).
 
-```ts
-it('streams large attach snapshot in ordered chunks', async () => {
-  const { ws: ws1, close: close1 } = await createAuthenticatedConnection()
-  const terminalId = await createTerminal(ws1, 'chunked-attach-create')
-
-  registry.simulateOutput(terminalId, 'x'.repeat(1_400_000))
-  close1()
-
-  const { ws: ws2, close: close2 } = await createAuthenticatedConnection()
-  ws2.send(JSON.stringify({ type: 'terminal.attach', terminalId }))
-
-  const events = await collectMessages(ws2, 1200)
-  const startIdx = events.findIndex((m) => m.type === 'terminal.attached.start' && m.terminalId === terminalId)
-  const endIdx = events.findIndex((m) => m.type === 'terminal.attached.end' && m.terminalId === terminalId)
-  const chunkCount = events.filter((m) => m.type === 'terminal.attached.chunk' && m.terminalId === terminalId).length
-
-  expect(startIdx).toBeGreaterThanOrEqual(0)
-  expect(chunkCount).toBeGreaterThan(0)
-  expect(endIdx).toBeGreaterThan(startIdx)
-
-  close2()
-})
-```
-
-**Step 2: Run test to verify it fails**
+Note: this file uses `FakeRegistry.simulateOutput(...)` intentionally (test helper, not production `TerminalRegistry`).
 
 Run: `npm test -- test/server/ws-edge-cases.test.ts -t "chunked attach"`
-Expected: FAIL because current server emits only `terminal.attached`.
 
-**Step 3: Write minimal implementation**
+### Step 2. Implement server wiring
 
 In `server/ws-handler.ts`:
-- Add `sendChunkedTerminalAttach(ws, terminalId, snapshot)`.
-- For oversized snapshots, send:
-  - `{ type: 'terminal.attached.start', terminalId, totalChars }`
-  - `{ type: 'terminal.attached.chunk', terminalId, chunk, index, totalChunks }`
-  - `{ type: 'terminal.attached.end', terminalId, totalChars }`
-- Keep current single-message `terminal.attached` path for small snapshots.
-- Ensure `finishAttachSnapshot(...)` is invoked only after the full snapshot sequence is sent.
+- Extend `ClientState` with `supportsTerminalAttachChunkV1`.
+- Parse new hello capability.
+- Add a private class method (inside `WsHandler`) that sends snapshot inline or chunked and **always** calls `finishAttachSnapshot` after final snapshot frame:
 
 ```ts
-private async sendTerminalAttachSnapshot(ws: LiveWebSocket, terminalId: string, snapshot: string): Promise<void> {
-  const maxBytes = MAX_CHUNK_BYTES
-  const payloadBytes = Buffer.byteLength(JSON.stringify({ type: 'terminal.attached', terminalId, snapshot }))
-
-  if (payloadBytes <= maxBytes) {
-    this.send(ws, { type: 'terminal.attached', terminalId, snapshot })
-    return
+private sendAttachSnapshotAndFinalize(
+  ws: LiveWebSocket,
+  state: ClientState,
+  args: {
+    terminalId: string
+    snapshot: string
+    created?: {
+      requestId: string
+      createdAt: number
+      effectiveResumeSessionId?: string
+    }
   }
-
-  const chunks = chunkTerminalSnapshot(snapshot, maxBytes)
-  this.send(ws, { type: 'terminal.attached.start', terminalId, totalChars: snapshot.length, totalChunks: chunks.length })
-  for (let i = 0; i < chunks.length; i += 1) {
-    this.send(ws, { type: 'terminal.attached.chunk', terminalId, index: i, totalChunks: chunks.length, chunk: chunks[i] })
-    if (i < chunks.length - 1) await new Promise<void>((resolve) => setImmediate(resolve))
-  }
-  this.send(ws, { type: 'terminal.attached.end', terminalId, totalChars: snapshot.length, totalChunks: chunks.length })
-}
+): void
 ```
 
-**Step 4: Run test to verify it passes**
+Method behavior:
+- Inline path (small snapshot OR client not chunk-capable):
+  - If `created` present, send `terminal.created` with `snapshot`.
+  - Else send `terminal.attached` with `snapshot`.
+  - Call `this.registry.finishAttachSnapshot(terminalId, ws)` immediately after send.
+- Chunk path (oversized + capable):
+  - If `created`, send `terminal.created` with `snapshotChunked: true` and no snapshot body.
+  - Chunk with `chunkTerminalSnapshot(snapshot, MAX_CHUNK_BYTES, terminalId)`.
+  - Send `terminal.attached.start`, each `terminal.attached.chunk`, then `terminal.attached.end`.
+  - Call `finishAttachSnapshot` after `end`.
 
-Run: `npm test -- test/server/ws-edge-cases.test.ts -t "chunked attach"`
-Expected: PASS.
+### Step 3. Replace all four snapshot callsites
 
-**Step 5: Commit**
+Replace direct snapshot sends + `setImmediate(finishAttachSnapshot)` in:
+1. `terminal.create` reused-by-request path.
+2. `terminal.create` reused-by-session path.
+3. `terminal.create` new terminal path.
+4. `terminal.attach` path.
+
+All must call `sendAttachSnapshotAndFinalize(...)`.
+
+### Step 4. Run tests (green)
 
 ```bash
-git add test/server/ws-edge-cases.test.ts server/ws-handler.ts
-git commit -m "feat(ws): stream oversized terminal attach snapshots in chunks"
+npm test -- test/server/ws-edge-cases.test.ts -t "chunked attach"
+npm test -- test/server/ws-edge-cases.test.ts -t "snapshot before any terminal.output"
+```
+
+### Step 5. Commit
+
+```bash
+git add server/ws-handler.ts test/server/ws-edge-cases.test.ts
+git commit -m "feat(ws): chunk oversized attach snapshots and finalize attach without race"
 ```
 
 ---
 
-### Task 3: Add Client Reassembly For Chunked Attach Snapshot Messages
+## Task 3: Add Client Reassembly for Chunked Attach
 
 **Files:**
-- Modify: `src/components/TerminalView.tsx`
-- Modify: `test/unit/client/components/TerminalView.lifecycle.test.tsx`
+- Modify `src/components/TerminalView.tsx`
+- Modify `test/unit/client/components/TerminalView.lifecycle.test.tsx`
 
-**Step 1: Write the failing test**
+### Step 1. Write failing tests (red)
 
-Add a lifecycle test where the message handler receives:
-- `terminal.attached.start`
-- multiple `terminal.attached.chunk`
-- `terminal.attached.end`
+Add lifecycle tests for chunk flow:
+- `terminal.attached.start` initializes buffer.
+- `terminal.attached.chunk` accumulates.
+- assert `term.write` is **not** called during chunk accumulation.
+- `terminal.attached.end` clears terminal, writes reassembled snapshot once, sets status running, and sets attaching false.
+- `terminal.created` with `snapshotChunked: true` does not prematurely clear attaching state.
 
-Assert terminal writes final reassembled snapshot only after `end` and status transitions to running.
-
-```ts
-messageHandler!({ type: 'terminal.attached.start', terminalId: 'term-1', totalChars: 6, totalChunks: 2 })
-messageHandler!({ type: 'terminal.attached.chunk', terminalId: 'term-1', index: 0, totalChunks: 2, chunk: 'abc' })
-messageHandler!({ type: 'terminal.attached.chunk', terminalId: 'term-1', index: 1, totalChunks: 2, chunk: 'def' })
-messageHandler!({ type: 'terminal.attached.end', terminalId: 'term-1', totalChars: 6, totalChunks: 2 })
-
-expect(fakeTerm.clear).toHaveBeenCalledTimes(1)
-expect(fakeTerm.write).toHaveBeenCalledWith('abcdef')
-```
-
-**Step 2: Run test to verify it fails**
-
-Run: `npm test -- test/unit/client/components/TerminalView.lifecycle.test.tsx -t "chunked attach"`
-Expected: FAIL because client ignores new message types.
-
-**Step 3: Write minimal implementation**
+### Step 2. Implement client behavior
 
 In `TerminalView.tsx`:
-- Add ref map for in-progress attach buffers by `terminalId`.
-- Handle new message types:
-  - `terminal.attached.start` => init buffer
-  - `terminal.attached.chunk` => append
-  - `terminal.attached.end` => clear terminal, write joined snapshot, set running/attach false, cleanup buffer
-- Keep existing `terminal.attached` behavior unchanged.
+- Add `useRef<Map<string, string[]>>` for in-flight attach chunks.
+- Handle:
+  - `terminal.attached.start`
+  - `terminal.attached.chunk`
+  - `terminal.attached.end`
+- Preserve existing `terminal.attached` inline path.
+- For `terminal.created`:
+  - existing inline snapshot behavior unchanged.
+  - if `snapshotChunked: true`, keep attaching state until `terminal.attached.end`.
+
+Suggested local types:
 
 ```ts
-const attachChunksRef = useRef<Map<string, string[]>>(new Map())
-
-if (msg.type === 'terminal.attached.start' && msg.terminalId === tid) {
-  attachChunksRef.current.set(tid, [])
-}
-
-if (msg.type === 'terminal.attached.chunk' && msg.terminalId === tid) {
-  const chunks = attachChunksRef.current.get(tid)
-  if (chunks) chunks.push(msg.chunk || '')
-}
-
-if (msg.type === 'terminal.attached.end' && msg.terminalId === tid) {
-  const chunks = attachChunksRef.current.get(tid) || []
-  attachChunksRef.current.delete(tid)
-  const snapshot = chunks.join('')
-  try { term.clear(); if (snapshot) term.write(snapshot) } catch {}
-  updateContent({ status: 'running' })
-  setIsAttaching(false)
-}
+type TerminalAttachChunkMsg =
+  | { type: 'terminal.attached.start'; terminalId: string; totalChars: number; totalChunks: number }
+  | { type: 'terminal.attached.chunk'; terminalId: string; chunk: string }
+  | { type: 'terminal.attached.end'; terminalId: string; totalChars: number; totalChunks: number }
 ```
 
-**Step 4: Run test to verify it passes**
+### Step 3. Run tests (green)
 
-Run: `npm test -- test/unit/client/components/TerminalView.lifecycle.test.tsx -t "chunked attach"`
-Expected: PASS.
+`npm test -- test/unit/client/components/TerminalView.lifecycle.test.tsx -t "chunked attach"`
 
-**Step 5: Commit**
+### Step 4. Commit
 
 ```bash
 git add src/components/TerminalView.tsx test/unit/client/components/TerminalView.lifecycle.test.tsx
-git commit -m "feat(client): reassemble chunked terminal attach snapshots"
+git commit -m "feat(client): reassemble chunked terminal attach snapshots safely"
 ```
 
 ---
 
-### Task 4: Add Failing Coalescing Unit Tests For SessionsSyncService
+## Task 4: Implement Session Publish Coalescing with Immediate-First Semantics
 
 **Files:**
-- Modify: `test/unit/server/sessions-sync/service.test.ts`
-- Target implementation: `server/sessions-sync/service.ts`
+- Modify `server/sessions-sync/service.ts`
+- Modify `test/unit/server/sessions-sync/service.test.ts`
+- Modify `server/index.ts`
 
-**Step 1: Write the failing tests**
+### Step 1. Write failing unit tests (red)
 
-Use fake timers to verify burst coalescing:
+In `test/unit/server/sessions-sync/service.test.ts` using fake timers:
+1. first publish flushes immediately when coalescing enabled.
+2. multiple rapid publishes during active window emit one trailing publish using latest state.
+3. if burst continues across windows, one publish per window with latest state.
+4. `shutdown()` clears timer and pending state.
+5. `coalesceMs=0` disables coalescing.
 
-```ts
-it('coalesces rapid publish calls into one broadcast of latest state', () => {
-  vi.useFakeTimers()
-  const ws = {
-    broadcastSessionsPatch: vi.fn(),
-    broadcastSessionsUpdatedToLegacy: vi.fn(),
-    broadcastSessionsUpdated: vi.fn(),
-  }
-
-  const svc = new SessionsSyncService(ws as any, { coalesceMs: 120 })
-  svc.publish([{ projectPath: '/p1', sessions: [{ provider: 'claude', sessionId: 's1', projectPath: '/p1', updatedAt: 1 }] }])
-  svc.publish([{ projectPath: '/p1', sessions: [{ provider: 'claude', sessionId: 's1', projectPath: '/p1', updatedAt: 2 }] }])
-
-  expect(ws.broadcastSessionsPatch).toHaveBeenCalledTimes(0)
-
-  vi.advanceTimersByTime(120)
-  expect(ws.broadcastSessionsPatch).toHaveBeenCalledTimes(1)
-  const msg = ws.broadcastSessionsPatch.mock.calls[0][0]
-  expect(msg.upsertProjects[0].sessions[0].updatedAt).toBe(2)
-})
-```
-
-Also add test for `shutdown()` clearing timer.
-
-**Step 2: Run test to verify it fails**
-
-Run: `npm test -- test/unit/server/sessions-sync/service.test.ts`
-Expected: FAIL because constructor options/coalescing logic do not exist.
-
-**Step 3: Write minimal implementation**
+### Step 2. Implement service
 
 In `server/sessions-sync/service.ts`:
-- Add constructor options `{ coalesceMs?: number }` with env default.
-- Add pending state + timer.
-- Move existing logic into `flush(next)`.
-- `publish(next)` schedules/coalesces flush.
-- `shutdown()` clears pending timer.
 
 ```ts
-type SessionsSyncOptions = { coalesceMs?: number }
-
-export class SessionsSyncService {
-  private pending: ProjectGroup[] | null = null
-  private timer: NodeJS.Timeout | null = null
-  private coalesceMs: number
-
-  constructor(private ws: ..., options: SessionsSyncOptions = {}) {
-    this.coalesceMs = options.coalesceMs ?? Number(process.env.SESSIONS_SYNC_COALESCE_MS || 150)
-  }
-
-  publish(next: ProjectGroup[]): void {
-    if (this.coalesceMs <= 0) {
-      this.flush(next)
-      return
-    }
-    this.pending = next
-    if (this.timer) return
-    this.timer = setTimeout(() => {
-      this.timer = null
-      const latest = this.pending
-      this.pending = null
-      if (latest) this.flush(latest)
-    }, this.coalesceMs)
-    this.timer.unref?.()
-  }
-
-  shutdown(): void {
-    if (this.timer) {
-      clearTimeout(this.timer)
-      this.timer = null
-    }
-    this.pending = null
-  }
+type SessionsSyncWs = {
+  broadcastSessionsPatch: (msg: { type: 'sessions.patch'; upsertProjects: ProjectGroup[]; removeProjectPaths: string[] }) => void
+  broadcastSessionsUpdatedToLegacy: (projects: ProjectGroup[]) => void
+  broadcastSessionsUpdated: (projects: ProjectGroup[]) => void
 }
+
+type SessionsSyncOptions = { coalesceMs?: number }
 ```
 
-**Step 4: Run test to verify it passes**
+Add fields:
+- `private pendingTrailing: ProjectGroup[] | null = null`
+- `private timer: NodeJS.Timeout | null = null`
+- `private coalesceMs: number`
 
-Run: `npm test -- test/unit/server/sessions-sync/service.test.ts`
-Expected: PASS.
+Publish logic:
+- `coalesceMs <= 0`: flush immediately.
+- no active timer: flush immediately, start window timer.
+- active timer: overwrite `pendingTrailing` with latest.
+- timer callback flushes pendingTrailing once (if present); if it flushed, start next window; if nothing pending, stop timer.
 
-**Step 5: Commit**
+Add:
+- `shutdown()` to clear timer and pending state.
+
+### Step 3. Wire shutdown
+
+In `server/index.ts` shutdown flow, call `sessionsSync.shutdown()` before exiting.
+
+### Step 4. Run tests (green)
 
 ```bash
-git add server/sessions-sync/service.ts test/unit/server/sessions-sync/service.test.ts
-git commit -m "feat(sync): coalesce bursty sessions publishes"
+npm test -- test/unit/server/sessions-sync/service.test.ts
+```
+
+### Step 5. Commit
+
+```bash
+git add server/sessions-sync/service.ts test/unit/server/sessions-sync/service.test.ts server/index.ts
+git commit -m "feat(sync): coalesce burst publishes with immediate-first delivery and clean shutdown"
 ```
 
 ---
 
-### Task 5: Wire Coalescing Service Shutdown + Integration Test
+## Task 5: Add Integration Coverage for Sessions Coalescing
 
 **Files:**
-- Modify: `server/index.ts`
-- Modify: `test/server/ws-sessions-patch.test.ts`
+- Modify `test/server/ws-sessions-patch.test.ts`
 
-**Step 1: Write the failing integration test**
+### Step 1. Add failing test (red)
 
-In `ws-sessions-patch.test.ts`, instantiate `SessionsSyncService` with real `WsHandler` and publish multiple updates quickly; assert one `sessions.patch` arrives after coalesce interval.
+Add integration test using real `WsHandler` + `SessionsSyncService`:
+- connect patch-capable client, receive initial snapshot.
+- call `publish` rapidly with coalescing enabled.
+- assert immediate first patch and one trailing patch for burst latest state.
+- assert no extra patches after timer settles.
 
-```ts
-const sync = new SessionsSyncService(handler as any, { coalesceMs: 80 })
-sync.publish(state1)
-sync.publish(state2)
-sync.publish(state3)
-const patch = await waitFor(ws, 'sessions.patch', 2000)
-expect(patch.upsertProjects[0].sessions[0].updatedAt).toBe(3)
-```
+### Step 2. Run test (red -> green after implementation)
 
-**Step 2: Run test to verify it fails**
+`npm test -- test/server/ws-sessions-patch.test.ts -t "coalesc"`
 
-Run: `npm test -- test/server/ws-sessions-patch.test.ts -t "coalesces"`
-Expected: FAIL until coalescing + timer behavior is integrated.
-
-**Step 3: Write minimal implementation**
-
-In `server/index.ts` shutdown path, call `sessionsSync.shutdown()` before process exit.
-
-```ts
-// after stopping indexers and before exit
-sessionsSync.shutdown()
-```
-
-**Step 4: Run test to verify it passes**
-
-Run: `npm test -- test/server/ws-sessions-patch.test.ts`
-Expected: PASS.
-
-**Step 5: Commit**
+### Step 3. Commit
 
 ```bash
-git add server/index.ts test/server/ws-sessions-patch.test.ts
-git commit -m "test(sync): verify coalesced patch delivery and clean shutdown"
+git add test/server/ws-sessions-patch.test.ts
+git commit -m "test(sync): verify sessions patch coalescing behavior end-to-end"
 ```
 
 ---
 
-### Task 6: Full Regression Verification
+## Task 6: Full Regression Verification
 
-**Files:**
-- Modify if needed: `test/server/ws-edge-cases.test.ts`
-- Modify if needed: `test/unit/client/components/App.test.tsx`
-- Modify if needed: `test/unit/client/components/TerminalView.lifecycle.test.tsx`
-
-**Step 1: Run targeted server tests**
-
-Run:
+### Step 1. Targeted tests
 
 ```bash
 npm test -- test/unit/server/ws-chunking.test.ts
-npm test -- test/unit/server/sessions-sync/service.test.ts
 npm test -- test/server/ws-edge-cases.test.ts
+npm test -- test/unit/client/components/TerminalView.lifecycle.test.tsx
+npm test -- test/unit/server/sessions-sync/service.test.ts
 npm test -- test/server/ws-sessions-patch.test.ts
 ```
 
-Expected: PASS.
+### Step 2. Full suite
 
-**Step 2: Run targeted client tests**
+`npm test`
 
-Run:
+### Step 3. Perf validation (manual)
 
-```bash
-npm test -- test/unit/client/components/TerminalView.lifecycle.test.tsx
-npm test -- test/unit/client/components/App.test.tsx
-```
-
-Expected: PASS.
-
-**Step 3: Run full suite**
-
-Run: `npm test`
-Expected: PASS (required before merge).
-
-**Step 4: Capture expected perf deltas in PR notes**
-
-Record before/after from `~/.freshell/logs/server-debug.jsonl`:
-- count and size of `terminal.attached` large sends
+Compare before/after in `~/.freshell/logs/server-debug.jsonl`:
+- count of large `terminal.attached` sends
 - count of `ws_backpressure_close`
-- count of `sessions.patch` events in burst window
-
-**Step 5: Commit final test adjustments/docs**
-
-```bash
-git add test/server/ws-edge-cases.test.ts test/unit/client/components/TerminalView.lifecycle.test.tsx test/unit/client/components/App.test.tsx
-git commit -m "test(perf): lock attach chunking and session publish coalescing behavior"
-```
+- `sessions.patch` volume during burst windows
 
 ---
 
-## Implementation Notes (Important)
+## Non-Goals
 
-1. **Do not break existing clients during rollout.**
-- Keep legacy `terminal.attached` for small snapshots.
-- Only stream chunked attach for oversized snapshots.
+1. No `sessions.patch` schema redesign.
+2. No reduction in scrollback size.
+3. No user-visible feature removal.
 
-2. **Preserve attach ordering invariant.**
-- Do not call `finishAttachSnapshot` until attach snapshot stream is fully sent.
+---
 
-3. **Keep coalescing bounded and configurable.**
-- Default `SESSIONS_SYNC_COALESCE_MS=150`.
-- Support `0` to disable for troubleshooting/tests.
+## Rollout and Risk Notes
 
-4. **No behavioral changes to data model.**
-- Sessions patch payload schema remains unchanged.
-- Coalescing only changes timing, not state semantics.
-
-## Post-Implementation Validation Checklist
-
-1. Attach a terminal with >1MB scrollback and confirm no backpressure disconnect.
-2. Confirm reconnect still renders snapshot before live output.
-3. Trigger rapid session-file churn and confirm patch sends are coalesced.
-4. Confirm no regression in `sessions.updated` chunk merge behavior on client.
-
-Plan complete and saved to `docs/plans/2026-02-10-ws-attach-chunking-sessions-coalescing.md`. Two execution options:
-
-1. Subagent-Driven (this session) - I dispatch fresh subagent per task, review between tasks, fast iteration
-2. Parallel Session (separate) - Open new session with executing-plans, batch execution with checkpoints
-
-Which approach?
+1. **Compatibility:** capability-gated chunk flow keeps old clients functional.
+2. **Ordering risk:** resolved by eliminating asynchronous chunk-yield between snapshot chunks and finishing attach only after final snapshot frame.
+3. **Latency risk for session updates:** immediate-first coalescing keeps isolated update latency unchanged while reducing burst churn.
+4. **Observability:** keep debug/perf logging off by default; use only for targeted validation.
