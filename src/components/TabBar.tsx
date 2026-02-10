@@ -229,7 +229,7 @@ export default function TabBar() {
   if (tabs.length === 0) return null
 
   return (
-    <div className="h-10 flex items-end px-2 bg-card" data-context={ContextIds.Global}>
+    <div className="h-10 flex items-end px-2 bg-muted" data-context={ContextIds.Global}>
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
