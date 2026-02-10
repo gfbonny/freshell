@@ -2333,4 +2333,61 @@ describe('panesSlice', () => {
       expect(result.zoomedPane[tabId]).toBe('pane-a')
     })
   })
+
+  describe('addPane clears zoom', () => {
+    it('clears zoom when adding a pane while zoomed', () => {
+      const tabId = 'tab1'
+      const a: PaneNode = { type: 'leaf', id: 'pane-a', content: { kind: 'terminal', createRequestId: 'a-req', status: 'running', mode: 'shell' } }
+      const b: PaneNode = { type: 'leaf', id: 'pane-b', content: { kind: 'terminal', createRequestId: 'b-req', status: 'running', mode: 'shell' } }
+      const root: PaneNode = {
+        type: 'split', id: 'split1', direction: 'horizontal',
+        sizes: [50, 50], children: [a, b],
+      }
+      const state: PanesState = {
+        layouts: { [tabId]: root },
+        activePane: { [tabId]: 'pane-a' },
+        paneTitles: {},
+        paneTitleSetByUser: {},
+        renameRequestTabId: null,
+        renameRequestPaneId: null,
+        zoomedPane: { [tabId]: 'pane-a' },
+      }
+
+      const result = panesReducer(state, addPane({ tabId, newContent: { kind: 'picker' } }))
+
+      // Zoom should be cleared so the new pane is visible
+      expect(result.zoomedPane[tabId]).toBeUndefined()
+    })
+  })
+
+  describe('splitPane clears zoom', () => {
+    it('clears zoom when splitting a pane while zoomed', () => {
+      const tabId = 'tab1'
+      const a: PaneNode = { type: 'leaf', id: 'pane-a', content: { kind: 'terminal', createRequestId: 'a-req', status: 'running', mode: 'shell' } }
+      const b: PaneNode = { type: 'leaf', id: 'pane-b', content: { kind: 'terminal', createRequestId: 'b-req', status: 'running', mode: 'shell' } }
+      const root: PaneNode = {
+        type: 'split', id: 'split1', direction: 'horizontal',
+        sizes: [50, 50], children: [a, b],
+      }
+      const state: PanesState = {
+        layouts: { [tabId]: root },
+        activePane: { [tabId]: 'pane-a' },
+        paneTitles: {},
+        paneTitleSetByUser: {},
+        renameRequestTabId: null,
+        renameRequestPaneId: null,
+        zoomedPane: { [tabId]: 'pane-a' },
+      }
+
+      const result = panesReducer(state, splitPane({
+        tabId,
+        paneId: 'pane-a',
+        direction: 'horizontal',
+        newContent: { kind: 'picker' },
+      }))
+
+      // Zoom should be cleared so the new pane is visible
+      expect(result.zoomedPane[tabId]).toBeUndefined()
+    })
+  })
 })

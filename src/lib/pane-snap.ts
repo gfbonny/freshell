@@ -47,16 +47,15 @@ export function snap1D(
  * Collect sizes[0] from all splits of the given orientation in the pane tree,
  * excluding the split being dragged. These serve as snap targets for 1D snapping.
  *
- * This traverses the entire tree and collects sizes[0] from every split node
- * whose direction matches the given orientation, except for the excluded split.
- * This means a horizontal bar at 60% will snap to ANY other horizontal bar
- * also near 60%, regardless of nesting depth - which is desirable behavior
- * for aligning bars across the layout.
+ * **Important:** These values are local percentages within each split's own
+ * parent container. For accurate cross-nesting alignment, use
+ * `collectCollinearSnapTargets` instead, which converts to a shared coordinate
+ * system.
  *
  * @param root - The root pane node of the layout tree
  * @param orientation - The orientation to match ('horizontal' or 'vertical')
  * @param excludeSplitId - The id of the split being dragged (to exclude from results)
- * @returns Array of sizes[0] values from matching splits
+ * @returns Array of sizes[0] values from matching splits (local percentages)
  */
 export function collectSameOrientationSizes(
   root: PaneNode,
@@ -82,6 +81,121 @@ function collectRecursive(
 
   collectRecursive(node.children[0], orientation, excludeSplitId, results)
   collectRecursive(node.children[1], orientation, excludeSplitId, results)
+}
+
+/**
+ * Collect absolute pixel positions of all same-orientation dividers (excluding
+ * the one being dragged), then convert them to the dragged split's local
+ * percentage coordinate system.
+ *
+ * This solves the coordinate space problem: a nested split at 50% of a 50%
+ * parent sits at 25% of the container, and the snap target should reflect that
+ * actual position, not the local 50%.
+ *
+ * @param root - The root pane node of the layout tree
+ * @param orientation - The orientation to match ('horizontal' or 'vertical')
+ * @param excludeSplitId - The id of the split being dragged
+ * @param containerWidth - Container width in pixels
+ * @param containerHeight - Container height in pixels
+ * @returns Array of positions converted to the dragged split's local % space
+ */
+export function collectCollinearSnapTargets(
+  root: PaneNode,
+  orientation: 'horizontal' | 'vertical',
+  excludeSplitId: string,
+  containerWidth: number,
+  containerHeight: number,
+): number[] {
+  const segments = computeDividerSegments(root, containerWidth, containerHeight)
+
+  // Find the dragged split's segment to get its parent container bounds
+  const draggedInfo = findSplitBounds(root, excludeSplitId, 0, 0, containerWidth, containerHeight)
+  if (!draggedInfo) return []
+
+  const parentAxisSize = orientation === 'horizontal'
+    ? draggedInfo.boundsWidth
+    : draggedInfo.boundsHeight
+
+  const parentAxisOrigin = orientation === 'horizontal'
+    ? draggedInfo.boundsLeft
+    : draggedInfo.boundsTop
+
+  if (parentAxisSize === 0) return []
+
+  // Collect absolute positions of other same-orientation dividers
+  const results: number[] = []
+  for (const seg of segments) {
+    if (seg.direction !== orientation) continue
+    if (seg.splitId === excludeSplitId) continue
+
+    // Convert absolute pixel position to local % within the dragged split's parent
+    const localPercent = ((seg.position - parentAxisOrigin) / parentAxisSize) * 100
+    // Only include targets that fall within the valid range of the dragged split
+    if (localPercent > 0 && localPercent < 100) {
+      results.push(localPercent)
+    }
+  }
+
+  return results
+}
+
+/**
+ * Find the bounds (parent container) of a specific split node in the tree.
+ * Returns the absolute pixel bounds of the container that the split divides.
+ */
+function findSplitBounds(
+  node: PaneNode,
+  splitId: string,
+  left: number,
+  top: number,
+  width: number,
+  height: number,
+): { boundsLeft: number; boundsTop: number; boundsWidth: number; boundsHeight: number } | null {
+  if (node.type === 'leaf') return null
+
+  if (node.id === splitId) {
+    return { boundsLeft: left, boundsTop: top, boundsWidth: width, boundsHeight: height }
+  }
+
+  if (node.direction === 'horizontal') {
+    const leftWidth = (node.sizes[0] / 100) * width
+    const rightWidth = (node.sizes[1] / 100) * width
+    const dividerX = left + leftWidth
+    return (
+      findSplitBounds(node.children[0], splitId, left, top, leftWidth, height) ||
+      findSplitBounds(node.children[1], splitId, dividerX, top, rightWidth, height)
+    )
+  } else {
+    const topHeight = (node.sizes[0] / 100) * height
+    const botHeight = (node.sizes[1] / 100) * height
+    const dividerY = top + topHeight
+    return (
+      findSplitBounds(node.children[0], splitId, left, top, width, topHeight) ||
+      findSplitBounds(node.children[1], splitId, left, dividerY, width, botHeight)
+    )
+  }
+}
+
+/**
+ * Convert snap threshold from "% of smallest container dimension" to
+ * the local percentage space of a specific split.
+ *
+ * @param snapThresholdSetting - The user setting (% of smallest dimension)
+ * @param containerWidth - Container width in pixels
+ * @param containerHeight - Container height in pixels
+ * @param splitAxisSize - The pixel size of the split's container along its resize axis
+ * @returns The threshold in local split percentage space
+ */
+export function convertThresholdToLocal(
+  snapThresholdSetting: number,
+  containerWidth: number,
+  containerHeight: number,
+  splitAxisSize: number,
+): number {
+  if (splitAxisSize === 0) return 0
+  const smallestDim = Math.min(containerWidth, containerHeight)
+  const thresholdPx = (snapThresholdSetting / 100) * smallestDim
+  return (thresholdPx / splitAxisSize) * 100
 }
 
 // ── 2D Intersection Snapping ──────────────────────────────────────────

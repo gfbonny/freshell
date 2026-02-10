@@ -70,7 +70,7 @@ export default function PaneLayout({ tabId, defaultContent, hidden }: PaneLayout
   const nodeToRender = zoomedLeaf ?? layout
 
   return (
-    <div ref={containerRef} className="relative h-full w-full">
+    <div ref={containerRef} data-pane-root className="relative h-full w-full">
       <PaneContainer tabId={tabId} node={nodeToRender} hidden={hidden} />
       {!zoomedPaneId && (
         <IntersectionDragOverlay tabId={tabId} containerRef={containerRef} />

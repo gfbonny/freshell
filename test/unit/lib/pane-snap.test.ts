@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { snap1D, collectSameOrientationSizes } from '../../../src/lib/pane-snap'
+import { snap1D, collectSameOrientationSizes, collectCollinearSnapTargets, convertThresholdToLocal } from '../../../src/lib/pane-snap'
 import type { PaneNode } from '../../../src/store/paneTypes'
 
 // Helper to create a leaf node
@@ -195,5 +195,195 @@ describe('collectSameOrientationSizes', () => {
     const result = collectSameOrientationSizes(root, 'horizontal', 'h1')
     expect(result).toEqual(expect.arrayContaining([60, 50]))
     expect(result).toHaveLength(2)
+  })
+})
+
+describe('collectCollinearSnapTargets', () => {
+  it('returns empty array for a leaf node', () => {
+    expect(collectCollinearSnapTargets(leaf('a'), 'horizontal', 'x', 800, 600)).toEqual([])
+  })
+
+  it('returns empty when the only split of matching orientation is excluded', () => {
+    const root: PaneNode = {
+      type: 'split',
+      id: 's1',
+      direction: 'horizontal',
+      sizes: [60, 40],
+      children: [leaf('a'), leaf('b')],
+    }
+    expect(collectCollinearSnapTargets(root, 'horizontal', 's1', 800, 600)).toEqual([])
+  })
+
+  it('converts nested split positions to dragged split local coordinates', () => {
+    // H-split [70, 30] (V-split [50, 50] (H-split [40, 60] (A, B), C), D)
+    // Container: 1000x500
+    // root-h divider at X=700 (70% of 1000), full container
+    // inner-h divider at X=280 (40% of 700), within the left 70% of container
+    //
+    // When dragging root-h, inner-h is at pixel 280.
+    // root-h's parent container is the full 1000px.
+    // local % = (280 / 1000) * 100 = 28%
+    //
+    // Old collectSameOrientationSizes would return 40 (wrong — that's inner-h's local %)
+    const innerH: PaneNode = {
+      type: 'split',
+      id: 'inner-h',
+      direction: 'horizontal',
+      sizes: [40, 60],
+      children: [leaf('a'), leaf('b')],
+    }
+    const innerV: PaneNode = {
+      type: 'split',
+      id: 'inner-v',
+      direction: 'vertical',
+      sizes: [50, 50],
+      children: [innerH, leaf('c')],
+    }
+    const root: PaneNode = {
+      type: 'split',
+      id: 'root-h',
+      direction: 'horizontal',
+      sizes: [70, 30],
+      children: [innerV, leaf('d')],
+    }
+
+    const targets = collectCollinearSnapTargets(root, 'horizontal', 'root-h', 1000, 500)
+    // inner-h at pixel 280 → 28% of root-h's 1000px container
+    expect(targets).toHaveLength(1)
+    expect(targets[0]).toBeCloseTo(28, 5)
+  })
+
+  it('converts root position to nested split local coordinates', () => {
+    // Same layout as above, but dragging inner-h
+    // root-h divider at pixel 700 (70% of 1000)
+    // inner-h's parent container is the left 70%: 700px wide, starting at x=0
+    // local % = (700 / 700) * 100 = 100% — outside the valid 0-100 range, excluded
+    const innerH: PaneNode = {
+      type: 'split',
+      id: 'inner-h',
+      direction: 'horizontal',
+      sizes: [40, 60],
+      children: [leaf('a'), leaf('b')],
+    }
+    const innerV: PaneNode = {
+      type: 'split',
+      id: 'inner-v',
+      direction: 'vertical',
+      sizes: [50, 50],
+      children: [innerH, leaf('c')],
+    }
+    const root: PaneNode = {
+      type: 'split',
+      id: 'root-h',
+      direction: 'horizontal',
+      sizes: [70, 30],
+      children: [innerV, leaf('d')],
+    }
+
+    const targets = collectCollinearSnapTargets(root, 'horizontal', 'inner-h', 1000, 500)
+    // root-h at pixel 700, inner-h parent is 700px wide starting at 0
+    // 700/700 = 100% → at boundary, excluded (> 0 && < 100)
+    expect(targets).toHaveLength(0)
+  })
+
+  it('produces correct targets for sibling same-orientation splits', () => {
+    // V-split [50, 50] (H-split [60, 40] (A, B), H-split [30, 70] (C, D))
+    // Container: 800x600
+    // top H-split divider at pixel 480 (60% of 800), within top 300px
+    // bot H-split divider at pixel 240 (30% of 800), within bottom 300px
+    //
+    // Both H-splits share the same parent container width (800px)
+    // Dragging top: bot at 240px → (240/800)*100 = 30% local — matches because
+    //   the sibling H-splits are at the same nesting level
+    const topH: PaneNode = {
+      type: 'split',
+      id: 'top-h',
+      direction: 'horizontal',
+      sizes: [60, 40],
+      children: [leaf('a'), leaf('b')],
+    }
+    const botH: PaneNode = {
+      type: 'split',
+      id: 'bot-h',
+      direction: 'horizontal',
+      sizes: [30, 70],
+      children: [leaf('c'), leaf('d')],
+    }
+    const root: PaneNode = {
+      type: 'split',
+      id: 'root-v',
+      direction: 'vertical',
+      sizes: [50, 50],
+      children: [topH, botH],
+    }
+
+    const targets = collectCollinearSnapTargets(root, 'horizontal', 'top-h', 800, 600)
+    // bot-h at pixel 240 → (240/800)*100 = 30% in top-h's coordinate space
+    expect(targets).toHaveLength(1)
+    expect(targets[0]).toBeCloseTo(30, 5)
+  })
+
+  it('excludes targets outside the 0-100% valid range', () => {
+    // H-split [50, 50] (A, H-split [50, 50] (B, C))
+    // Container: 1000x500
+    // outer divider at 500px
+    // inner divider at 750px (50% of right 500px = 250px + 500px)
+    //
+    // Dragging inner: outer at pixel 500.
+    // inner's parent is 500px starting at x=500.
+    // (500 - 500) / 500 * 100 = 0% — at boundary, excluded
+    const innerH: PaneNode = {
+      type: 'split',
+      id: 'inner-h',
+      direction: 'horizontal',
+      sizes: [50, 50],
+      children: [leaf('b'), leaf('c')],
+    }
+    const root: PaneNode = {
+      type: 'split',
+      id: 'outer-h',
+      direction: 'horizontal',
+      sizes: [50, 50],
+      children: [leaf('a'), innerH],
+    }
+
+    const targets = collectCollinearSnapTargets(root, 'horizontal', 'inner-h', 1000, 500)
+    // outer-h at 500px. inner-h parent starts at 500px, width 500px.
+    // (500 - 500) / 500 * 100 = 0% → excluded (must be > 0)
+    expect(targets).toHaveLength(0)
+  })
+})
+
+describe('convertThresholdToLocal', () => {
+  it('converts threshold for square container', () => {
+    // 4% of min(600, 600) = 24px. Local split axis is 600px.
+    // 24/600 * 100 = 4%
+    expect(convertThresholdToLocal(4, 600, 600, 600)).toBeCloseTo(4, 5)
+  })
+
+  it('converts threshold for wide container on horizontal axis', () => {
+    // 4% of min(1200, 600) = 4% of 600 = 24px. Local split axis is 1200px.
+    // 24/1200 * 100 = 2%
+    expect(convertThresholdToLocal(4, 1200, 600, 1200)).toBeCloseTo(2, 5)
+  })
+
+  it('converts threshold for wide container on vertical axis', () => {
+    // 4% of min(1200, 600) = 4% of 600 = 24px. Local split axis is 600px.
+    // 24/600 * 100 = 4%
+    expect(convertThresholdToLocal(4, 1200, 600, 600)).toBeCloseTo(4, 5)
+  })
+
+  it('converts threshold for nested split with smaller axis', () => {
+    // 4% of min(800, 600) = 4% of 600 = 24px. Nested split axis is 400px.
+    // 24/400 * 100 = 6%
+    expect(convertThresholdToLocal(4, 800, 600, 400)).toBeCloseTo(6, 5)
+  })
+
+  it('returns 0 when split axis size is 0', () => {
+    expect(convertThresholdToLocal(4, 800, 600, 0)).toBe(0)
+  })
+
+  it('returns 0 when threshold is 0 (disabled)', () => {
+    expect(convertThresholdToLocal(0, 800, 600, 800)).toBe(0)
   })
 })

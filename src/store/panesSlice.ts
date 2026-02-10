@@ -382,6 +382,11 @@ export const panesSlice = createSlice({
         state.layouts[tabId] = newRoot
         state.activePane[tabId] = newPaneId
 
+        // Clear zoom so the new pane is visible
+        if (state.zoomedPane?.[tabId]) {
+          delete state.zoomedPane[tabId]
+        }
+
         // Initialize title for new pane
         if (!state.paneTitles[tabId]) {
           state.paneTitles[tabId] = {}
@@ -436,6 +441,11 @@ export const panesSlice = createSlice({
 
       state.layouts[tabId] = newRoot
       state.activePane[tabId] = newPaneId
+
+      // Clear zoom so the new pane is visible
+      if (state.zoomedPane?.[tabId]) {
+        delete state.zoomedPane[tabId]
+      }
 
       // Initialize title for new pane
       if (!state.paneTitles[tabId]) {

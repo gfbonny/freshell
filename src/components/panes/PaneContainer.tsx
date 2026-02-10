@@ -14,7 +14,7 @@ import { cn } from '@/lib/utils'
 import { getWsClient } from '@/lib/ws-client'
 import { api } from '@/lib/api'
 import { derivePaneTitle } from '@/lib/derivePaneTitle'
-import { snap1D, collectSameOrientationSizes } from '@/lib/pane-snap'
+import { snap1D, collectCollinearSnapTargets, convertThresholdToLocal } from '@/lib/pane-snap'
 import { nanoid } from 'nanoid'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
 import type { CodingCliProviderName } from '@/lib/coding-cli-types'
@@ -132,17 +132,25 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
       accumulatedDeltaRef.current += percentDelta
       const rawNewSize = dragStartSizeRef.current + accumulatedDeltaRef.current
 
-      // Collect snap targets from same-orientation splits in the full layout tree
+      // Get root container dimensions for coordinate conversion
+      const rootContainer = containerRef.current.closest('[data-pane-root]') as HTMLElement | null
+      const rootW = rootContainer?.offsetWidth ?? container.offsetWidth
+      const rootH = rootContainer?.offsetHeight ?? container.offsetHeight
+
+      // Collect snap targets in local % space using absolute coordinate conversion
       const collinearPositions = rootNode
-        ? collectSameOrientationSizes(rootNode, direction, splitId)
+        ? collectCollinearSnapTargets(rootNode, direction, splitId, rootW, rootH)
         : []
+
+      // Convert snap threshold from "% of smallest dimension" to local split %
+      const localThreshold = convertThresholdToLocal(snapThreshold, rootW, rootH, totalSize)
 
       // Apply snapping
       newSize = snap1D(
         rawNewSize,
         dragStartSizeRef.current,
         collinearPositions,
-        snapThreshold,
+        localThreshold,
         shiftHeld ?? false,
       )
     }

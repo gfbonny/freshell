@@ -46,17 +46,37 @@ export default function IntersectionDragOverlay({
     splitDimensions: Record<string, { totalSize: number; direction: 'horizontal' | 'vertical' }>
   } | null>(null)
 
+  // Track container dimensions so intersections recompute on resize
+  const [containerSize, setContainerSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 })
+
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect
+        setContainerSize((prev) =>
+          prev.w === width && prev.h === height ? prev : { w: width, h: height },
+        )
+      }
+    })
+
+    observer.observe(container)
+    // Initialize from current dimensions
+    setContainerSize({ w: container.offsetWidth, h: container.offsetHeight })
+
+    return () => observer.disconnect()
+  }, [containerRef])
+
   // Compute intersections from the layout tree and container dimensions
   const intersections = useMemo(() => {
     if (!layout || layout.type === 'leaf') return []
-    const container = containerRef.current
-    if (!container) return []
-    const { offsetWidth, offsetHeight } = container
-    if (offsetWidth === 0 || offsetHeight === 0) return []
+    if (containerSize.w === 0 || containerSize.h === 0) return []
 
-    const segments = computeDividerSegments(layout, offsetWidth, offsetHeight)
+    const segments = computeDividerSegments(layout, containerSize.w, containerSize.h)
     return findIntersections(segments)
-  }, [layout, containerRef])
+  }, [layout, containerSize])
 
   // Collect the total pixel dimension for each split involved in an intersection.
   // This is needed to convert pixel deltas to percentage changes during dragging.
@@ -139,13 +159,19 @@ export default function IntersectionDragOverlay({
       const deltaX = e.clientX - dragging.startMouseX
       const deltaY = e.clientY - dragging.startMouseY
 
+      // Convert snap threshold from "% of smallest dimension" to pixels
+      const container = containerRef.current
+      const rootW = container?.offsetWidth ?? 800
+      const rootH = container?.offsetHeight ?? 600
+      const thresholdPx = (snapThreshold / 100) * Math.min(rootW, rootH)
+
       // Apply 2D snap
       const snapped = snap2D(
         dragging.originalX + deltaX,
         dragging.originalY + deltaY,
         dragging.originalX,
         dragging.originalY,
-        snapThreshold,
+        thresholdPx,
         e.shiftKey,
       )
 
