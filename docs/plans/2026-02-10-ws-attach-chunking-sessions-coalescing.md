@@ -97,6 +97,10 @@
   - `ATTACH_CHUNK_TIMEOUT_MS >= ATTACH_FRAME_SEND_TIMEOUT_MS + reconnectMinDelay`.
 - No client-side cancel message is added in v1; timeout alignment prevents clients from routinely abandoning streams before server-side timeout handling completes.
 
+11. **Keep protocol/state-machine logic out of rendering components.**
+- Implement chunk reassembly, timeout handling, generation guards, and auto-reattach policy in a dedicated client hook (`useChunkedAttach`) or transport helper.
+- `TerminalView` should remain a thin integration surface that consumes hook outputs and renders UI.
+
 ---
 
 ## Protocol Changes
@@ -246,7 +250,13 @@ export function chunkTerminalSnapshot(snapshot: string, maxBytes: number, termin
 
 `npm test -- test/unit/server/ws-chunking.test.ts`
 
-### Step 5. Commit
+### Step 5. Refactor (required)
+
+- Refactor helper/test naming and small internals for clarity without changing byte-safety behavior.
+- Keep surrogate-boundary guarantees and perf threshold assertions intact.
+- Re-run Task 1 targeted tests after refactor.
+
+### Step 6. Commit
 
 ```bash
 git add test/unit/server/ws-chunking.test.ts server/ws-handler.ts
@@ -340,10 +350,11 @@ private enqueueAttachSnapshotSend(
 ```
 
 `enqueueAttachSnapshotSend(...)` requirements:
-- Compute chain key `${state.id}:${args.terminalId}`.
+- Compute chain key `${ws.connectionId}:${args.terminalId}`.
 - Append `sendAttachSnapshotAndFinalize(...)` to the key's promise chain.
 - Catch/log inside the chain so the websocket message loop is never blocked and never gets unhandled rejection noise.
 - Keep `onMessage` handlers non-blocking by calling this wrapper and returning immediately (do not `await` chain completion in handlers).
+- In `onClose(...)`, perform `attachChainKeysByConnection` cleanup using `ws.connectionId`.
 
 Implementation safety:
 - Wrap chunking + send sequence in `try/catch`.
@@ -384,7 +395,14 @@ npm test -- test/server/ws-edge-cases.test.ts -t "chunked attach"
 npm test -- test/server/ws-edge-cases.test.ts -t "snapshot before any terminal.output"
 ```
 
-### Step 5. Commit
+### Step 5. Refactor (required)
+
+- Refactor for readability/idiomatic server structure while keeping tests green:
+  - extract small private helpers if `ws-handler.ts` grows too complex (e.g., chain-key helpers/cleanup).
+  - keep send-order and attach-finalization invariants unchanged.
+- Re-run Task 2 targeted tests after refactor.
+
+### Step 6. Commit
 
 ```bash
 git add server/ws-handler.ts src/lib/ws-client.ts test/server/ws-edge-cases.test.ts
@@ -397,6 +415,7 @@ git commit -m "feat(ws): chunk oversized attach snapshots and finalize attach wi
 
 **Files:**
 - Modify `src/components/TerminalView.tsx`
+- Add `src/components/terminal/useChunkedAttach.ts` (or equivalent colocated hook)
 - Modify `test/unit/client/components/TerminalView.lifecycle.test.tsx`
 
 ### Step 1. Write failing tests (red)
@@ -429,7 +448,7 @@ Add lifecycle tests for chunk flow:
 
 ### Step 2. Implement client behavior
 
-In `TerminalView.tsx`:
+In `src/components/terminal/useChunkedAttach.ts` (new hook):
 - Add `useRef<Map<string, string[]>>` for in-flight attach chunks.
 - Add `useRef<Map<string, number>>` (or equivalent) for per-terminal chunk timeout timers.
 - Add `useRef<number>` (connection generation token) incremented on reconnect/disconnect cleanup.
@@ -459,6 +478,12 @@ In `TerminalView.tsx`:
 - On any end-of-stream validation failure, clear `isAttaching` immediately and run the same one-shot guarded auto-reattach path.
 - If reattach fails, keep pane status as running, mark snapshot state as degraded, and show a one-time warning banner/message.
 
+In `src/components/TerminalView.tsx`:
+- Replace inline chunk state machine branches with hook integration points:
+  - pass websocket messages/terminal identity into the hook.
+  - apply hook outputs (`snapshotText`, `snapshotState`, `shouldAutoReattach`, warnings) to existing render and terminal write flows.
+- Keep rendering/UI responsibilities in `TerminalView`; keep protocol sequencing and retries in the hook.
+
 Suggested local types:
 
 ```ts
@@ -472,10 +497,16 @@ type TerminalAttachChunkMsg =
 
 `npm test -- test/unit/client/components/TerminalView.lifecycle.test.tsx -t "chunked attach"`
 
-### Step 4. Commit
+### Step 4. Refactor (required)
+
+- Refactor hook API and callsites for clarity and minimal coupling.
+- Ensure `TerminalView` remains render-focused and does not reacquire protocol state-machine complexity.
+- Re-run Task 3 targeted tests after refactor.
+
+### Step 5. Commit
 
 ```bash
-git add src/components/TerminalView.tsx test/unit/client/components/TerminalView.lifecycle.test.tsx
+git add src/components/terminal/useChunkedAttach.ts src/components/TerminalView.tsx test/unit/client/components/TerminalView.lifecycle.test.tsx
 git commit -m "feat(client): reassemble chunked terminal attach snapshots safely"
 ```
 
@@ -496,6 +527,7 @@ In `test/unit/server/sessions-sync/service.test.ts` using fake timers:
 3. if burst continues across windows, one publish per window with latest state.
 4. `shutdown()` clears timer and pending state.
 5. `coalesceMs=0` disables coalescing.
+6. no-change trailing flush (`last -> next` diff empty, e.g. A->B->A) emits nothing, updates baseline state, and stops timer when no pending remains.
 
 ### Step 2. Implement service
 
@@ -540,6 +572,10 @@ Diff timing contract:
 - `pendingTrailing` stores raw `ProjectGroup[]`.
 - `diffProjects` is computed only in `flush(next)` against current `this.last` to avoid stale diff payloads.
 - `this.last` / `hasLast` are updated only in `flush(next)` after diff computation; `publish(...)` never mutates them.
+- No-change edge case is explicit:
+  - if `diffProjects(this.last, next)` is empty, broadcast nothing, clear consumed pending state, and treat the callback as "no flush emitted".
+  - still update `this.last = next` and `hasLast = true` so future diffs compare against the latest canonical state.
+  - timer continuation rule keys off "pending exists" (not "anything emitted"): if pending remains after callback, schedule next window; otherwise stop timer.
 
 Add:
 - `shutdown()` to clear timer and pending state.
@@ -556,7 +592,12 @@ In `server/index.ts` shutdown flow:
 npm test -- test/unit/server/sessions-sync/service.test.ts
 ```
 
-### Step 5. Commit
+### Step 5. Refactor (required)
+
+- Refactor timer/pending logic for readability (small private helpers for window start/stop and flush decision).
+- Re-run Task 4 targeted tests after refactor.
+
+### Step 6. Commit
 
 ```bash
 git add server/sessions-sync/service.ts test/unit/server/sessions-sync/service.test.ts server/index.ts
@@ -582,7 +623,12 @@ Add integration test using real `WsHandler` + `SessionsSyncService`:
 
 `npm test -- test/server/ws-sessions-patch.test.ts -t "coalesc"`
 
-### Step 3. Commit
+### Step 3. Refactor (required)
+
+- Refactor only test structure/readability if needed; keep assertions and behavior unchanged.
+- Re-run Task 5 targeted integration test after refactor.
+
+### Step 4. Commit
 
 ```bash
 git add test/server/ws-sessions-patch.test.ts
