@@ -76,6 +76,10 @@
 - No server-side incoming Zod change is required for outbound-only messages.
 - Add explicit TypeScript types/guards in client paths handling new attach chunk messages.
 
+7. **Chunking algorithm cost is bounded for current limits.**
+- With `MAX_WS_CHUNK_BYTES` defaulting to ~500KB and snapshot upper bound 2MB, attach chunking is typically <= 4 chunks.
+- Binary search chunk sizing stays bounded and acceptable at this payload scale; revisit only if perf logs show attach chunking hot paths.
+
 ---
 
 ## Protocol Changes
@@ -136,6 +140,7 @@ Add tests for `chunkTerminalSnapshot(snapshot, maxBytes, terminalId)`:
 - handles unicode text and round-trips exactly.
 - honors long terminal IDs (simulate nanoid-length IDs).
 - throws clear error when `maxBytes` is too small for minimal chunk envelope.
+- preserves empty snapshot behavior (`[]`) so caller can choose inline path.
 
 Use exact envelope check in test:
 
@@ -228,6 +233,7 @@ In `test/server/ws-edge-cases.test.ts`, add tests asserting:
 1. Large `terminal.attach` sends `start -> chunk+ -> end` in order.
 2. `terminal.output` queued during attach is emitted only after `terminal.attached.end`.
 3. Large `terminal.create` snapshot paths also use chunk flow (at minimum one create path; ideally cover reused + new).
+4. If connection closes mid-chunk stream, snapshot stream aborts and no attach-finalization flush occurs for that connection.
 
 Note: this file uses `FakeRegistry.simulateOutput(...)` intentionally (test helper, not production `TerminalRegistry`).
 
@@ -238,6 +244,7 @@ Run: `npm test -- test/server/ws-edge-cases.test.ts -t "chunked attach"`
 In `server/ws-handler.ts`:
 - Extend `ClientState` with `supportsTerminalAttachChunkV1`.
 - Parse new hello capability.
+- Change `send(ws, msg)` to return `boolean` (`true` when frame was accepted for send; `false` when closed/aborted by backpressure guard).
 - Add a private class method (inside `WsHandler`) that sends snapshot inline or chunked and finalizes attach only after a complete snapshot send:
 
 ```ts
@@ -260,14 +267,14 @@ Method behavior:
 - Inline path (small snapshot OR client not chunk-capable):
   - If `created` present, send `terminal.created` with `snapshot`.
   - Else send `terminal.attached` with `snapshot`.
-  - Schedule `setImmediate(() => this.registry.finishAttachSnapshot(terminalId, ws))`.
+  - If send returns `true`, schedule `setImmediate(() => this.registry.finishAttachSnapshot(terminalId, ws))`.
 - Chunk path (oversized + capable):
   - If `created`, send `terminal.created` with `snapshotChunked: true` and no snapshot body.
   - Chunk with `chunkTerminalSnapshot(snapshot, MAX_CHUNK_BYTES, terminalId)`.
   - If chunk helper returns `[]`, send inline snapshot path instead (no empty chunk stream).
-  - Send `terminal.attached.start`, each `terminal.attached.chunk`, then `terminal.attached.end` with `totalCodeUnits`.
-  - Schedule `setImmediate(() => finishAttachSnapshot(...))` after `end`.
-  - If `ws.readyState` closes mid-stream, abort remaining chunks and do not finish attach for that connection.
+  - Send `terminal.attached.start`, each `terminal.attached.chunk`, then `terminal.attached.end` with `totalCodeUnits`, checking send-return `boolean` before each step.
+  - Schedule `setImmediate(() => finishAttachSnapshot(...))` only if all chunk frames were accepted.
+  - If any chunk send returns `false`, abort remaining chunks and do not finish attach for that connection.
 
 ### Step 3. Replace all four snapshot callsites
 
@@ -311,7 +318,7 @@ Add lifecycle tests for chunk flow:
 - `terminal.created` with `snapshotChunked: true` does not prematurely clear attaching state.
 - incomplete stream cleanup:
   - on websocket reconnect/disconnect, buffered chunks for that terminal are dropped.
-  - on timeout (no `terminal.attached.end` within configured window), buffered chunks are dropped.
+  - on timeout (no `terminal.attached.end` within `ATTACH_CHUNK_TIMEOUT_MS = 10_000`), buffered chunks are dropped and attach spinner is cleared.
   - on repeated `terminal.attached.start` for same terminal, previous in-flight chunks are replaced.
 
 ### Step 2. Implement client behavior
@@ -319,6 +326,7 @@ Add lifecycle tests for chunk flow:
 In `TerminalView.tsx`:
 - Add `useRef<Map<string, string[]>>` for in-flight attach chunks.
 - Add `useRef<Map<string, number>>` (or equivalent) for per-terminal chunk timeout timers.
+- Add `const ATTACH_CHUNK_TIMEOUT_MS = 10_000`.
 - Handle:
   - `terminal.attached.start`
   - `terminal.attached.chunk`
@@ -328,6 +336,7 @@ In `TerminalView.tsx`:
   - existing inline snapshot behavior unchanged.
   - if `snapshotChunked: true`, keep attaching state until `terminal.attached.end`.
 - On reconnect/unmount/detach/terminal change, clear in-flight chunk buffers and timers.
+- On chunk timeout, drop buffered chunks, clear timer, and set `isAttaching` false (do not render partial snapshot).
 
 Suggested local types:
 
@@ -394,6 +403,10 @@ Publish logic:
 - no active timer: flush immediately, start window timer.
 - active timer: overwrite `pendingTrailing` with latest.
 - timer callback flushes pendingTrailing once (if present); if it flushed, start next window; if nothing pending, stop timer.
+
+Diff timing contract:
+- `pendingTrailing` stores raw `ProjectGroup[]`.
+- `diffProjects` is computed only in `flush(next)` against current `this.last` to avoid stale diff payloads.
 
 Add:
 - `shutdown()` to clear timer and pending state.
