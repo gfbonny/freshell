@@ -22,13 +22,14 @@ Also:
 ## External Research Findings (Used to Define 100%)
 
 ### Codex
-- Codex token-count event schema is nested at `event_msg.payload.info.{total_token_usage,last_token_usage,model_context_window}`.
+- Codex token-count event schema in current CLI output is nested at `event_msg.payload.info.{total_token_usage,last_token_usage,model_context_window}`; legacy flat payloads (`payload.input/output/total`) still appear in older captures.
 - Codex compacts when `total_usage_tokens >= auto_compact_limit`.
 - `auto_compact_limit` defaults to `90%` of model `context_window` when not explicitly configured.
 - Codex also applies `effective_context_window_percent` (default `95`) when reporting usable model context.
 
 **Implementation consequence:**
 - Use `total_token_usage.total_tokens` as the active context-usage numerator.
+- Keep flat-field fallback parsing for backward compatibility.
 - 100% should map to compact threshold (not full context window).
 - Threshold formula:
   - preferred: explicit `model_auto_compact_token_limit` when known
@@ -59,6 +60,10 @@ Also:
 - Backward-compatible WS protocol additions only.
 - Existing behavior in `App.tsx` message handlers (notably `terminal.exit` idle-warning cleanup) must be preserved.
 - Provider parity rule: Codex/Claude pane-header rendering must use one shared formatter/path and identical UI behavior where possible; provider-specific branches are allowed only for token-threshold derivation.
+- `compactPercent` has a single source of truth: `tokenUsage.compactPercent` (no duplicated top-level `compactPercent` fields).
+- Session discovery split must remain explicit:
+  - `codingCliIndexer` is the metadata source for Codex/Claude `cwd/git/tokenUsage`.
+  - `claudeIndexer` remains responsible for Claude search/session-file repair hooks and one-time new-session association only.
 
 ---
 
@@ -129,6 +134,7 @@ Cover:
 - prefer `info.total_token_usage.total_tokens` for context usage.
 - keep compatibility fallback for legacy flat payload shape.
 - parse `session_meta.payload.git.branch` when present.
+- include fixture lines for both observed shapes so contract drift is explicit (`nested` + `legacy flat`).
 
 ```ts
 expect(events[0]).toMatchObject({
@@ -146,7 +152,10 @@ Cover parse-session aggregation from assistant message usage fields:
 - `message.usage.output_tokens`
 - `message.usage.cache_read_input_tokens`
 - `message.usage.cache_creation_input_tokens`
-- dedupe repeated assistant records by `message.id`.
+- dedupe repeated assistant usage records by stable key priority:
+  - `uuid` (preferred when present on stream lines)
+  - else `message.id`
+  - else full-line hash fallback (to avoid accidental over-deduping).
 
 ```ts
 expect(meta.tokenUsage).toEqual({
@@ -184,8 +193,9 @@ export interface TokenSummary {
   - fallback to legacy flat fields if nested missing.
   - compute compact percentage from Codex threshold rules (from research section).
 - `claude.ts`:
-  - aggregate assistant usage across parse pass.
-  - dedupe by assistant `message.id`.
+  - extend `JsonlMeta` and `parseSessionContent(...)` return shape to carry `tokenUsage` and git metadata fields needed by indexer propagation.
+  - aggregate assistant usage across parse pass from real JSONL assistant entries (`type: "assistant"` with `message.usage`).
+  - apply stable dedupe key priority from Step 2.
   - compute `compactThresholdTokens` using Claude 95% rule + context-window fallback.
 
 **Step 5: Run focused tests**
@@ -262,7 +272,6 @@ type TerminalMeta = {
   provider?: 'claude' | 'codex' | 'opencode' | 'gemini' | 'kimi'
   sessionId?: string
   tokenUsage?: TokenSummary
-  compactPercent?: number
   updatedAt: number
 }
 ```
@@ -305,7 +314,7 @@ git commit -m "feat(server): add terminal metadata service with explicit cwd/bra
 
 **Files:**
 - Modify: `server/ws-handler.ts`
-- Modify: `test/server/ws-protocol.test.ts`
+- Create: `test/server/ws-terminal-meta.test.ts`
 
 **Step 1: Add failing WS tests**
 
@@ -316,20 +325,27 @@ Test:
 **Step 2: Implement WS schema + handlers**
 
 In `server/ws-handler.ts`:
+- add explicit Zod schemas and include them in message unions:
+  - `TerminalMetaListSchema` (`{ type: "terminal.meta.list", requestId }`)
+  - `TokenSummarySchema`
+  - `TerminalMetaRecordSchema`
+  - `TerminalMetaListResponseSchema`
+  - `TerminalMetaUpdatedSchema` (with `upsert` + `remove` patch arrays)
 - add client message: `terminal.meta.list`.
 - add response: `terminal.meta.list.response`.
 - add broadcast event type: `terminal.meta.updated`.
+- ensure `send(...)` paths emit only validated payload shapes from those schemas.
 
 **Step 3: Run tests**
 
-Run: `npm test -- test/server/ws-protocol.test.ts`
+Run: `npm test -- test/server/ws-terminal-meta.test.ts`
 
 Expected: PASS.
 
 **Step 4: Commit**
 
 ```bash
-git add server/ws-handler.ts test/server/ws-protocol.test.ts
+git add server/ws-handler.ts test/server/ws-terminal-meta.test.ts
 git commit -m "feat(ws): add terminal metadata list/update protocol"
 ```
 
@@ -353,7 +369,8 @@ In `server/index.ts`:
 - instantiate metadata service.
 - seed from `registry.list()` for snapshot serving.
 - seed/update on terminal create and title-association loops.
-- on coding-cli index updates, map sessions to associated terminals and call `applySessionMetadata(...)`.
+- on `codingCliIndexer.onUpdate`, map sessions to associated terminals and call `applySessionMetadata(...)` for both Codex and Claude provider sessions.
+- keep `claudeIndexer.onNewSession` as association-only; after association, opportunistically apply metadata from latest `codingCliIndexer` snapshot when available (no direct token parsing from `claudeIndexer` path).
 - broadcast `terminal.meta.updated` only when metadata changed.
 - on terminal exit/remove, remove metadata and broadcast removal patch.
 
@@ -445,7 +462,7 @@ git commit -m "feat(client): ingest terminal metadata snapshot and live updates"
 - percentage omitted when compact threshold unknown.
 - metadata hidden for non-coding-cli modes.
 - icon buttons still render after metadata text.
-- title bar renders even when a tab has a single pane (no split).
+- title bar renders for single-pane tabs and split-pane tabs (all panes that currently use `PaneHeader`).
 - Codex and Claude with equivalent metadata inputs render equivalent title text/spacing output.
 
 `Pane.test.tsx` should assert metadata prop/select path is wired.
@@ -514,7 +531,7 @@ In `TabBar.test.tsx`, assert:
 
 In `src/components/TabBar.tsx`:
 - update class logic so active tab uses the same surface/background style token as `PaneHeader`.
-- set inactive tabs to white background.
+- set inactive tabs to white background in both themes (`bg-white` and `dark:bg-white`) per product requirement.
 - keep hover/focus/contrast behavior accessible.
 
 **Step 3: Run tests**
@@ -571,16 +588,19 @@ git commit -m "test(e2e): verify terminal metadata websocket flow to right-align
 
 1. `resolveGitCheckoutRoot()` explicitly returns worktree checkout root (not canonical parent repo root).
 2. Codex parser handles nested `token_count.info.*` schema and computes compact percent from compact-threshold semantics.
-3. Claude parser aggregates assistant usage with message-id dedupe and computes compact percent with 95% rule.
-4. `ParsedSessionMeta` and `CodingCliSession` both carry `tokenUsage` (and related git metadata) explicitly.
-5. `terminal.meta.list` and `terminal.meta.updated` WS messages work end-to-end.
-6. `terminal.exit` handling in `App.tsx` preserves existing idle-warning cleanup and removes terminal metadata.
-7. Pane title bar is always visible, including when a tab has only one pane.
-8. Pane header shows right-aligned metadata text in format `<subdir> (<branch><*>)  <percent>%` before icons.
-9. Non-coding-cli panes do not show this metadata string.
-10. Active tab background matches pane title-bar background; inactive tabs are white.
-11. Codex and Claude pane title bars have parity in rendering behavior except for provider-specific threshold math.
-12. `npm run lint` and `npm test` are green.
+3. Claude parser aggregates assistant usage with explicit stable-key dedupe and computes compact percent with 95% rule.
+4. Claude dedupe key priority is explicit (`uuid` -> `message.id` -> line-hash fallback), preventing duplicate counting without dropping legitimate rows.
+5. `ParsedSessionMeta` and `CodingCliSession` both carry `tokenUsage` (and related git metadata) explicitly.
+6. `TerminalMeta` does not duplicate compact percent outside `tokenUsage`.
+7. `terminal.meta.list` and `terminal.meta.updated` WS messages work end-to-end with explicit Zod schemas.
+8. `terminal.exit` handling in `App.tsx` preserves existing idle-warning cleanup and removes terminal metadata.
+9. Pane title bar is always visible, including when a tab has only one pane.
+10. Pane header shows right-aligned metadata text in format `<subdir> (<branch><*>)  <percent>%` before icons.
+11. Non-coding-cli panes do not show this metadata string.
+12. Active tab background matches pane title-bar background; inactive tabs are white (including dark theme behavior by design) while maintaining readable contrast.
+13. Codex and Claude pane title bars have parity in rendering behavior except for provider-specific threshold math.
+14. `codingCliIndexer` vs `claudeIndexer` responsibilities are preserved (metadata vs association/search hooks).
+15. `npm run lint` and `npm test` are green.
 
 ---
 
