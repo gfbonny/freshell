@@ -615,6 +615,43 @@ export const panesSlice = createSlice({
       state.layouts[tabId] = update(root)
     },
 
+    replacePane: (
+      state,
+      action: PayloadAction<{ tabId: string; paneId: string }>
+    ) => {
+      const { tabId, paneId } = action.payload
+      const root = state.layouts[tabId]
+      if (!root) return
+
+      const pickerContent: PaneContent = { kind: 'picker' }
+
+      function updateContent(node: PaneNode): PaneNode {
+        if (node.type === 'leaf') {
+          if (node.id === paneId) {
+            return { ...node, content: pickerContent }
+          }
+          return node
+        }
+        return {
+          ...node,
+          children: [updateContent(node.children[0]), updateContent(node.children[1])],
+        }
+      }
+
+      state.layouts[tabId] = updateContent(root)
+
+      // Reset title to picker-derived title ("New Tab")
+      if (!state.paneTitles[tabId]) {
+        state.paneTitles[tabId] = {}
+      }
+      state.paneTitles[tabId][paneId] = derivePaneTitle(pickerContent)
+
+      // Clear user-set flag so title auto-derives again
+      if (state.paneTitleSetByUser?.[tabId]?.[paneId]) {
+        delete state.paneTitleSetByUser[tabId][paneId]
+      }
+    },
+
     updatePaneContent: (
       state,
       action: PayloadAction<{ tabId: string; paneId: string; content: PaneContent }>
@@ -740,6 +777,7 @@ export const {
   resizePanes,
   resetSplit,
   swapSplit,
+  replacePane,
   updatePaneContent,
   removeLayout,
   hydratePanes,

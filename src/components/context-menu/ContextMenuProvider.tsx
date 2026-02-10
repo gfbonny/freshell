@@ -1,14 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { addTab, closeTab, reorderTabs, updateTab, setActiveTab, openSessionTab, requestTabRename } from '@/store/tabsSlice'
-import { addPane, closePane, initLayout, resetSplit, swapSplit, requestPaneRename } from '@/store/panesSlice'
+import { addPane, closePane, initLayout, replacePane, resetSplit, swapSplit, requestPaneRename } from '@/store/panesSlice'
 import { setProjects, setProjectExpanded } from '@/store/sessionsSlice'
 import { getWsClient } from '@/lib/ws-client'
 import { api } from '@/lib/api'
 import { getAuthToken } from '@/lib/auth'
 import { buildShareUrl } from '@/lib/utils'
 import { copyText } from '@/lib/clipboard'
-import { collectTerminalIds } from '@/lib/pane-utils'
+import { collectTerminalIds, findPaneContent } from '@/lib/pane-utils'
 import { collectSessionRefsFromNode } from '@/lib/session-utils'
 import { getTabDisplayTitle } from '@/lib/tab-title'
 import { getBrowserActions, getEditorActions, getTerminalActions } from '@/lib/pane-action-registry'
@@ -192,6 +192,15 @@ export function ContextMenuProvider({
     suppressNextFocusRestoreRef.current = true
     dispatch(requestPaneRename({ tabId, paneId }))
   }, [dispatch])
+
+  const replacePaneAction = useCallback((tabId: string, paneId: string) => {
+    if (!panes[tabId]) return
+    const content = findPaneContent(panes[tabId], paneId)
+    if (content?.kind === 'terminal' && content.terminalId) {
+      ws.send({ type: 'terminal.detach', terminalId: content.terminalId })
+    }
+    dispatch(replacePane({ tabId, paneId }))
+  }, [dispatch, panes, ws])
 
   const closeTabById = useCallback((tabId: string) => {
     const layout = panes[tabId]
@@ -687,6 +696,7 @@ export function ContextMenuProvider({
         closeTabsToRight,
         moveTab,
         renamePane,
+        replacePane: replacePaneAction,
         resetSplit: (tabId, splitId) => dispatch(resetSplit({ tabId, splitId })),
         swapSplit: (tabId, splitId) => dispatch(swapSplit({ tabId, splitId })),
         closePane: (tabId, paneId) => dispatch(closePane({ tabId, paneId })),
@@ -738,6 +748,7 @@ export function ContextMenuProvider({
     closeTabsToRight,
     moveTab,
     renamePane,
+    replacePaneAction,
     dispatch,
     openSessionInNewTab,
     openSessionInThisTab,
