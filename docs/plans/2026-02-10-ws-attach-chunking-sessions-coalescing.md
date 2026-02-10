@@ -126,10 +126,10 @@ Ordering guarantee relies on websocket/TCP message order on a single connection.
 For `terminal.create`, keep `terminal.created` but allow chunk follow-up:
 
 ```ts
-{ type: 'terminal.created', requestId, terminalId, createdAt, effectiveResumeSessionId, snapshotChunked: true }
+{ type: 'terminal.created', requestId, terminalId, createdAt, effectiveResumeSessionId, snapshotChunked: true, snapshot?: string }
 ```
 
-The existing `terminal.created` `snapshot` field remains unchanged for inline/small snapshots.
+The existing `terminal.created` `snapshot` field remains unchanged for inline/small snapshots; it is optional/omitted when `snapshotChunked: true`.
 
 ---
 
@@ -242,6 +242,7 @@ git commit -m "feat(ws): add byte-accurate terminal snapshot chunking helper and
 
 **Files:**
 - Modify `server/ws-handler.ts`
+- Modify `src/lib/ws-client.ts`
 
 ### Step 1. Add failing integration tests first (red)
 
@@ -272,8 +273,12 @@ In `server/ws-handler.ts`:
   - enqueues with `ws.send(payload, callback)` and resolves `false` on callback error.
   - resolves `false` on socket `close` event while frame is in-flight.
   - includes a bounded send timeout (e.g. 5s) so an in-flight send cannot hang indefinitely.
+  - on timeout, resolves `false` and proactively closes the socket with `4008` (`Attach send timeout`) to avoid dangling in-flight state.
   - this helper is dedicated to attach snapshot sequencing and should not change non-attach send semantics.
 - Add per-terminal-per-connection attach send serialization (promise chaining) so async attach flows cannot interleave.
+  - Store chains in `attachSendChains: Map<string, Promise<void>>` keyed by `${connectionId}:${terminalId}`.
+  - On completion/failure, clear map entry in `finally` if it still points to the active promise.
+  - On websocket close, clear all chain keys for that connection ID.
 - Add a private class method (inside `WsHandler`) that sends snapshot inline or chunked and finalizes attach only after a complete snapshot send:
 
 ```ts
@@ -306,6 +311,9 @@ Method behavior:
   - Schedule `setImmediate(() => finishAttachSnapshot(...))` only if all chunk frames were accepted.
   - If any frame enqueue returns `false`, abort remaining chunks and do not finish attach for that connection.
 
+In `src/lib/ws-client.ts`:
+- add `terminalAttachChunkV1: true` to hello capabilities so chunk-capable clients actually negotiate this path.
+
 ### Step 3. Replace all four snapshot callsites
 
 Replace direct snapshot sends + `setImmediate(finishAttachSnapshot)` in:
@@ -326,7 +334,7 @@ npm test -- test/server/ws-edge-cases.test.ts -t "snapshot before any terminal.o
 ### Step 5. Commit
 
 ```bash
-git add server/ws-handler.ts test/server/ws-edge-cases.test.ts
+git add server/ws-handler.ts src/lib/ws-client.ts test/server/ws-edge-cases.test.ts
 git commit -m "feat(ws): chunk oversized attach snapshots and finalize attach without race"
 ```
 
