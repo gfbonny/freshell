@@ -421,14 +421,19 @@ describe('pane header runtime metadata flow (e2e)', () => {
     })
   })
 
-  it('keeps annotation visible after refresh when pane terminalId is missing but tab/session metadata exists', async () => {
+  it('keeps annotation visible after refresh when pane metadata fields are stale but tab metadata is current', async () => {
     const store = createStore({
       codexPane: {
+        mode: 'shell',
         terminalId: undefined,
-        resumeSessionId: 'session-codex-refresh',
+        resumeSessionId: undefined,
+        initialCwd: undefined,
       },
       codexTab: {
+        mode: 'codex',
         terminalId: 'term-codex-tab-level',
+        resumeSessionId: 'session-codex-refresh',
+        initialCwd: '/home/user/code/freshell',
       },
     })
 

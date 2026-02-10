@@ -33,6 +33,11 @@ interface PaneContainerProps {
   hidden?: boolean
 }
 
+function normalizePathForMatch(value?: string): string | undefined {
+  if (!value) return undefined
+  return value.replace(/[\\/]+$/, '')
+}
+
 function resolvePaneRuntimeMeta(
   terminalMetaById: Record<string, TerminalMetaRecord>,
   options: {
@@ -41,6 +46,7 @@ function resolvePaneRuntimeMeta(
     isOnlyPane: boolean
     provider?: CodingCliProviderName
     resumeSessionId?: string
+    initialCwd?: string
   },
 ): TerminalMetaRecord | undefined {
   if (options.terminalId) {
@@ -61,13 +67,35 @@ function resolvePaneRuntimeMeta(
     ))
   }
 
+  if (options.provider && options.initialCwd) {
+    const normalizedInitialCwd = normalizePathForMatch(options.initialCwd)
+    if (normalizedInitialCwd) {
+      const byCwd = Object.values(terminalMetaById).find((record) => {
+        if (record.provider !== options.provider) return false
+        const candidates = [
+          normalizePathForMatch(record.cwd),
+          normalizePathForMatch(record.checkoutRoot),
+          normalizePathForMatch(record.repoRoot),
+        ].filter(Boolean)
+        return candidates.includes(normalizedInitialCwd)
+      })
+      if (byCwd) return byCwd
+    }
+  }
+
+  if (options.provider && options.isOnlyPane) {
+    const providerMatches = Object.values(terminalMetaById).filter((record) => record.provider === options.provider)
+    if (providerMatches.length === 1) return providerMatches[0]
+  }
+
   return undefined
 }
 
 export default function PaneContainer({ tabId, node, hidden }: PaneContainerProps) {
   const dispatch = useAppDispatch()
   const activePane = useAppSelector((s) => s.panes.activePane[tabId])
-  const tabTerminalId = useAppSelector((s) => s.tabs.tabs.find((t) => t.id === tabId)?.terminalId)
+  const tab = useAppSelector((s) => s.tabs.tabs.find((t) => t.id === tabId))
+  const tabTerminalId = tab?.terminalId
   const paneTitles = useAppSelector((s) => s.panes.paneTitles[tabId] ?? EMPTY_PANE_TITLES)
   const terminalMetaById = useAppSelector(
     (s) => s.terminalMeta?.byTerminalId ?? EMPTY_TERMINAL_META_BY_ID
@@ -216,14 +244,31 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
     const paneTitle = explicitTitle ?? derivePaneTitle(node.content)
     const paneStatus = node.content.kind === 'terminal' ? node.content.status : 'running'
     const isRenaming = renamingPaneId === node.id
+    const paneProvider: CodingCliProviderName | undefined =
+      node.content.kind === 'terminal'
+        ? (
+            node.content.mode !== 'shell'
+              ? node.content.mode
+              : (tab?.mode !== 'shell' ? tab?.mode : undefined)
+          )
+        : undefined
+    const paneResumeSessionId =
+      node.content.kind === 'terminal'
+        ? (node.content.resumeSessionId || tab?.resumeSessionId)
+        : undefined
+    const paneInitialCwd =
+      node.content.kind === 'terminal'
+        ? (node.content.initialCwd || tab?.initialCwd)
+        : undefined
     const paneRuntimeMeta =
-      node.content.kind === 'terminal' && node.content.mode !== 'shell'
+      node.content.kind === 'terminal'
         ? resolvePaneRuntimeMeta(terminalMetaById, {
           terminalId: node.content.terminalId,
           tabTerminalId,
           isOnlyPane,
-          provider: node.content.mode,
-          resumeSessionId: node.content.resumeSessionId,
+          provider: paneProvider,
+          resumeSessionId: paneResumeSessionId,
+          initialCwd: paneInitialCwd,
         })
         : undefined
     const paneMetaLabel =
