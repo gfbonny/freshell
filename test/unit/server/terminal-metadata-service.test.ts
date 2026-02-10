@@ -22,7 +22,7 @@ function createTerminalRecord(overrides: Partial<{
   }
 }
 
-function createService() {
+function createService(gitState?: { branch?: string; isDirty?: boolean }) {
   let now = 1_000
   const nextNow = () => {
     now += 100
@@ -34,7 +34,10 @@ function createService() {
     git: {
       resolveCheckoutRoot: async () => '/workspace/repo',
       resolveRepoRoot: async () => '/workspace',
-      resolveBranchAndDirty: async () => ({ branch: 'main', isDirty: true }),
+      resolveBranchAndDirty: async () => ({
+        branch: gitState?.branch ?? 'main',
+        isDirty: gitState?.isDirty ?? true,
+      }),
     },
   })
 
@@ -69,8 +72,8 @@ describe('TerminalMetadataService', () => {
     })
   })
 
-  it('merges session token usage and updates updatedAt when metadata changes', async () => {
-    const { service } = createService()
+  it('prefers live git branch/dirty over stale session snapshots and updates token usage', async () => {
+    const { service } = createService({ branch: 'feature/live', isDirty: true })
     const seeded = await service.seedFromTerminal(
       createTerminalRecord({
         terminalId: 'term-2',
@@ -85,7 +88,7 @@ describe('TerminalMetadataService', () => {
       projectPath: '/workspace/repo',
       updatedAt: Date.now(),
       cwd: '/workspace/repo/src',
-      gitBranch: 'feature/one',
+      gitBranch: 'main',
       isDirty: false,
       tokenUsage: {
         inputTokens: 20,
@@ -109,8 +112,8 @@ describe('TerminalMetadataService', () => {
       checkoutRoot: '/workspace/repo',
       repoRoot: '/workspace',
       displaySubdir: 'repo',
-      branch: 'feature/one',
-      isDirty: false,
+      branch: 'feature/live',
+      isDirty: true,
       provider: 'claude',
       sessionId: 'claude-session-2',
       tokenUsage: {

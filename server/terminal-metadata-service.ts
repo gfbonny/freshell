@@ -192,8 +192,9 @@ export class TerminalMetadataService {
       checkoutRoot,
       repoRoot,
       displaySubdir: deriveDisplaySubdir(cwd, checkoutRoot),
-      branch: meta.branch ?? gitBranchAndDirty.branch,
-      isDirty: meta.isDirty ?? gitBranchAndDirty.isDirty,
+      // Prefer live git state derived from cwd over potentially stale session snapshots.
+      branch: gitBranchAndDirty.branch ?? meta.branch,
+      isDirty: gitBranchAndDirty.isDirty ?? meta.isDirty,
     }
   }
 

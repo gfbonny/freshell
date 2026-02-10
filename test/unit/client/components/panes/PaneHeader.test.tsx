@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent, cleanup } from '@testing-library/react'
 import PaneHeader from '@/components/panes/PaneHeader'
-import { formatPaneRuntimeLabel } from '@/lib/format-terminal-title-meta'
+import { formatPaneRuntimeLabel, formatPaneRuntimeTooltip } from '@/lib/format-terminal-title-meta'
 
 vi.mock('lucide-react', () => ({
   X: ({ className }: { className?: string }) => (
@@ -81,6 +81,7 @@ describe('PaneHeader', () => {
         <PaneHeader
           title="My Terminal"
           metaLabel="freshell (main*)  25%"
+          metaTooltip={'Directory: /home/user/code/freshell\nbranch: main*\nTokens: 54414/167000(33% full)'}
           status="running"
           isActive={true}
           onClose={vi.fn()}
@@ -90,7 +91,9 @@ describe('PaneHeader', () => {
       )
 
       expect(
-        screen.getByText((_, element) => element?.getAttribute('title') === 'freshell (main*)  25%'),
+        screen.getByText((_, element) =>
+          element?.getAttribute('title') === 'Directory: /home/user/code/freshell\nbranch: main*\nTokens: 54414/167000(33% full)',
+        ),
       ).toBeInTheDocument()
       expect(screen.getByTitle('Maximize pane')).toBeInTheDocument()
       expect(screen.getByTitle('Close pane')).toBeInTheDocument()
@@ -152,6 +155,35 @@ describe('PaneHeader', () => {
       })
 
       expect(label).toBe('freshell (main)')
+    })
+  })
+
+  describe('formatPaneRuntimeTooltip()', () => {
+    it('formats detailed hover text with directory, branch, and tokens', () => {
+      const tooltip = formatPaneRuntimeTooltip({
+        terminalId: 'term-4',
+        provider: 'claude',
+        cwd: '/home/user/code/freshell/.worktrees/fix-token-percent-calc',
+        checkoutRoot: '/home/user/code/freshell/.worktrees/fix-token-percent-calc',
+        branch: 'fix/token-percent-calc',
+        isDirty: true,
+        tokenUsage: {
+          inputTokens: 1,
+          outputTokens: 8,
+          cachedTokens: 54405,
+          totalTokens: 54414,
+          contextTokens: 54414,
+          compactThresholdTokens: 167000,
+          compactPercent: 33,
+        },
+        updatedAt: 1,
+      })
+
+      expect(tooltip).toBe(
+        'Directory: /home/user/code/freshell/.worktrees/fix-token-percent-calc\n' +
+        'branch: fix/token-percent-calc*\n' +
+        'Tokens: 54414/167000(33% full)',
+      )
     })
   })
 

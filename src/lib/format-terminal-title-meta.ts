@@ -29,3 +29,35 @@ export function formatPaneRuntimeLabel(meta: TerminalMetaRecord | undefined): st
   if (!percent) return left || undefined
   return left ? `${left}  ${percent}` : percent
 }
+
+export function formatPaneRuntimeTooltip(meta: TerminalMetaRecord | undefined): string | undefined {
+  if (!meta) return undefined
+
+  const lines: string[] = []
+  const directory = meta.cwd || meta.checkoutRoot || meta.repoRoot
+  if (directory) {
+    lines.push(`Directory: ${directory}`)
+  }
+
+  if (meta.branch) {
+    lines.push(`branch: ${meta.branch}${meta.isDirty ? '*' : ''}`)
+  }
+
+  const contextTokens = meta.tokenUsage?.contextTokens
+  const compactThresholdTokens = meta.tokenUsage?.compactThresholdTokens
+  const compactPercent = meta.tokenUsage?.compactPercent
+  if (
+    typeof contextTokens === 'number' &&
+    Number.isFinite(contextTokens) &&
+    typeof compactThresholdTokens === 'number' &&
+    Number.isFinite(compactThresholdTokens) &&
+    compactThresholdTokens > 0
+  ) {
+    const normalizedPercent = typeof compactPercent === 'number' && Number.isFinite(compactPercent)
+      ? Math.max(0, Math.min(100, Math.round(compactPercent)))
+      : Math.max(0, Math.min(100, Math.round((contextTokens / compactThresholdTokens) * 100)))
+    lines.push(`Tokens: ${Math.round(contextTokens)}/${Math.round(compactThresholdTokens)}(${normalizedPercent}% full)`)
+  }
+
+  return lines.length ? lines.join('\n') : undefined
+}

@@ -17,6 +17,7 @@ function statusClassName(status: TerminalStatus): string {
 interface PaneHeaderProps {
   title: string
   metaLabel?: string
+  metaTooltip?: string
   status: TerminalStatus
   isActive: boolean
   onClose: () => void
@@ -34,6 +35,7 @@ interface PaneHeaderProps {
 export default function PaneHeader({
   title,
   metaLabel,
+  metaTooltip,
   status,
   isActive,
   onClose,
@@ -91,7 +93,7 @@ export default function PaneHeader({
         {metaLabel && (
           <span
             className="max-w-[18rem] truncate text-xs text-muted-foreground text-right"
-            title={metaLabel}
+            title={metaTooltip || metaLabel}
           >
             {metaLabel}
           </span>

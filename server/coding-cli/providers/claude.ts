@@ -1,5 +1,6 @@
 import path from 'path'
 import { createHash } from 'crypto'
+import fs from 'fs'
 import fsp from 'fs/promises'
 import { extractTitleFromMessage } from '../../title-utils.js'
 import { isValidClaudeSessionId } from '../../claude-session-id.js'
@@ -22,6 +23,7 @@ export type JsonlMeta = {
 
 const CLAUDE_DEFAULT_CONTEXT_WINDOW = 200_000
 const CLAUDE_DEFAULT_COMPACT_PERCENT = 95
+const CLAUDE_DEBUG_TAIL_BYTES = 128 * 1024
 
 const CLAUDE_MODEL_CONTEXT_WINDOWS: Record<string, number> = {
   'claude-opus-4-20250514': 200_000,
@@ -37,6 +39,8 @@ const CLAUDE_MODEL_CONTEXT_WINDOWS: Record<string, number> = {
   'claude-3-sonnet-20240229': 200_000,
   'claude-3-haiku-20240307': 200_000,
 }
+
+const claudeDebugCompactThresholdCache = new Map<string, number | null>()
 
 function toFiniteNumber(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) return value
@@ -75,8 +79,61 @@ function assistantUsageDedupKey(obj: any, line: string): string {
   return `line:${createHash('sha1').update(line).digest('hex')}`
 }
 
+function parseAutocompactThresholdFromDebugText(text: string): number | undefined {
+  const matches = text.matchAll(/autocompact:\s*tokens=\d+\s+threshold=(\d+)/g)
+  let threshold: number | undefined
+  for (const match of matches) {
+    const parsed = Number(match[1])
+    if (Number.isFinite(parsed) && parsed > 0) {
+      threshold = parsed
+    }
+  }
+  return threshold
+}
+
+function readClaudeDebugCompactThreshold(sessionId: string, claudeHome: string): number | undefined {
+  if (!sessionId || !isValidClaudeSessionId(sessionId)) return undefined
+
+  const cached = claudeDebugCompactThresholdCache.get(sessionId)
+  if (cached !== undefined) {
+    return cached ?? undefined
+  }
+
+  const debugPath = path.join(claudeHome, 'debug', `${sessionId}.txt`)
+  try {
+    const fd = fs.openSync(debugPath, 'r')
+    let threshold: number | undefined
+    try {
+      const stat = fs.fstatSync(fd)
+      const bytesToRead = Math.min(stat.size, CLAUDE_DEBUG_TAIL_BYTES)
+      if (bytesToRead <= 0) {
+        claudeDebugCompactThresholdCache.set(sessionId, null)
+        return undefined
+      }
+
+      const start = Math.max(0, stat.size - bytesToRead)
+      const buffer = Buffer.alloc(bytesToRead)
+      const read = fs.readSync(fd, buffer, 0, bytesToRead, start)
+      threshold = parseAutocompactThresholdFromDebugText(buffer.subarray(0, read).toString('utf8'))
+    } finally {
+      fs.closeSync(fd)
+    }
+
+    claudeDebugCompactThresholdCache.set(sessionId, threshold ?? null)
+    return threshold
+  } catch {
+    claudeDebugCompactThresholdCache.set(sessionId, null)
+    return undefined
+  }
+}
+
+type ParseSessionOptions = {
+  fallbackSessionId?: string
+  compactThresholdTokens?: number
+}
+
 /** Parse session metadata from jsonl content (pure function for testing) */
-export function parseSessionContent(content: string): JsonlMeta {
+export function parseSessionContent(content: string, options: ParseSessionOptions = {}): JsonlMeta {
   const lines = content.split(/\r?\n/).filter(Boolean)
   let sessionId: string | undefined
   let cwd: string | undefined
@@ -86,9 +143,13 @@ export function parseSessionContent(content: string): JsonlMeta {
   let isDirty: boolean | undefined
   let model: string | undefined
   const usageSeen = new Set<string>()
-  let usageInputTokens = 0
-  let usageOutputTokens = 0
-  let usageCachedTokens = 0
+  let latestUsage:
+    | {
+      inputTokens: number
+      outputTokens: number
+      cachedTokens: number
+    }
+    | undefined
 
   for (const line of lines) {
     let obj: any
@@ -185,25 +246,32 @@ export function parseSessionContent(content: string): JsonlMeta {
       const dedupeKey = assistantUsageDedupKey(obj, line)
       if (!usageSeen.has(dedupeKey)) {
         usageSeen.add(dedupeKey)
-        usageInputTokens += toFiniteNumber(usage.input_tokens) ?? 0
-        usageOutputTokens += toFiniteNumber(usage.output_tokens) ?? 0
-        usageCachedTokens +=
-          (toFiniteNumber(usage.cache_read_input_tokens) ?? 0) +
-          (toFiniteNumber(usage.cache_creation_input_tokens) ?? 0)
+        latestUsage = {
+          inputTokens: toFiniteNumber(usage.input_tokens) ?? 0,
+          outputTokens: toFiniteNumber(usage.output_tokens) ?? 0,
+          cachedTokens:
+            (toFiniteNumber(usage.cache_read_input_tokens) ?? 0) +
+            (toFiniteNumber(usage.cache_creation_input_tokens) ?? 0),
+        }
       }
     }
   }
 
+  if (!sessionId && options.fallbackSessionId && isValidClaudeSessionId(options.fallbackSessionId)) {
+    sessionId = options.fallbackSessionId
+  }
+
   let tokenUsage: TokenSummary | undefined
-  if (usageSeen.size > 0) {
-    const contextTokens = usageInputTokens + usageOutputTokens + usageCachedTokens
+  if (latestUsage) {
+    const contextTokens = latestUsage.inputTokens + latestUsage.outputTokens + latestUsage.cachedTokens
     const modelContextWindow = resolveClaudeContextWindow(model)
-    const compactPercentThreshold = resolveClaudeCompactPercentThreshold()
-    const compactThresholdTokens = Math.round((modelContextWindow * compactPercentThreshold) / 100)
+    const compactThresholdTokens =
+      options.compactThresholdTokens ??
+      Math.round((modelContextWindow * resolveClaudeCompactPercentThreshold()) / 100)
     tokenUsage = {
-      inputTokens: usageInputTokens,
-      outputTokens: usageOutputTokens,
-      cachedTokens: usageCachedTokens,
+      inputTokens: latestUsage.inputTokens,
+      outputTokens: latestUsage.outputTokens,
+      cachedTokens: latestUsage.cachedTokens,
       totalTokens: contextTokens,
       contextTokens,
       modelContextWindow,
@@ -286,8 +354,13 @@ export const claudeProvider: CodingCliProvider = {
     return files
   },
 
-  parseSessionFile(content: string): ParsedSessionMeta {
-    return parseSessionContent(content)
+  parseSessionFile(content: string, filePath: string): ParsedSessionMeta {
+    const fallbackSessionId = path.basename(filePath, '.jsonl')
+    const compactThresholdTokens = readClaudeDebugCompactThreshold(fallbackSessionId, this.homeDir)
+    return parseSessionContent(content, {
+      fallbackSessionId,
+      compactThresholdTokens,
+    })
   },
 
   async resolveProjectPath(_filePath: string, meta: ParsedSessionMeta): Promise<string> {

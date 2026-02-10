@@ -12,6 +12,7 @@ interface PaneProps {
   isOnlyPane: boolean
   title?: string
   metaLabel?: string
+  metaTooltip?: string
   status?: TerminalStatus
   content?: PaneContent
   onClose: () => void
@@ -34,6 +35,7 @@ export default function Pane({
   isOnlyPane: _isOnlyPane,
   title,
   metaLabel,
+  metaTooltip,
   status,
   content,
   onClose,
@@ -74,6 +76,7 @@ export default function Pane({
           <PaneHeader
             title={title}
             metaLabel={metaLabel}
+            metaTooltip={metaTooltip}
             status={status || 'creating'}
             isActive={isActive}
             onClose={onClose}

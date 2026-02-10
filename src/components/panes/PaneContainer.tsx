@@ -15,7 +15,7 @@ import { cn } from '@/lib/utils'
 import { getWsClient } from '@/lib/ws-client'
 import { api } from '@/lib/api'
 import { derivePaneTitle } from '@/lib/derivePaneTitle'
-import { formatPaneRuntimeLabel } from '@/lib/format-terminal-title-meta'
+import { formatPaneRuntimeLabel, formatPaneRuntimeTooltip } from '@/lib/format-terminal-title-meta'
 import { snap1D, collectCollinearSnapTargets, convertThresholdToLocal } from '@/lib/pane-snap'
 import { nanoid } from 'nanoid'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
@@ -191,6 +191,12 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
       node.content.terminalId
         ? formatPaneRuntimeLabel(terminalMetaById[node.content.terminalId])
         : undefined
+    const paneMetaTooltip =
+      node.content.kind === 'terminal' &&
+      node.content.mode !== 'shell' &&
+      node.content.terminalId
+        ? formatPaneRuntimeTooltip(terminalMetaById[node.content.terminalId])
+        : undefined
 
     return (
       <Pane
@@ -202,6 +208,7 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
         status={paneStatus}
         content={node.content}
         metaLabel={paneMetaLabel}
+        metaTooltip={paneMetaTooltip}
         onClose={() => handleClose(node.id, node.content)}
         onFocus={() => handleFocus(node.id)}
         onToggleZoom={() => handleToggleZoom(node.id)}

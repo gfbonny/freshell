@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import path from 'path'
 import os from 'os'
+import fsp from 'fs/promises'
 import { claudeProvider, parseSessionContent } from '../../../../server/coding-cli/providers/claude'
 import { getClaudeHome } from '../../../../server/claude-home'
 import { ClaudeSessionIndexer, applyOverride } from '../../../../server/claude-indexer'
@@ -47,7 +48,7 @@ describe('claudeProvider.getStreamArgs()', () => {
   })
 })
 
-describe('parseSessionContent() - token usage aggregation', () => {
+describe('parseSessionContent() - token usage snapshots', () => {
   const originalAutocompactOverride = process.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE
 
   afterEach(() => {
@@ -58,7 +59,7 @@ describe('parseSessionContent() - token usage aggregation', () => {
     }
   })
 
-  it('aggregates assistant usage with uuid -> message.id -> line-hash dedupe priority', () => {
+  it('uses latest assistant usage snapshot with uuid -> message.id -> line-hash dedupe priority', () => {
     const content = [
       JSON.stringify({
         type: 'assistant',
@@ -144,11 +145,11 @@ describe('parseSessionContent() - token usage aggregation', () => {
     const meta = parseSessionContent(content)
 
     expect(meta.tokenUsage).toEqual({
-      inputTokens: 20,
-      outputTokens: 9,
-      cachedTokens: 12,
-      totalTokens: 41,
-      contextTokens: 41,
+      inputTokens: 4,
+      outputTokens: 2,
+      cachedTokens: 3,
+      totalTokens: 9,
+      contextTokens: 9,
       modelContextWindow: 200000,
       compactThresholdTokens: 190000,
       compactPercent: 0,
@@ -178,6 +179,77 @@ describe('parseSessionContent() - token usage aggregation', () => {
 
     expect(meta.tokenUsage?.compactThresholdTokens).toBe(190000)
     expect(meta.tokenUsage?.compactPercent).toBe(100)
+  })
+
+  it('supports compact-threshold overrides sourced outside session JSON (e.g. debug logs)', () => {
+    const content = [
+      JSON.stringify({
+        type: 'assistant',
+        uuid: 'uuid-debug-threshold',
+        message: {
+          role: 'assistant',
+          usage: {
+            input_tokens: 1,
+            output_tokens: 8,
+            cache_read_input_tokens: 49961,
+            cache_creation_input_tokens: 4444,
+          },
+        },
+      }),
+    ].join('\n')
+
+    const meta = parseSessionContent(content, { compactThresholdTokens: 167000 })
+    expect(meta.tokenUsage?.contextTokens).toBe(54414)
+    expect(meta.tokenUsage?.compactThresholdTokens).toBe(167000)
+    expect(meta.tokenUsage?.compactPercent).toBe(Math.round((54414 / 167000) * 100))
+  })
+
+  it('reads compact threshold from Claude debug logs when parsing session files', async () => {
+    const homeDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'freshell-claude-debug-'))
+    const sessionId = SESSION_A
+    const debugDir = path.join(homeDir, 'debug')
+    const debugFile = path.join(debugDir, `${sessionId}.txt`)
+    await fsp.mkdir(debugDir, { recursive: true })
+    await fsp.writeFile(
+      debugFile,
+      [
+        'autocompact: tokens=120000 threshold=160000 effectiveWindow=180000',
+        'autocompact: tokens=55880 threshold=167000 effectiveWindow=180000',
+      ].join('\n'),
+      'utf8',
+    )
+
+    const originalHomeDir = (claudeProvider as any).homeDir
+    ;(claudeProvider as any).homeDir = homeDir
+    try {
+      const content = [
+        JSON.stringify({
+          type: 'assistant',
+          uuid: 'uuid-session-file-threshold',
+          message: {
+            role: 'assistant',
+            usage: {
+              input_tokens: 1,
+              output_tokens: 8,
+              cache_read_input_tokens: 49961,
+              cache_creation_input_tokens: 4444,
+            },
+          },
+        }),
+      ].join('\n')
+
+      const meta = claudeProvider.parseSessionFile(
+        content,
+        path.join(homeDir, 'projects', 'project-a', `${sessionId}.jsonl`),
+      )
+
+      expect(meta.tokenUsage?.contextTokens).toBe(54414)
+      expect(meta.tokenUsage?.compactThresholdTokens).toBe(167000)
+      expect(meta.tokenUsage?.compactPercent).toBe(Math.round((54414 / 167000) * 100))
+    } finally {
+      ;(claudeProvider as any).homeDir = originalHomeDir
+      await fsp.rm(homeDir, { recursive: true, force: true })
+    }
   })
 })
 

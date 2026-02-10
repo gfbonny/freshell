@@ -108,8 +108,9 @@ describe('Session-Terminal metadata broadcasts', () => {
       terminalId: terminal.terminalId,
       provider: 'codex',
       sessionId: SESSION_ID_ONE,
-      branch: 'feature/codex',
-      isDirty: true,
+      // Live git state from cwd should win over potentially stale session snapshots.
+      branch: 'main',
+      isDirty: false,
       tokenUsage: {
         compactPercent: 25,
       },
@@ -206,7 +207,7 @@ describe('Session-Terminal metadata broadcasts', () => {
       terminalId: terminal.terminalId,
       provider: 'claude',
       sessionId: SESSION_ID_TWO,
-      branch: 'feature/claude',
+      branch: 'main',
       isDirty: false,
       tokenUsage: {
         inputTokens: 20,

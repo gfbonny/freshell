@@ -165,7 +165,7 @@ describe('codex-provider', () => {
     })
   })
 
-  it('parses codex session metadata git branch and compact-threshold token usage', () => {
+  it('parses codex session metadata and uses current-context token usage (not cumulative totals)', () => {
     const explicitLimit = 90000
     const content = [
       JSON.stringify({
@@ -182,16 +182,16 @@ describe('codex-provider', () => {
           type: 'token_count',
           info: {
             last_token_usage: {
-              input_tokens: 120,
-              output_tokens: 30,
-              cached_input_tokens: 40,
-              total_tokens: 190,
+              input_tokens: 40200,
+              output_tokens: 600,
+              cached_input_tokens: 19944,
+              total_tokens: 70744,
             },
             total_token_usage: {
-              input_tokens: 30000,
-              output_tokens: 20000,
-              cached_input_tokens: 1200,
-              total_tokens: 51200,
+              input_tokens: 67867071,
+              output_tokens: 249291,
+              cached_input_tokens: 63449600,
+              total_tokens: 68359470,
             },
             model_context_window: 200000,
             model_auto_compact_token_limit: explicitLimit,
@@ -205,14 +205,14 @@ describe('codex-provider', () => {
     expect(meta.gitBranch).toBe('main')
     expect(meta.isDirty).toBe(true)
     expect(meta.tokenUsage).toEqual({
-      inputTokens: 30000,
-      outputTokens: 20000,
-      cachedTokens: 1200,
-      totalTokens: 51200,
-      contextTokens: 51200,
+      inputTokens: 40200,
+      outputTokens: 600,
+      cachedTokens: 19944,
+      totalTokens: 70744,
+      contextTokens: 70744,
       modelContextWindow: 200000,
       compactThresholdTokens: explicitLimit,
-      compactPercent: Math.round((51200 / explicitLimit) * 100),
+      compactPercent: Math.round((70744 / explicitLimit) * 100),
     })
   })
 

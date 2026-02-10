@@ -1,6 +1,6 @@
-import fs from 'fs'
 import path from 'path'
 import fsp from 'fs/promises'
+import type { Stats } from 'fs'
 import chokidar from 'chokidar'
 import { logger } from '../logger.js'
 import { getPerfConfig, startPerfTimer } from '../perf-logger.js'
@@ -10,6 +10,7 @@ import { makeSessionKey, type CodingCliSession, type CodingCliProviderName, type
 
 const perfConfig = getPerfConfig()
 const REFRESH_YIELD_EVERY = 200
+const SESSION_SNIPPET_BYTES = 256 * 1024
 
 const yieldToEventLoop = () => new Promise<void>((resolve) => setImmediate(resolve))
 const IS_WINDOWS = process.platform === 'win32'
@@ -43,14 +44,39 @@ function applyOverride(session: CodingCliSession, ov: SessionOverride | undefine
 
 async function readSessionSnippet(filePath: string): Promise<string> {
   try {
-    const stream = fs.createReadStream(filePath, { encoding: 'utf-8', highWaterMark: 256 * 1024 })
-    let data = ''
-    for await (const chunk of stream) {
-      data += chunk
-      if (data.length >= 256 * 1024) break
+    const stat = await fsp.stat(filePath)
+    if (stat.size <= SESSION_SNIPPET_BYTES) {
+      return await fsp.readFile(filePath, 'utf-8')
     }
-    stream.close()
-    return data
+
+    const headBytes = Math.floor(SESSION_SNIPPET_BYTES / 2)
+    const tailBytes = SESSION_SNIPPET_BYTES - headBytes
+    const fd = await fsp.open(filePath, 'r')
+
+    try {
+      const headBuffer = Buffer.alloc(headBytes)
+      const tailBuffer = Buffer.alloc(tailBytes)
+      const [headRead, tailRead] = await Promise.all([
+        fd.read(headBuffer, 0, headBytes, 0),
+        fd.read(tailBuffer, 0, tailBytes, Math.max(0, stat.size - tailBytes)),
+      ])
+
+      const headRaw = headBuffer.subarray(0, headRead.bytesRead).toString('utf8')
+      const tailRaw = tailBuffer.subarray(0, tailRead.bytesRead).toString('utf8')
+
+      // Keep complete JSONL lines only: head drops trailing partial line,
+      // tail drops leading partial line.
+      const headNewline = headRaw.lastIndexOf('\n')
+      const tailNewline = tailRaw.indexOf('\n')
+      const head = headNewline >= 0 ? headRaw.slice(0, headNewline) : headRaw
+      const tail = tailNewline >= 0 ? tailRaw.slice(tailNewline + 1) : tailRaw
+
+      if (!head) return tail
+      if (!tail) return head
+      return `${head}\n${tail}`
+    } finally {
+      await fd.close()
+    }
   } catch {
     return ''
   }
@@ -150,7 +176,7 @@ export class CodingCliSessionIndexer {
   }
 
   private async updateCacheEntry(provider: CodingCliProvider, filePath: string, cacheKey: string) {
-    let stat: fs.Stats
+    let stat: Stats
     try {
       stat = await fsp.stat(filePath)
     } catch {

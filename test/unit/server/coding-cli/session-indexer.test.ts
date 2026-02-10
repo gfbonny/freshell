@@ -280,6 +280,37 @@ describe('CodingCliSessionIndexer', () => {
     expect(session?.tokenUsage?.compactPercent).toBe(25)
   })
 
+  it('reads both head and tail snippets for large session files', async () => {
+    const fileA = path.join(tempDir, 'session-large.jsonl')
+    const fillerLines = Array.from({ length: 600 }, (_, i) =>
+      JSON.stringify({ filler: `${i}-${'x'.repeat(600)}` }),
+    )
+    const content = [
+      JSON.stringify({ cwd: '/project/a', title: 'Head Title' }),
+      ...fillerLines,
+      JSON.stringify({ tailSentinel: 'tail-sentinel' }),
+    ].join('\n') + '\n'
+    await fsp.writeFile(fileA, content)
+
+    const parseSessionFile = vi.fn((snippet: string) => ({
+      cwd: snippet.includes('"cwd":"/project/a"') ? '/project/a' : undefined,
+      title: snippet.includes('tail-sentinel') ? 'Tail Title' : 'Head Title',
+      messageCount: snippet.split(/\r?\n/).filter(Boolean).length,
+    }))
+
+    const provider: CodingCliProvider = {
+      ...makeProvider([fileA]),
+      parseSessionFile,
+    }
+
+    const indexer = new CodingCliSessionIndexer([provider])
+    await indexer.refresh()
+
+    const session = indexer.getProjects()[0]?.sessions[0]
+    expect(session?.title).toBe('Tail Title')
+    expect(parseSessionFile).toHaveBeenCalledTimes(1)
+  })
+
   it('applies legacy overrides when sessionId differs from filename', async () => {
     const legacyId = 'legacy-id'
     const canonicalId = 'canonical-id'

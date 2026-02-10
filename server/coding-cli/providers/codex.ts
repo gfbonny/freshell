@@ -33,6 +33,16 @@ function normalizeCompactPercent(numerator: number, denominator?: number): numbe
   return Math.max(0, Math.min(100, ratio))
 }
 
+function coerceLikelyContextTokens(value: number | undefined, modelContextWindow?: number): number | undefined {
+  if (value === undefined || value < 0) return undefined
+  // `total_token_usage.total_tokens` can be cumulative for the entire transcript.
+  // Treat values far above the model context window as non-context counters.
+  if (modelContextWindow && modelContextWindow > 0 && value > modelContextWindow * 2) {
+    return undefined
+  }
+  return value
+}
+
 type CodexUsage = {
   inputTokens: number
   outputTokens: number
@@ -84,18 +94,29 @@ function parseCodexTokenEnvelope(payload: any): {
       explicitCompactLimit ??
       (modelContextWindow ? Math.round(modelContextWindow * (90 / 95)) : undefined)
 
-    const contextTokens =
-      toFiniteNumber(info.total_usage_tokens) ??
-      toFiniteNumber(info.total_token_usage?.total_tokens) ??
-      totalUsage?.totalTokens
+    const contextCandidates = [
+      toFiniteNumber(info.current_context_tokens),
+      toFiniteNumber(info.context_tokens),
+      toFiniteNumber(info.context_token_count),
+      toFiniteNumber(info.total_usage_tokens),
+      toFiniteNumber(info.last_token_usage?.total_tokens),
+      lastUsage?.totalTokens,
+      toFiniteNumber(info.total_token_usage?.total_tokens),
+      totalUsage?.totalTokens,
+    ]
+    const contextTokens = contextCandidates
+      .map((candidate) => coerceLikelyContextTokens(candidate, modelContextWindow))
+      .find((candidate): candidate is number => candidate !== undefined)
 
-    const aggregate = totalUsage ?? lastUsage
-    const summary = aggregate
+    // `last_token_usage` reflects the current context snapshot and is what users
+    // see in the live Codex status bar. `total_token_usage` may be cumulative.
+    const aggregate = lastUsage ?? totalUsage
+    const summary = aggregate || contextTokens !== undefined
       ? {
-          inputTokens: aggregate.inputTokens,
-          outputTokens: aggregate.outputTokens,
-          cachedTokens: aggregate.cachedTokens,
-          totalTokens: aggregate.totalTokens,
+          inputTokens: aggregate?.inputTokens ?? 0,
+          outputTokens: aggregate?.outputTokens ?? 0,
+          cachedTokens: aggregate?.cachedTokens ?? 0,
+          totalTokens: contextTokens ?? aggregate?.totalTokens ?? 0,
           contextTokens,
           modelContextWindow,
           compactThresholdTokens,
@@ -265,7 +286,7 @@ export const codexProvider: CodingCliProvider = {
     return walkJsonlFiles(sessionsDir)
   },
 
-  parseSessionFile(content: string) {
+  parseSessionFile(content: string, _filePath: string) {
     return parseCodexSessionContent(content)
   },
 
