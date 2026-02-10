@@ -35,6 +35,7 @@ import { ContextIds } from '@/components/context-menu/context-menu-constants'
 import { Wifi, WifiOff, Moon, Sun, Share2, X, Copy, Check, PanelLeftClose, PanelLeft } from 'lucide-react'
 import { updateSettingsLocal, markSaved } from '@/store/settingsSlice'
 import { clearIdleWarning, recordIdleWarning } from '@/store/idleWarningsSlice'
+import { setTerminalMetaSnapshot, upsertTerminalMeta, removeTerminalMeta } from '@/store/terminalMetaSlice'
 
 const SIDEBAR_MIN_WIDTH = 200
 const SIDEBAR_MAX_WIDTH = 500
@@ -239,6 +240,10 @@ export default function App() {
           dispatch(setError(undefined))
           dispatch(setStatus('ready'))
           dispatch(resetWsSnapshotReceived())
+          ws.send({
+            type: 'terminal.meta.list',
+            requestId: `terminal-meta-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          })
         }
         if (msg.type === 'sessions.updated') {
           // Support chunked sessions for mobile browsers with limited WebSocket buffers
@@ -264,11 +269,28 @@ export default function App() {
         if (msg.type === 'settings.updated') {
           dispatch(setSettings(applyLocalTerminalFontFamily(msg.settings)))
         }
+        if (msg.type === 'terminal.meta.list.response') {
+          dispatch(setTerminalMetaSnapshot(msg.terminals || []))
+        }
+        if (msg.type === 'terminal.meta.updated') {
+          const upsert = Array.isArray(msg.upsert) ? msg.upsert : []
+          if (upsert.length > 0) {
+            dispatch(upsertTerminalMeta(upsert))
+          }
+
+          const remove = Array.isArray(msg.remove) ? msg.remove : []
+          for (const terminalId of remove) {
+            dispatch(removeTerminalMeta(terminalId))
+          }
+        }
         if (msg.type === 'terminal.exit') {
           const terminalId = msg.terminalId
           const code = msg.exitCode
           if (import.meta.env.MODE === 'development') console.log('terminal exit', terminalId, code)
-          if (terminalId) dispatch(clearIdleWarning(terminalId))
+          if (terminalId) {
+            dispatch(clearIdleWarning(terminalId))
+            dispatch(removeTerminalMeta(terminalId))
+          }
         }
         if (msg.type === 'terminal.idle.warning') {
           if (!msg.terminalId) return
