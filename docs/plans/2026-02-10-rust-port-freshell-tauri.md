@@ -6,14 +6,14 @@
 
 **Architecture:** Build a new Rust workspace beside the current codebase, lock parity with tests, and port behavior subsystem-by-subsystem (protocol, PTY lifecycle, sessions/indexing/repair, UI pane system, browser/editor panes, settings, auth). The runtime is PTY-first (single terminal lifecycle path), with client-local workspace state and a shared Rust/WASM UI used by both browser and Tauri webview.
 
-**Tech Stack:** Rust (Tokio, Axum, serde, tracing), portable PTY crate, Leptos (CSR) for Rust/WASM UI, Tauri v2, Python browser-use smoke/e2e tests, Cargo test/nextest.
+**Tech Stack:** Rust (Tokio, Axum, serde, tracing), portable PTY crate, Leptos (CSR) for Rust/WASM UI, wasm-bindgen JS interop shims for xterm.js + Monaco, Tauri v2, Python browser-use smoke/e2e tests, Cargo test/nextest.
 
 ---
 
 ## Product Decisions (Locked)
 
-- Big-bang rewrite (backend + web UI + Tauri in one v1).
-- Zero TypeScript in v1 deliverable.
+- Single-release parity cutover (backend + web UI + Tauri ship together in v1), implemented incrementally on a feature branch.
+- Zero TypeScript application/runtime code in v1 deliverable; allow minimal plain-JS interop shims where required for JS libraries (xterm.js and Monaco).
 - PTY-first runtime model is canonical.
 - Client-local workspace state (tabs/panes/layout stay local per client).
 - Tauri app bundles embedded server and also supports remote connect.
@@ -37,7 +37,7 @@ Read these files before writing code. They define existing behavior to preserve.
 - `server/ws-handler.ts` (WS protocol, handshake, auth, backpressure, rate limits)
 - `server/terminal-registry.ts` (PTY lifecycle, attach/detach snapshot semantics)
 - `server/index.ts` (HTTP routes, background services, startup/shutdown ordering)
-- `server/config-store.ts` (settings/session overrides, atomic file persistence)
+- `server/config-store.ts` (settings/session overrides, atomic file persistence, single-writer mutex/queue semantics for write serialization)
 - `server/sessions-sync/*` (sessions diff + patch/snapshot fanout semantics)
 - `server/session-scanner/*` (Claude session scan/repair queue)
 - `server/coding-cli/*` + `server/claude-indexer.ts` (session indexing/provider behavior)
@@ -98,6 +98,7 @@ Expected: FAIL (crate/type does not exist yet)
 pub enum WsServerMessage {
     Ready { timestamp: String },
 }
+// Keep this enum as the protocol root type; Task 2 extends it rather than replacing it.
 ```
 
 **Step 4: Run test to verify it passes**
@@ -118,16 +119,28 @@ git commit -m "chore(rust): scaffold rust workspace and protocol crate"
 
 **Files:**
 - Create: `.worktrees/rust-port/.github/workflows/rust-smoke-matrix.yml`
+- Create: `.worktrees/rust-port/rust/crates/freshell-protocol/tests/ci_matrix_declared.rs`
 - Test: `.worktrees/rust-port/rust/crates/freshell-protocol/tests/workspace_smoke.rs` (reused as matrix smoke target)
 
 **Step 1: Write the failing CI check**
 
-```bash
-cd .worktrees/rust-port
-rg "rust-smoke-matrix" .github/workflows
+```rust
+use std::fs;
+use std::path::PathBuf;
+
+#[test]
+fn rust_smoke_matrix_workflow_exists_and_targets_three_oses() {
+    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../../.github/workflows/rust-smoke-matrix.yml");
+    let text = fs::read_to_string(&p).expect("workflow must exist");
+    assert!(text.contains("ubuntu-latest"));
+    assert!(text.contains("macos-latest"));
+    assert!(text.contains("windows-latest"));
+    assert!(text.contains("workspace_builds_protocol_crate"));
+}
 ```
 
-Expected: FAIL (workflow missing)
+Expected: FAIL (workflow missing, test cannot read workflow file)
 
 **Step 2: Write minimal implementation**
 
@@ -140,7 +153,7 @@ Expected: FAIL (workflow missing)
 
 **Step 3: Run local validation**
 
-Run: `cd .worktrees/rust-port && cargo test --manifest-path rust/Cargo.toml -p freshell-protocol workspace_builds_protocol_crate`
+Run: `cd .worktrees/rust-port/rust && cargo test -p freshell-protocol rust_smoke_matrix_workflow_exists_and_targets_three_oses`
 
 Expected: PASS
 
@@ -148,7 +161,7 @@ Expected: PASS
 
 ```bash
 cd .worktrees/rust-port
-git add .github/workflows/rust-smoke-matrix.yml
+git add .github/workflows/rust-smoke-matrix.yml rust/crates/freshell-protocol/tests/ci_matrix_declared.rs
 git commit -m "ci(rust): add early cross-platform smoke matrix for protocol workspace"
 ```
 
@@ -172,7 +185,7 @@ use freshell_protocol::{WsClientMessage, WsServerMessage};
 #[test]
 fn ws_schema_covers_all_required_message_families() {
     let client_types = [
-        r#"{"type":"hello","token":"token-1234567890abcd"}"#,
+        r#"{"type":"hello","token":"token-1234567890abcd","capabilities":{"sessionsPatchV1":true,"terminalAttachChunkV1":true}}"#,
         r#"{"type":"ping"}"#,
         r#"{"type":"terminal.create","requestId":"r1","mode":"shell","shell":"system"}"#,
         r#"{"type":"terminal.attach","terminalId":"t1"}"#,
@@ -181,7 +194,9 @@ fn ws_schema_covers_all_required_message_families() {
         r#"{"type":"terminal.resize","terminalId":"t1","cols":120,"rows":40}"#,
         r#"{"type":"terminal.kill","terminalId":"t1"}"#,
         r#"{"type":"terminal.list","requestId":"r2"}"#,
+        r#"{"type":"terminal.meta.list","requestId":"r2m"}"#,
         r#"{"type":"codingcli.create","requestId":"r3","provider":"claude","prompt":"hi","cwd":"/tmp","resumeSessionId":"sess-prev","model":"sonnet","maxTurns":10,"permissionMode":"default","sandbox":"workspace-write"}"#,
+        r#"{"type":"codingcli.create","requestId":"r4","provider":"codex","prompt":"hi"}"#,
         r#"{"type":"codingcli.input","sessionId":"s1","data":"continue\n"}"#,
         r#"{"type":"codingcli.kill","sessionId":"s1"}"#,
     ];
@@ -194,10 +209,14 @@ fn ws_schema_covers_all_required_message_families() {
     let server_types = [
         r#"{"type":"ready","timestamp":"2026-02-10T00:00:00Z"}"#,
         r#"{"type":"terminal.created","requestId":"r1","terminalId":"t1","snapshot":"","createdAt":1}"#,
-        r#"{"type":"terminal.attached","terminalId":"t1","snapshot":""}"#,
+        r#"{"type":"terminal.attached.start","terminalId":"t1","totalBytes":12}"#,
+        r#"{"type":"terminal.attached.chunk","terminalId":"t1","seq":0,"data":"aGVsbG8K","isLast":false}"#,
+        r#"{"type":"terminal.attached.end","terminalId":"t1","chunks":1}"#,
         r#"{"type":"terminal.detached","terminalId":"t1"}"#,
         r#"{"type":"terminal.output","terminalId":"t1","data":"hi\n"}"#,
         r#"{"type":"terminal.exit","terminalId":"t1","exitCode":0}"#,
+        r#"{"type":"terminal.meta.updated","terminalId":"t1","title":"Shell","description":"bash","updatedAt":2}"#,
+        r#"{"type":"terminal.meta.list.response","requestId":"r2m","items":[{"terminalId":"t1","title":"Shell","description":"bash","updatedAt":2}]}"#,
         r#"{"type":"terminal.list.response","requestId":"r2","terminals":[{"terminalId":"t1","title":"Shell","description":"bash","mode":"shell","resumeSessionId":"abc","createdAt":1,"lastActivityAt":2,"status":"running","hasClients":true,"cwd":"/tmp"}]}"#,
         r#"{"type":"terminal.list.updated"}"#,
         r#"{"type":"terminal.title.updated","terminalId":"t1","title":"New Title"}"#,
@@ -207,6 +226,7 @@ fn ws_schema_covers_all_required_message_families() {
         r#"{"type":"codingcli.stderr","sessionId":"s1","provider":"claude","text":"warn"}"#,
         r#"{"type":"codingcli.killed","sessionId":"s1","success":true}"#,
         r#"{"type":"sessions.updated","projects":[]}"#,
+        r#"{"type":"sessions.updated","projects":[],"clear":true,"append":false}"#,
         r#"{"type":"sessions.patch","upsertProjects":[],"removeProjectPaths":[]}"#,
         r#"{"type":"session.status","sessionId":"abc","status":"running"}"#,
         r#"{"type":"session.repair.activity","event":"scanned","sessionId":"abc"}"#,
@@ -238,8 +258,20 @@ Expected: FAIL (message types missing)
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum TerminalMode { Shell, Claude, Codex, Opencode, Gemini, Kimi }
+pub enum TerminalMode {
+    #[serde(rename = "shell")]
+    Shell,
+    #[serde(rename = "claude")]
+    Claude,
+    #[serde(rename = "codex")]
+    Codex,
+    #[serde(rename = "opencode")]
+    Opencode,
+    #[serde(rename = "gemini")]
+    Gemini,
+    #[serde(rename = "kimi")]
+    Kimi,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -275,6 +307,8 @@ pub enum WsClientMessage {
     TerminalKill { terminal_id: String },
     #[serde(rename = "terminal.list")]
     TerminalList { request_id: String },
+    #[serde(rename = "terminal.meta.list")]
+    TerminalMetaList { request_id: String },
     #[serde(rename = "codingcli.create")]
     CodingCliCreate {
         request_id: String,
@@ -299,6 +333,8 @@ pub enum WsClientMessage {
 pub struct ClientCapabilities {
     #[serde(rename = "sessionsPatchV1")]
     pub sessions_patch_v1: bool,
+    #[serde(rename = "terminalAttachChunkV1")]
+    pub terminal_attach_chunk_v1: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -321,14 +357,27 @@ pub enum WsServerMessage {
         created_at: u64,
         effective_resume_session_id: Option<String>,
     },
-    #[serde(rename = "terminal.attached")]
-    TerminalAttached { terminal_id: String, snapshot: String },
+    #[serde(rename = "terminal.attached.start")]
+    TerminalAttachedStart { terminal_id: String, total_bytes: usize },
+    #[serde(rename = "terminal.attached.chunk")]
+    TerminalAttachedChunk { terminal_id: String, seq: u32, data: String, is_last: bool },
+    #[serde(rename = "terminal.attached.end")]
+    TerminalAttachedEnd { terminal_id: String, chunks: u32 },
     #[serde(rename = "terminal.detached")]
     TerminalDetached { terminal_id: String },
     #[serde(rename = "terminal.output")]
     TerminalOutput { terminal_id: String, data: String },
     #[serde(rename = "terminal.exit")]
     TerminalExit { terminal_id: String, exit_code: i32 },
+    #[serde(rename = "terminal.meta.updated")]
+    TerminalMetaUpdated {
+        terminal_id: String,
+        title: String,
+        description: Option<String>,
+        updated_at: u64,
+    },
+    #[serde(rename = "terminal.meta.list.response")]
+    TerminalMetaListResponse { request_id: String, items: Vec<TerminalMetaItem> },
     #[serde(rename = "terminal.list.response")]
     TerminalListResponse { request_id: String, terminals: Vec<TerminalListItem> },
     #[serde(rename = "terminal.list.updated")]
@@ -346,7 +395,13 @@ pub enum WsServerMessage {
     #[serde(rename = "codingcli.killed")]
     CodingCliKilled { session_id: String, success: bool },
     #[serde(rename = "sessions.updated")]
-    SessionsUpdated { projects: Vec<serde_json::Value>, clear: Option<bool>, append: Option<bool> },
+    SessionsUpdated {
+        projects: Vec<serde_json::Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clear: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        append: Option<bool>,
+    },
     #[serde(rename = "sessions.patch")]
     SessionsPatch { upsert_projects: Vec<serde_json::Value>, remove_project_paths: Vec<String> },
     #[serde(rename = "session.status")]
@@ -387,7 +442,18 @@ pub struct TerminalListItem {
     pub has_clients: bool,
     pub cwd: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalMetaItem {
+    pub terminal_id: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub updated_at: u64,
+}
 ```
+
+Also implement a single outbound WS serializer in `freshell-server` so every server frame, including `terminal.output`, is emitted from `WsServerMessage` instead of ad-hoc JSON payloads.
 
 **Step 4: Run test to verify it passes**
 
@@ -466,28 +532,61 @@ git commit -m "feat(server): add auth token validation and config crate foundati
 **Step 1: Write the failing test**
 
 ```rust
+use axum::body::{to_bytes, Body};
+use axum::http::{Request, StatusCode};
+use serde_json::Value;
+use tower::ServiceExt;
+
 #[tokio::test]
 async fn settings_requires_auth_and_supports_patch_put_roundtrip() {
     let app = freshell_server::http::build_test_router();
 
-    let unauth = app
-        .oneshot(axum::http::Request::builder()
+    let unauth = app.clone()
+        .oneshot(Request::builder()
+            .method("GET")
             .uri("/api/settings")
-            .body(axum::body::Body::empty())
+            .body(Body::empty())
             .unwrap())
         .await
         .unwrap();
-    assert_eq!(unauth.status(), axum::http::StatusCode::UNAUTHORIZED);
+    assert_eq!(unauth.status(), StatusCode::UNAUTHORIZED);
 
-    let patched = freshell_server::tests::patch_settings(&app, "token-1234567890abcd", r#"{"defaultShell":"wsl"}"#).await;
-    assert_eq!(patched.status(), axum::http::StatusCode::OK);
+    let patched = app.clone()
+        .oneshot(Request::builder()
+            .method("PATCH")
+            .uri("/api/settings")
+            .header("x-auth-token", "token-1234567890abcd")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"defaultShell":"wsl"}"#))
+            .unwrap())
+        .await
+        .unwrap();
+    assert_eq!(patched.status(), StatusCode::OK);
 
-    let put = freshell_server::tests::put_settings(&app, "token-1234567890abcd", r#"{"fontSize":16}"#).await;
-    assert_eq!(put.status(), axum::http::StatusCode::OK);
+    let put = app.clone()
+        .oneshot(Request::builder()
+            .method("PUT")
+            .uri("/api/settings")
+            .header("x-auth-token", "token-1234567890abcd")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"fontSize":16}"#))
+            .unwrap())
+        .await
+        .unwrap();
+    assert_eq!(put.status(), StatusCode::OK);
 
-    let read_back = freshell_server::tests::get_settings(&app, "token-1234567890abcd").await;
-    assert!(read_back.body_text().contains("\"defaultShell\":\"wsl\""));
-    assert!(read_back.body_text().contains("\"fontSize\":16"));
+    let read_back = app
+        .oneshot(Request::builder()
+            .method("GET")
+            .uri("/api/settings")
+            .header("x-auth-token", "token-1234567890abcd")
+            .body(Body::empty())
+            .unwrap())
+        .await
+        .unwrap();
+    let body: Value = serde_json::from_slice(&to_bytes(read_back.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(body["defaultShell"], "wsl");
+    assert_eq!(body["fontSize"], 16);
 }
 ```
 
@@ -506,7 +605,8 @@ Expected: FAIL
 // - PATCH /api/settings (auth)
 // - PUT /api/settings alias (auth; same semantics as PATCH)
 // auth middleware reads x-auth-token
-// test harness helpers: get_settings, patch_settings, put_settings
+// config writes are serialized through a single-writer async mutex to preserve atomic file semantics.
+// optional harness helpers can be added later; this test should compile/run with only tower::ServiceExt and axum primitives.
 ```
 
 **Step 4: Run test to verify it passes**
@@ -538,16 +638,22 @@ git commit -m "feat(server): add axum http skeleton with health and settings rou
 
 ```rust
 #[tokio::test]
-async fn attach_sends_snapshot_before_live_output() {
+async fn attach_emits_chunked_snapshot_frames_before_live_output() {
     let mut reg = freshell_pty::TerminalRegistry::new_for_test();
-    let term_id = reg.create_test_terminal("hello\n").await;
+    let term_id = reg.create_test_terminal("hello\nworld\n").await;
 
-    let (snapshot, stream) = reg.attach_for_test(&term_id).await.unwrap();
-    assert_eq!(snapshot, "hello\n");
+    let mut stream = reg.attach_stream_for_test(&term_id).await.unwrap();
+    let start = stream.recv().await.unwrap();
+    assert_eq!(start["type"], "terminal.attached.start");
+    let first_chunk = stream.recv().await.unwrap();
+    assert_eq!(first_chunk["type"], "terminal.attached.chunk");
+    let end = stream.recv().await.unwrap();
+    assert_eq!(end["type"], "terminal.attached.end");
 
     reg.push_test_output(&term_id, "world\n").await;
-    let next = stream.recv().await.unwrap();
-    assert_eq!(next, "world\n");
+    let live = stream.recv().await.unwrap();
+    assert_eq!(live["type"], "terminal.output");
+    assert_eq!(live["data"], "world\n");
 }
 
 #[tokio::test]
@@ -555,21 +661,21 @@ async fn output_during_attach_window_is_queued_and_flushed_after_snapshot() {
     let mut reg = freshell_pty::TerminalRegistry::new_for_test();
     let term_id = reg.create_test_terminal("snap\n").await;
 
-    let (snapshot, mut stream, attach_token) = reg.attach_begin_for_test(&term_id).await.unwrap();
-    assert_eq!(snapshot, "snap\n");
+    let (mut stream, attach_token) = reg.attach_begin_for_test(&term_id).await.unwrap();
 
     reg.push_test_output(&term_id, "during-attach\n").await;
-    assert!(stream.try_recv().is_err());
+    reg.assert_no_live_output_before_attach_end_for_test(&mut stream).await;
 
     reg.finish_attach_snapshot_for_test(&term_id, attach_token).await.unwrap();
     let flushed = stream.recv().await.unwrap();
-    assert_eq!(flushed, "during-attach\n");
+    assert_eq!(flushed["type"], "terminal.output");
+    assert_eq!(flushed["data"], "during-attach\n");
 }
 ```
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd .worktrees/rust-port/rust && cargo test -p freshell-pty attach_sends_snapshot_before_live_output`
+Run: `cd .worktrees/rust-port/rust && cargo test -p freshell-pty attach_emits_chunked_snapshot_frames_before_live_output`
 
 Expected: FAIL
 
@@ -578,11 +684,12 @@ Expected: FAIL
 ```rust
 // TerminalRegistry with:
 // - create(mode, shell, cwd, resume_session_id)
-// - attach(terminal_id) -> (snapshot, receiver)
+// - chunked attach protocol: terminal.attached.start/chunk/end
 // - attach-begin/finish flow to avoid output loss during snapshot send
 // - detach, input, resize, kill
 // - ring buffer (char-count based, default 64 KiB, configurable)
 // - pending snapshot queue + bounded overflow handling
+// - negotiated chunking via hello.capabilities.terminalAttachChunkV1
 ```
 
 **Step 4: Run test to verify it passes**
@@ -632,7 +739,7 @@ Expected: FAIL
 ```rust
 // WS handler:
 // - start hello timer (default 5s)
-// - parse hello, verify token, store capabilities
+// - parse hello, verify token, store capabilities (sessionsPatchV1 + terminalAttachChunkV1)
 // - send ready + initial snapshot messages
 // - close with 4001/4002/4003/4008 codes as needed
 ```
@@ -672,12 +779,17 @@ async fn oversized_buffered_amount_closes_connection_with_4008() {
 
 #[tokio::test]
 async fn pending_snapshot_queue_is_bounded_and_drops_or_closes_on_overflow() {
-    let mut reg = freshell_pty::TerminalRegistry::new_for_test();
+    let mut reg = freshell_pty::TerminalRegistry::new_for_test_with_overflow_policy(
+        freshell_pty::OverflowPolicy::CloseAttachOnOverflow,
+    );
     let term_id = reg.create_test_terminal("seed\n").await;
     let (_snapshot, _stream, attach_token) = reg.attach_begin_for_test(&term_id).await.unwrap();
     reg.push_many_outputs_for_test(&term_id, 100_000).await;
     let outcome = reg.finish_attach_snapshot_for_test(&term_id, attach_token).await;
-    assert!(outcome.is_ok() || outcome.is_err());
+    assert!(matches!(
+        outcome,
+        Err(freshell_pty::AttachFinishError::SnapshotQueueOverflow { .. })
+    ));
 }
 ```
 
@@ -790,8 +902,9 @@ Expected: FAIL
 ```rust
 // Add WS dispatch for:
 // terminal.create, terminal.attach, terminal.detach,
-// terminal.input, terminal.resize, terminal.kill, terminal.list
+// terminal.input, terminal.resize, terminal.kill, terminal.list, terminal.meta.list
 // plus request-id idempotency map and create rate limiter.
+// all outbound events must be sent through a typed send_ws(WsServerMessage) helper (no raw JSON bypasses).
 ```
 
 **Step 4: Run test to verify it passes**
@@ -815,6 +928,9 @@ git commit -m "feat(ws): implement full terminal websocket lifecycle commands"
 - Create: `.worktrees/rust-port/rust/crates/freshell-coding-cli/src/provider.rs`
 - Create: `.worktrees/rust-port/rust/crates/freshell-coding-cli/src/providers/claude.rs`
 - Create: `.worktrees/rust-port/rust/crates/freshell-coding-cli/src/providers/codex.rs`
+- Create: `.worktrees/rust-port/rust/crates/freshell-coding-cli/src/providers/opencode.rs`
+- Create: `.worktrees/rust-port/rust/crates/freshell-coding-cli/src/providers/gemini.rs`
+- Create: `.worktrees/rust-port/rust/crates/freshell-coding-cli/src/providers/kimi.rs`
 - Modify: `.worktrees/rust-port/rust/crates/freshell-server/src/ws/mod.rs`
 - Test: `.worktrees/rust-port/rust/crates/freshell-server/tests/ws_codingcli_lifecycle.rs`
 
@@ -862,9 +978,10 @@ Expected: FAIL
 
 ```rust
 // Port session manager semantics from server/coding-cli/session-manager.ts:
-// - provider registry (claude + codex in v1 parity with current source tree)
+// - provider registry (claude/codex/opencode/gemini/kimi in v1 protocol parity)
 // - bounded event buffer and status transitions
 // - stderr passthrough, input forwarding, kill semantics
+// - providers unavailable on host return deterministic typed errors without crashing runtime
 // Wire WS commands/events: codingcli.create/input/kill + created/event/exit/stderr/killed.
 ```
 
@@ -886,12 +1003,15 @@ git commit -m "feat(coding-cli): port coding cli session manager and websocket l
 
 ## Sessions, Indexing, Repair
 
-### Task 8: Build Unified Provider Session Indexer (Current Providers: Claude + Codex)
+### Task 8: Build Unified Provider Session Indexer (Claude/Codex/Opencode/Gemini/Kimi)
 
 **Files:**
 - Create: `.worktrees/rust-port/rust/crates/freshell-sessions/src/provider.rs`
 - Create: `.worktrees/rust-port/rust/crates/freshell-sessions/src/providers/claude.rs`
 - Create: `.worktrees/rust-port/rust/crates/freshell-sessions/src/providers/codex.rs`
+- Create: `.worktrees/rust-port/rust/crates/freshell-sessions/src/providers/opencode.rs`
+- Create: `.worktrees/rust-port/rust/crates/freshell-sessions/src/providers/gemini.rs`
+- Create: `.worktrees/rust-port/rust/crates/freshell-sessions/src/providers/kimi.rs`
 - Create: `.worktrees/rust-port/rust/crates/freshell-sessions/src/indexer.rs`
 - Test: `.worktrees/rust-port/rust/crates/freshell-sessions/tests/indexer_projects.rs`
 
@@ -901,7 +1021,8 @@ git commit -m "feat(coding-cli): port coding cli session manager and websocket l
 #[tokio::test]
 async fn indexer_groups_sessions_by_project_sorted_by_recency() {
     let idx = freshell_sessions::Indexer::new_for_test();
-    idx.ingest_fixture("test/fixtures/sessions/healthy.jsonl").await.unwrap();
+    let fixture = freshell_sessions::tests::fixture_path("test/fixtures/sessions/healthy.jsonl");
+    idx.ingest_fixture(&fixture).await.unwrap();
 
     let projects = idx.projects().await;
     assert!(!projects.is_empty());
@@ -918,8 +1039,9 @@ Expected: FAIL
 **Step 3: Write minimal implementation**
 
 ```rust
-// Define Provider trait + Claude/Codex parser impls.
+// Define Provider trait + parser impls for claude/codex/opencode/gemini/kimi.
 // Build in-memory index keyed by project_path with sorted sessions.
+// Resolve fixture paths via CARGO_MANIFEST_DIR-aware helper so tests run from crate directories.
 ```
 
 **Step 4: Run test to verify it passes**
@@ -1345,6 +1467,58 @@ git add rust/crates/freshell-web/src rust/crates/freshell-web/tests/bootstrap_re
 git commit -m "feat(web): add wasm app shell with api bootstrap and websocket client"
 ```
 
+### Task 12A: Add JS Interop Bridges for xterm.js and Monaco
+
+**Files:**
+- Create: `.worktrees/rust-port/rust/crates/freshell-web/src/js/terminal_bridge.rs`
+- Create: `.worktrees/rust-port/rust/crates/freshell-web/src/js/editor_bridge.rs`
+- Create: `.worktrees/rust-port/rust/crates/freshell-web/js/xterm_bridge.js`
+- Create: `.worktrees/rust-port/rust/crates/freshell-web/js/monaco_bridge.js`
+- Test: `.worktrees/rust-port/rust/crates/freshell-web/tests/js_bridge_contract.rs`
+
+**Step 1: Write the failing test**
+
+```rust
+#[test]
+fn js_bridge_contract_exposes_terminal_and_editor_mount_hooks() {
+    let contract = freshell_web::js::bridge_contract_for_test();
+    assert!(contract.contains("mountXterm"));
+    assert!(contract.contains("xtermWrite"));
+    assert!(contract.contains("mountMonaco"));
+    assert!(contract.contains("monacoSetValue"));
+}
+```
+
+**Step 2: Run test to verify it fails**
+
+Run: `cd .worktrees/rust-port/rust && cargo test -p freshell-web js_bridge_contract_exposes_terminal_and_editor_mount_hooks`
+
+Expected: FAIL
+
+**Step 3: Write minimal implementation**
+
+```rust
+// JS interop layer:
+// - wasm-bindgen wrappers for xterm.js mount/write/resize/dispose
+// - wasm-bindgen wrappers for Monaco mount/get/set/dispose
+// - plain JS bridge modules (no TypeScript) as stable boundary
+// - deterministic no-op test doubles for non-browser unit tests
+```
+
+**Step 4: Run test to verify it passes**
+
+Run: `cd .worktrees/rust-port/rust && cargo test -p freshell-web js_bridge_contract`
+
+Expected: PASS
+
+**Step 5: Commit**
+
+```bash
+cd .worktrees/rust-port
+git add rust/crates/freshell-web/src/js rust/crates/freshell-web/js rust/crates/freshell-web/tests/js_bridge_contract.rs
+git commit -m "feat(web): add wasm-bindgen interop bridges for xterm and monaco"
+```
+
 ### Task 13: Port Tab/Pane State Model (Client-Local Persistence)
 
 **Files:**
@@ -1402,6 +1576,7 @@ git commit -m "feat(web): port tabs and pane-tree state with local persistence"
 
 **Files:**
 - Create: `.worktrees/rust-port/rust/crates/freshell-web/src/components/terminal_view.rs`
+- Modify: `.worktrees/rust-port/rust/crates/freshell-web/src/js/terminal_bridge.rs`
 - Create: `.worktrees/rust-port/rust/crates/freshell-web/src/lib/terminal_input_policy.rs`
 - Test: `.worktrees/rust-port/rust/crates/freshell-web/tests/terminal_create_flow.rs`
 
@@ -1438,7 +1613,8 @@ Expected: FAIL
 ```rust
 // Terminal component responsibilities:
 // - send terminal.create with createRequestId
-// - process terminal.created / output / exit / error
+// - process terminal.created / attached.start / attached.chunk / attached.end / output / exit / error
+// - render terminal via xterm.js bridge from Task 12A
 // - resize on visibility/observer events
 // - reconnect attach semantics
 ```
@@ -1453,7 +1629,7 @@ Expected: PASS
 
 ```bash
 cd .worktrees/rust-port
-git add rust/crates/freshell-web/src/components/terminal_view.rs rust/crates/freshell-web/tests/terminal_create_flow.rs
+git add rust/crates/freshell-web/src/components/terminal_view.rs rust/crates/freshell-web/src/js/terminal_bridge.rs rust/crates/freshell-web/tests/terminal_create_flow.rs
 git commit -m "feat(web): port terminal pane ws lifecycle and state transitions"
 ```
 
@@ -1529,6 +1705,7 @@ git commit -m "feat(web): port browser pane with proxy rewrite and tiered devtoo
 
 **Files:**
 - Create: `.worktrees/rust-port/rust/crates/freshell-web/src/components/editor_pane.rs`
+- Modify: `.worktrees/rust-port/rust/crates/freshell-web/src/js/editor_bridge.rs`
 - Test: `.worktrees/rust-port/rust/crates/freshell-web/tests/editor_pane_io.rs`
 
 **Step 1: Write the failing test**
@@ -1560,6 +1737,7 @@ Expected: FAIL
 // - edit in-memory
 // - save via /api/files/write
 // - preview/source toggle
+// - render text editor via Monaco bridge from Task 12A
 ```
 
 **Step 4: Run test to verify it passes**
@@ -1572,7 +1750,7 @@ Expected: PASS
 
 ```bash
 cd .worktrees/rust-port
-git add rust/crates/freshell-web/src/components/editor_pane.rs rust/crates/freshell-web/tests/editor_pane_io.rs
+git add rust/crates/freshell-web/src/components/editor_pane.rs rust/crates/freshell-web/src/js/editor_bridge.rs rust/crates/freshell-web/tests/editor_pane_io.rs
 git commit -m "feat(web): port editor pane and files api interactions"
 ```
 
@@ -1734,6 +1912,7 @@ git commit -m "feat(tauri): add browser-pane devtools bridge for desktop"
 - Create: `.worktrees/rust-port/rust/crates/freshell-server/tests/session_association_parity.rs`
 - Create: `.worktrees/rust-port/rust/crates/freshell-web/tests/pane_focus_parity.rs`
 - Modify: `.worktrees/rust-port/test/browser_use/smoke_freshell.py`
+- Modify: `.worktrees/rust-port/test/browser_use/*.py` (rewrite flows to new Leptos DOM/a11y labels)
 - Modify: `.worktrees/rust-port/test/browser_use/requirements.txt`
 
 **Step 1: Write the failing parity tests**
@@ -1752,6 +1931,15 @@ async fn ws_protocol_parity_smoke() {
     })).await;
     let created = c.wait_type("terminal.created").await;
     assert_eq!(created["requestId"], "req-1");
+    let terminal_id = created["terminalId"].as_str().unwrap();
+
+    c.send_json(serde_json::json!({"type":"terminal.attach","terminalId":terminal_id})).await;
+    assert_eq!(c.wait_type("terminal.attached.start").await["terminalId"], terminal_id);
+    assert_eq!(c.wait_type("terminal.attached.chunk").await["terminalId"], terminal_id);
+    assert_eq!(c.wait_type("terminal.attached.end").await["terminalId"], terminal_id);
+
+    c.send_json(serde_json::json!({"type":"terminal.meta.list","requestId":"meta-1"})).await;
+    assert_eq!(c.wait_type("terminal.meta.list.response").await["requestId"], "meta-1");
 
     h.publish_sessions_fixture("projects_small").await;
     let patch_or_snapshot = c.wait_one_of(&["sessions.patch", "sessions.updated"]).await;
@@ -1781,6 +1969,7 @@ Expected: FAIL
 // - ws protocol field parity (codingcli provider/text/success, error fields, terminal list payload)
 // - terminal/session association + title update events
 // - pane focus/activation invariants and browser pane devtools-open persistence
+// - rewrite browser-use flows for the new Leptos DOM while keeping semantic roles/labels stable
 // - browser-use python deps + fixture wiring for rust runtime smoke flow
 ```
 
@@ -1804,29 +1993,32 @@ git commit -m "test(parity): add rust parity tests for ws/session/pane behavior"
 - Modify: `.worktrees/rust-port/package.json`
 - Modify: `.worktrees/rust-port/README.md`
 - Modify: `.worktrees/rust-port/scripts/*` (where launch/build scripts are defined)
+- Delete or archive: `.worktrees/rust-port/src/`, `.worktrees/rust-port/server/`, `.worktrees/rust-port/test/{client,server,integration,e2e}/` (TS runtime/test surfaces)
+- Remove obsolete TS toolchain files once no longer referenced (`tsconfig*.json`, Vite config, TS-only lint config sections)
 - Create: `.worktrees/rust-port/docs/rust-port-runtime.md`
-- Test: `.worktrees/rust-port/test/integration/update-flow.test.ts` (replace with rust-oriented smoke if retained)
+- Create: `.worktrees/rust-port/test/rust_runtime_smoke.sh`
 
 **Step 1: Write failing smoke test for new entrypoint**
 
 ```bash
-# test script example
-npm run dev:rport-smoke
+# test/rust_runtime_smoke.sh
+# assert rust server starts, serves /api/health, then exits cleanly
+bash test/rust_runtime_smoke.sh
 # expected to fail before script wiring is updated
 ```
 
 **Step 2: Run to verify fail**
 
-Run: `cd .worktrees/rust-port && npm run dev:rport-smoke`
+Run: `cd .worktrees/rust-port && bash test/rust_runtime_smoke.sh`
 
 Expected: FAIL
 
-**Step 3: Implement minimal script rewiring**
+**Step 3: Implement minimal script rewiring + TS runtime removal**
 
 ```json
 {
   "scripts": {
-    "dev:rport-smoke": "cargo run --manifest-path rust/Cargo.toml -p freshell-server -- --smoke",
+    "dev:rport-smoke": "bash test/rust_runtime_smoke.sh",
     "dev": "cargo run --manifest-path rust/Cargo.toml -p freshell-server",
     "build": "cargo build --manifest-path rust/Cargo.toml --workspace",
     "test": "cargo test --manifest-path rust/Cargo.toml --workspace"
@@ -1834,10 +2026,18 @@ Expected: FAIL
 }
 ```
 
+```text
+Also in this task:
+- remove TS runtime directories/files listed above (or move under docs/archive/ts-runtime/ if historical retention is required)
+- remove stale npm-only runtime deps no longer needed after xterm/monaco interop shims are pinned
+- regenerate or remove JS lockfiles so they match the post-cutover package manifest
+- ensure no command in README/scripts points to Node server entrypoints
+```
+
 **Step 4: Run smoke + full tests**
 
 Run:
-- `cd .worktrees/rust-port && npm run dev:rport-smoke`
+- `cd .worktrees/rust-port && bash test/rust_runtime_smoke.sh`
 - `cd .worktrees/rust-port && npm test`
 
 Expected: PASS
@@ -1846,7 +2046,8 @@ Expected: PASS
 
 ```bash
 cd .worktrees/rust-port
-git add package.json README.md docs/rust-port-runtime.md
+git add package.json README.md scripts docs/rust-port-runtime.md test/rust_runtime_smoke.sh
+git add -A src server test/client test/server test/integration test/e2e tsconfig*.json
 git commit -m "chore(runtime): switch project entrypoints to rust workspace"
 ```
 
@@ -1901,9 +2102,10 @@ git commit -m "ci(release): add cross-platform rust and tauri build matrix"
 ## End-to-End Verification Checklist (Must Pass Before Merge)
 
 1. `cd .worktrees/rust-port/rust && cargo test --workspace`
-2. `cd .worktrees/rust-port && pytest test/browser_use -q`
-3. `cd .worktrees/rust-port/apps/freshell-tauri/src-tauri && cargo test`
-4. Manual verification on Linux/macOS/Windows:
+2. `cd .worktrees/rust-port && bash test/rust_runtime_smoke.sh`
+3. `cd .worktrees/rust-port && pytest test/browser_use -q`
+4. `cd .worktrees/rust-port/apps/freshell-tauri/src-tauri && cargo test`
+5. Manual verification on Linux/macOS/Windows:
    - WS auth + hello/ready works
    - terminal create/input/resize/detach/attach/kill works
    - codingcli create/input/kill and stream events work
