@@ -88,6 +88,8 @@ export type SidebarSortMode = 'recency' | 'recency-pinned' | 'activity' | 'proje
 
 export type DefaultNewPane = 'ask' | 'shell' | 'browser' | 'editor'
 
+export type TabAttentionStyle = 'highlight' | 'pulse' | 'darken' | 'none'
+
 export type TerminalTheme =
   | 'auto'           // Follow app theme (dark/light)
   | 'dracula'
@@ -146,5 +148,6 @@ export interface AppSettings {
     defaultNewPane: DefaultNewPane
     snapThreshold: number // 0-8, % of container's smallest dimension; 0 = off
     iconsOnTabs: boolean
+    tabAttentionStyle: TabAttentionStyle
   }
 }

@@ -54,6 +54,7 @@ export type AppSettings = {
   panes: {
     defaultNewPane: 'ask' | 'shell' | 'browser' | 'editor'
     snapThreshold: number // 0-8, % of container's smallest dimension; 0 = off
+    tabAttentionStyle: 'highlight' | 'pulse' | 'darken' | 'none'
   }
   sidebar: {
     sortMode: 'recency' | 'activity' | 'project'

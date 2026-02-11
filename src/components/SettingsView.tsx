@@ -609,6 +609,22 @@ export default function SettingsView() {
                 }}
               />
             </SettingsRow>
+
+            <SettingsRow label="Tab completion indicator">
+              <SegmentedControl
+                value={settings.panes?.tabAttentionStyle ?? 'highlight'}
+                options={[
+                  { value: 'highlight', label: 'Highlight' },
+                  { value: 'pulse', label: 'Pulse' },
+                  { value: 'darken', label: 'Darken' },
+                  { value: 'none', label: 'None' },
+                ]}
+                onChange={(v: string) => {
+                  dispatch(updateSettingsLocal({ panes: { tabAttentionStyle: v } } as any))
+                  scheduleSave({ panes: { tabAttentionStyle: v } })
+                }}
+              />
+            </SettingsRow>
           </SettingsSection>
 
           {/* Terminal */}
