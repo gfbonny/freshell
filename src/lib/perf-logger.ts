@@ -2,6 +2,9 @@ type ClientPerfConfig = {
   enabled: boolean
   longTaskThresholdMs: number
   resourceSlowMs: number
+  apiSlowMs: number
+  apiParseSlowMs: number
+  reduxActionSlowMs: number
   wsReadySlowMs: number
   wsMessageSlowMs: number
   wsQueueWarnSize: number
@@ -26,6 +29,9 @@ export function resolveClientPerfConfig(flag?: string): ClientPerfConfig {
     enabled: parseBoolean(flag),
     longTaskThresholdMs: readNumber(undefined, 50),
     resourceSlowMs: readNumber(undefined, 1000),
+    apiSlowMs: readNumber(undefined, 1000),
+    apiParseSlowMs: readNumber(undefined, 100),
+    reduxActionSlowMs: readNumber(undefined, 50),
     wsReadySlowMs: readNumber(undefined, 500),
     wsMessageSlowMs: readNumber(undefined, 30),
     wsQueueWarnSize: readNumber(undefined, 200),
