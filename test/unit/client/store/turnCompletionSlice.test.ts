@@ -4,6 +4,7 @@ import reducer, {
   consumeTurnCompleteEvents,
   markTabAttention,
   recordTurnComplete,
+  type TurnCompletionState,
 } from '@/store/turnCompletionSlice'
 
 describe('turnCompletionSlice', () => {
@@ -63,5 +64,27 @@ describe('turnCompletionSlice', () => {
 
     state = reducer(state, clearTabAttention({ tabId: 'tab-2' }))
     expect(state.attentionByTab['tab-2']).toBeUndefined()
+  })
+
+  it('markTabAttention is a no-op when already set (perf guard)', () => {
+    const state = reducer(undefined, markTabAttention({ tabId: 'tab-1' }))
+    const next = reducer(state, markTabAttention({ tabId: 'tab-1' }))
+    // Immer returns the same reference when the draft is unmodified
+    expect(next).toBe(state)
+  })
+
+  it('clearTabAttention is a no-op when not set (perf guard)', () => {
+    const state = reducer(undefined, clearTabAttention({ tabId: 'tab-1' }))
+    const initial: TurnCompletionState = {
+      seq: 0,
+      lastEvent: null,
+      pendingEvents: [],
+      attentionByTab: {},
+    }
+    // Should return exact same state reference — no draft modification
+    expect(state).toEqual(initial)
+    // Also verify repeated clears don't mutate
+    const next = reducer(state, clearTabAttention({ tabId: 'tab-1' }))
+    expect(next).toBe(state)
   })
 })

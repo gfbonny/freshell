@@ -42,9 +42,11 @@ const turnCompletionSlice = createSlice({
       state.pendingEvents = state.pendingEvents.filter((event) => event.seq > throughSeq)
     },
     markTabAttention(state, action: PayloadAction<{ tabId: string }>) {
+      if (state.attentionByTab[action.payload.tabId]) return
       state.attentionByTab[action.payload.tabId] = true
     },
     clearTabAttention(state, action: PayloadAction<{ tabId: string }>) {
+      if (!state.attentionByTab[action.payload.tabId]) return
       delete state.attentionByTab[action.payload.tabId]
     },
   },

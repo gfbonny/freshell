@@ -125,11 +125,15 @@ export default function TabItem({
       style={isActive && needsAttention && tabAttentionStyle !== 'none' ? {
         borderTopWidth: '3px',
         borderTopStyle: 'solid',
-        borderTopColor: tabAttentionStyle === 'darken' ? '#666' : '#059669',
-        backgroundColor: tabAttentionStyle === 'darken' ? 'rgba(0,0,0,0.15)' : 'rgba(16,185,129,0.25)',
+        borderTopColor: tabAttentionStyle === 'darken'
+          ? 'hsl(var(--muted-foreground))'
+          : 'hsl(var(--success))',
+        backgroundColor: tabAttentionStyle === 'darken'
+          ? 'hsl(var(--foreground) / 0.08)'
+          : 'hsl(var(--success) / 0.15)',
         boxShadow: tabAttentionStyle === 'darken'
-          ? 'inset 0 4px 8px rgba(0,0,0,0.15)'
-          : 'inset 0 4px 8px rgba(16,185,129,0.3)',
+          ? 'inset 0 4px 8px hsl(var(--foreground) / 0.1)'
+          : 'inset 0 4px 8px hsl(var(--success) / 0.2)',
       } : undefined}
       role="button"
       tabIndex={0}

@@ -805,6 +805,7 @@ describe('State Edge Cases', () => {
             cursorBlink: false,
             scrollback: 100000,
             theme: 'light',
+            warnExternalLinks: true,
           },
           defaultCwd: '/custom/path',
           safety: {
@@ -823,6 +824,7 @@ describe('State Edge Cases', () => {
             defaultNewPane: 'shell',
             snapThreshold: 3,
             iconsOnTabs: true,
+            tabAttentionStyle: 'highlight' as const,
           },
           codingCli: {
             enabledProviders: ['claude', 'codex'],

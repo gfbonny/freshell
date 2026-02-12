@@ -59,6 +59,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   const restoreRequestIdRef = useRef<string | null>(null)
   const restoreFlagRef = useRef(false)
   const turnCompleteSignalStateRef = useRef(createTurnCompleteSignalParserState())
+  const warnExternalLinksRef = useRef(settings.terminal.warnExternalLinks)
 
   // Extract terminal-specific fields (safe because we check kind later)
   const isTerminal = paneContent.kind === 'terminal'
@@ -82,6 +83,10 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   useEffect(() => {
     hiddenRef.current = hidden
   }, [hidden])
+
+  useEffect(() => {
+    warnExternalLinksRef.current = settings.terminal.warnExternalLinks
+  }, [settings.terminal.warnExternalLinks])
 
   const shouldFocusActiveTerminal = !hidden && activeTabId === tabId && activePaneId === paneId
 
@@ -180,7 +185,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       theme: getTerminalTheme(settings.terminal.theme, settings.theme),
       linkHandler: {
         activate: (_event: MouseEvent, uri: string) => {
-          if (settings.terminal.warnExternalLinks !== false) {
+          if (warnExternalLinksRef.current !== false) {
             if (confirm(`Do you want to navigate to ${uri}?\n\nWARNING: This link could potentially be dangerous`)) {
               window.open(uri, '_blank')
             }

@@ -32,6 +32,7 @@ describe('settingsSlice', () => {
         cursorBlink: true,
         scrollback: 5000,
         theme: 'auto',
+        warnExternalLinks: true,
       })
       expect(state.settings.defaultCwd).toBeUndefined()
       expect(state.settings.safety).toEqual({
@@ -50,6 +51,7 @@ describe('settingsSlice', () => {
         defaultNewPane: 'ask',
         snapThreshold: 2,
         iconsOnTabs: true,
+        tabAttentionStyle: 'highlight',
       })
       expect(state.settings.codingCli).toEqual({
         enabledProviders: ['claude', 'codex'],
@@ -93,6 +95,7 @@ describe('settingsSlice', () => {
           cursorBlink: false,
           scrollback: 10000,
           theme: 'light',
+          warnExternalLinks: true,
         },
         defaultCwd: '/home/user',
         safety: {
@@ -120,6 +123,7 @@ describe('settingsSlice', () => {
           defaultNewPane: 'shell',
           snapThreshold: 2,
           iconsOnTabs: true,
+          tabAttentionStyle: 'highlight',
         },
       }
 

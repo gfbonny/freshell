@@ -26,6 +26,10 @@ function createTab(overrides: Partial<Tab> = {}): Tab {
   }
 }
 
+function getTabElement() {
+  return screen.getByText('Test Tab').closest('div[class*="group"]')
+}
+
 describe('TabItem', () => {
   afterEach(() => {
     cleanup()
@@ -53,30 +57,73 @@ describe('TabItem', () => {
 
   it('applies active styles when isActive is true', () => {
     render(<TabItem {...defaultProps} isActive={true} />)
-    const tabElement = screen.getByText('Test Tab').closest('div[class*="group"]')
-    expect(tabElement?.className).toContain('bg-background')
-    expect(tabElement?.className).toContain('border-b-background')
-    expect(tabElement?.className).toContain('-mb-px')
+    const el = getTabElement()
+    expect(el?.className).toContain('bg-background')
+    expect(el?.className).toContain('border-b-background')
+    expect(el?.className).toContain('-mb-px')
   })
 
   it('applies dragging opacity when isDragging is true', () => {
     render(<TabItem {...defaultProps} isDragging={true} />)
-    const tabElement = screen.getByText('Test Tab').closest('div[class*="group"]')
-    expect(tabElement?.className).toContain('opacity-50')
+    const el = getTabElement()
+    expect(el?.className).toContain('opacity-50')
   })
 
-  it('applies light-green attention styles when tab needs attention', () => {
+  it('applies emerald attention styles for highlight style (default)', () => {
     render(<TabItem {...defaultProps} needsAttention={true} />)
-    const tabElement = screen.getByText('Test Tab').closest('div[class*="group"]')
-    expect(tabElement?.className).toContain('bg-emerald-100')
-    expect(tabElement?.className).toContain('text-emerald-900')
+    const el = getTabElement()
+    expect(el?.className).toContain('bg-emerald-100')
+    expect(el?.className).toContain('text-emerald-900')
+    expect(el?.className).not.toContain('animate-pulse')
   })
 
-  it('active styles take precedence over attention styles', () => {
-    render(<TabItem {...defaultProps} isActive={true} needsAttention={true} />)
-    const tabElement = screen.getByText('Test Tab').closest('div[class*="group"]')
-    expect(tabElement?.className).toContain('bg-background')
-    expect(tabElement?.className).not.toContain('bg-emerald-100')
+  it('applies emerald attention styles with animation for pulse style', () => {
+    render(<TabItem {...defaultProps} needsAttention={true} tabAttentionStyle="pulse" />)
+    const el = getTabElement()
+    expect(el?.className).toContain('bg-emerald-100')
+    expect(el?.className).toContain('animate-pulse')
+  })
+
+  it('applies foreground-based attention styles for darken style', () => {
+    render(<TabItem {...defaultProps} needsAttention={true} tabAttentionStyle="darken" />)
+    const el = getTabElement()
+    expect(el?.className).toContain('bg-foreground/15')
+    expect(el?.className).not.toContain('bg-emerald-100')
+  })
+
+  it('applies no attention styles when style is none', () => {
+    render(<TabItem {...defaultProps} needsAttention={true} tabAttentionStyle="none" />)
+    const el = getTabElement()
+    expect(el?.className).not.toContain('bg-emerald-100')
+    expect(el?.className).not.toContain('bg-foreground/15')
+    expect(el?.className).toContain('bg-muted')
+  })
+
+  it('applies inline attention styles on active tab with highlight', () => {
+    render(<TabItem {...defaultProps} isActive={true} needsAttention={true} tabAttentionStyle="highlight" />)
+    const el = getTabElement() as HTMLElement
+    expect(el.style.borderTopWidth).toBe('3px')
+    expect(el.style.borderTopColor).toBe('hsl(var(--success))')
+    expect(el.style.backgroundColor).toBe('hsl(var(--success) / 0.15)')
+  })
+
+  it('applies inline attention styles on active tab with darken', () => {
+    render(<TabItem {...defaultProps} isActive={true} needsAttention={true} tabAttentionStyle="darken" />)
+    const el = getTabElement() as HTMLElement
+    expect(el.style.borderTopColor).toBe('hsl(var(--muted-foreground))')
+    expect(el.style.backgroundColor).toBe('hsl(var(--foreground) / 0.08)')
+  })
+
+  it('does not apply inline attention styles on active tab with none', () => {
+    render(<TabItem {...defaultProps} isActive={true} needsAttention={true} tabAttentionStyle="none" />)
+    const el = getTabElement() as HTMLElement
+    expect(el.style.borderTopWidth).toBe('')
+  })
+
+  it('applies animate-pulse on active tab with pulse style and attention', () => {
+    render(<TabItem {...defaultProps} isActive={true} needsAttention={true} tabAttentionStyle="pulse" />)
+    const el = getTabElement()
+    expect(el?.className).toContain('animate-pulse')
   })
 
   it('shows input when isRenaming is true', () => {
@@ -94,8 +141,8 @@ describe('TabItem', () => {
     const onClick = vi.fn()
     render(<TabItem {...defaultProps} onClick={onClick} />)
 
-    const tabElement = screen.getByText('Test Tab').closest('div[class*="group"]')
-    fireEvent.click(tabElement!)
+    const el = getTabElement()
+    fireEvent.click(el!)
     expect(onClick).toHaveBeenCalled()
   })
 
@@ -112,8 +159,8 @@ describe('TabItem', () => {
     const onDoubleClick = vi.fn()
     render(<TabItem {...defaultProps} onDoubleClick={onDoubleClick} />)
 
-    const tabElement = screen.getByText('Test Tab').closest('div[class*="group"]')
-    fireEvent.doubleClick(tabElement!)
+    const el = getTabElement()
+    fireEvent.doubleClick(el!)
     expect(onDoubleClick).toHaveBeenCalled()
   })
 })

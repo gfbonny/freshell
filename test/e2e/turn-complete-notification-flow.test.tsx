@@ -10,7 +10,7 @@ import tabsReducer from '@/store/tabsSlice'
 import panesReducer from '@/store/panesSlice'
 import settingsReducer, { defaultSettings } from '@/store/settingsSlice'
 import connectionReducer from '@/store/connectionSlice'
-import turnCompletionReducer from '@/store/turnCompletionSlice'
+import turnCompletionReducer, { clearTabAttention } from '@/store/turnCompletionSlice'
 import type { PaneNode, TerminalPaneContent } from '@/store/paneTypes'
 import type { Tab } from '@/store/types'
 
@@ -253,7 +253,7 @@ describe('turn complete notification flow (e2e)', () => {
     }
   })
 
-  it('bells and highlights on background completion, then clears when selected and focused', async () => {
+  it('bells and highlights on background completion, then clears when user types', async () => {
     const store = createStore()
 
     render(
@@ -281,22 +281,20 @@ describe('turn complete notification flow (e2e)', () => {
     const backgroundTabBefore = screen.getByText('Background').closest('div[class*="group"]')
     expect(backgroundTabBefore?.className).toContain('bg-emerald-100')
 
-    act(() => {
-      hasFocus = false
-      window.dispatchEvent(new Event('blur'))
-    })
-
+    // Switch to the background tab
     fireEvent.click(screen.getByText('Background'))
 
     await waitFor(() => {
       expect(store.getState().tabs.activeTabId).toBe('tab-2')
     })
 
+    // Attention persists after switching tabs (no auto-clear on focus)
     expect(store.getState().turnCompletion.attentionByTab['tab-2']).toBe(true)
 
+    // Attention is cleared when the user types (dispatches clearTabAttention).
+    // TerminalView calls clearTabAttention in its sendInput handler.
     act(() => {
-      hasFocus = true
-      window.dispatchEvent(new Event('focus'))
+      store.dispatch(clearTabAttention({ tabId: 'tab-2' }))
     })
 
     await waitFor(() => {

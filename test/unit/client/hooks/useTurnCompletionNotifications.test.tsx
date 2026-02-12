@@ -4,7 +4,6 @@ import { configureStore } from '@reduxjs/toolkit'
 import { Provider } from 'react-redux'
 import tabsReducer from '@/store/tabsSlice'
 import turnCompletionReducer, { recordTurnComplete } from '@/store/turnCompletionSlice'
-import { setActiveTab } from '@/store/tabsSlice'
 import { useTurnCompletionNotifications } from '@/hooks/useTurnCompletionNotifications'
 import type { Tab } from '@/store/types'
 
@@ -117,7 +116,7 @@ describe('useTurnCompletionNotifications', () => {
     expect(store.getState().turnCompletion.pendingEvents).toHaveLength(0)
   })
 
-  it('does not play bell or mark attention when the active tab completes while focused', async () => {
+  it('marks attention but does not play bell when the active tab completes while focused', async () => {
     const store = createStore('tab-1')
 
     render(
@@ -131,12 +130,12 @@ describe('useTurnCompletionNotifications', () => {
     })
 
     await waitFor(() => {
-      expect(store.getState().turnCompletion.lastEvent?.tabId).toBe('tab-1')
+      expect(store.getState().turnCompletion.pendingEvents).toHaveLength(0)
     })
 
     expect(playSound).not.toHaveBeenCalled()
-    expect(store.getState().turnCompletion.attentionByTab['tab-1']).toBeUndefined()
-    expect(store.getState().turnCompletion.pendingEvents).toHaveLength(0)
+    // Attention is always marked — cleared by typing, not by focus
+    expect(store.getState().turnCompletion.attentionByTab['tab-1']).toBe(true)
   })
 
   it('plays bell and marks attention when active tab completes while window is unfocused', async () => {
@@ -181,7 +180,7 @@ describe('useTurnCompletionNotifications', () => {
     expect(store.getState().turnCompletion.pendingEvents).toHaveLength(0)
   })
 
-  it('processes burst completions from multiple tabs without dropping attention updates', async () => {
+  it('marks attention on all tabs in burst completions', async () => {
     const store = createStore('tab-1')
 
     render(
@@ -199,12 +198,14 @@ describe('useTurnCompletionNotifications', () => {
       expect(store.getState().turnCompletion.pendingEvents).toHaveLength(0)
     })
 
+    // Sound plays once (for the background tab-2; active tab-1 skips sound)
     expect(playSound).toHaveBeenCalledTimes(1)
-    expect(store.getState().turnCompletion.attentionByTab['tab-1']).toBeUndefined()
+    // Attention is marked on ALL tabs — cleared by typing, not by focus
+    expect(store.getState().turnCompletion.attentionByTab['tab-1']).toBe(true)
     expect(store.getState().turnCompletion.attentionByTab['tab-2']).toBe(true)
   })
 
-  it('clears attention when tab is active and window regains focus', async () => {
+  it('attention persists after switching tabs (cleared by typing, not focus)', async () => {
     hasFocus = false
     const store = createStore('tab-1')
 
@@ -222,14 +223,16 @@ describe('useTurnCompletionNotifications', () => {
       expect(store.getState().turnCompletion.attentionByTab['tab-2']).toBe(true)
     })
 
+    // Regain focus and switch to tab-2 — attention should persist
+    // (previously, focus change would auto-clear; now only typing clears it)
     act(() => {
-      store.dispatch(setActiveTab('tab-2'))
       hasFocus = true
       window.dispatchEvent(new Event('focus'))
     })
 
+    // Give a tick for any effects to run
     await waitFor(() => {
-      expect(store.getState().turnCompletion.attentionByTab['tab-2']).toBeUndefined()
+      expect(store.getState().turnCompletion.attentionByTab['tab-2']).toBe(true)
     })
   })
 })
