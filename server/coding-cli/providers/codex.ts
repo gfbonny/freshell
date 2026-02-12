@@ -103,7 +103,9 @@ function parseUsagePayload(payload: any): CodexUsage | undefined {
     ) ?? 0
 
   const explicitTotal = toFiniteNumber(payload.total_tokens ?? payload.totalTokens ?? payload.total)
-  const totalTokens = explicitTotal ?? (inputTokens + outputTokens + cachedTokens)
+  // Codex cached-input token fields represent a subset of input tokens (not additive).
+  // If the payload does not include an explicit total, fall back to input + output.
+  const totalTokens = explicitTotal ?? (inputTokens + outputTokens)
 
   if (inputTokens === 0 && outputTokens === 0 && cachedTokens === 0 && totalTokens === 0) {
     return undefined

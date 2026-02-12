@@ -216,6 +216,48 @@ describe('codex-provider', () => {
     })
   })
 
+  it('does not double-count cached tokens when total_tokens is missing', () => {
+    const explicitLimit = 180000
+    const content = [
+      JSON.stringify({
+        type: 'session_meta',
+        payload: {
+          id: 'session-missing-total',
+          cwd: '/project/a',
+        },
+      }),
+      JSON.stringify({
+        type: 'event_msg',
+        payload: {
+          type: 'token_count',
+          info: {
+            last_token_usage: {
+              input_tokens: 100,
+              output_tokens: 20,
+              cached_input_tokens: 80,
+              // total_tokens intentionally omitted
+            },
+            model_context_window: 200000,
+            model_auto_compact_token_limit: explicitLimit,
+          },
+        },
+      }),
+    ].join('\n')
+
+    const meta = parseCodexSessionContent(content)
+
+    expect(meta.tokenUsage).toEqual({
+      inputTokens: 100,
+      outputTokens: 20,
+      cachedTokens: 80,
+      totalTokens: 120,
+      contextTokens: 120,
+      modelContextWindow: 200000,
+      compactThresholdTokens: explicitLimit,
+      compactPercent: Math.round((120 / explicitLimit) * 100),
+    })
+  })
+
   it('derives codex compact threshold from model_context_window when explicit limit is missing', () => {
     const content = [
       JSON.stringify({
