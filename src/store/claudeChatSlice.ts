@@ -132,7 +132,7 @@ const claudeChatSlice = createSlice({
     }>) {
       const session = state.sessions[action.payload.sessionId]
       if (!session) return
-      if (action.payload.costUsd) session.totalCostUsd += action.payload.costUsd
+      if (action.payload.costUsd != null) session.totalCostUsd += action.payload.costUsd
       if (action.payload.usage) {
         session.totalInputTokens += action.payload.usage.input_tokens
         session.totalOutputTokens += action.payload.usage.output_tokens
@@ -147,6 +147,27 @@ const claudeChatSlice = createSlice({
       if (!session) return
       session.status = 'exited'
       session.streamingActive = false
+    },
+
+    replayHistory(state, action: PayloadAction<{
+      sessionId: string
+      messages: Array<{ role: 'user' | 'assistant'; content: ChatContentBlock[]; timestamp?: string }>
+    }>) {
+      const session = state.sessions[action.payload.sessionId]
+      if (!session) return
+      for (const msg of action.payload.messages) {
+        session.messages.push({
+          role: msg.role,
+          content: msg.content,
+          timestamp: msg.timestamp || new Date().toISOString(),
+        })
+      }
+    },
+
+    sessionError(state, action: PayloadAction<{ sessionId: string; message: string }>) {
+      const session = state.sessions[action.payload.sessionId]
+      if (!session) return
+      session.lastError = action.payload.message
     },
 
     removeSession(state, action: PayloadAction<{ sessionId: string }>) {
@@ -168,6 +189,8 @@ export const {
   setSessionStatus,
   turnResult,
   sessionExited,
+  replayHistory,
+  sessionError,
   removeSession,
 } = claudeChatSlice.actions
 

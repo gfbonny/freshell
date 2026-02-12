@@ -45,6 +45,7 @@ export interface ChatSessionState {
   totalInputTokens: number
   totalOutputTokens: number
   tools?: Array<{ name: string }>
+  lastError?: string
 }
 
 export interface ClaudeChatState {

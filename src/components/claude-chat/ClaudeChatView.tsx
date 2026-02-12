@@ -1,8 +1,12 @@
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import type { ClaudeChatPaneContent } from '@/store/paneTypes'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { updatePaneContent } from '@/store/panesSlice'
+import { addUserMessage } from '@/store/claudeChatSlice'
 import { getWsClient } from '@/lib/ws-client'
+import MessageBubble from './MessageBubble'
+import PermissionBanner from './PermissionBanner'
+import ChatComposer from './ChatComposer'
 
 interface ClaudeChatViewProps {
   tabId: string
@@ -15,6 +19,35 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
   const dispatch = useAppDispatch()
   const ws = getWsClient()
   const createSentRef = useRef(false)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  // Resolve pendingCreates -> pane sessionId
+  const pendingSessionId = useAppSelector(
+    (s) => s.claudeChat.pendingCreates[paneContent.createRequestId],
+  )
+  const session = useAppSelector(
+    (s) => paneContent.sessionId ? s.claudeChat.sessions[paneContent.sessionId] : undefined,
+  )
+
+  // Wire sessionId from pendingCreates back into the pane content
+  useEffect(() => {
+    if (paneContent.sessionId || !pendingSessionId) return
+    dispatch(updatePaneContent({
+      tabId,
+      paneId,
+      content: { ...paneContent, sessionId: pendingSessionId, status: 'starting' },
+    }))
+  }, [pendingSessionId, paneContent, tabId, paneId, dispatch])
+
+  // Update pane status from session state
+  useEffect(() => {
+    if (!session || session.status === paneContent.status) return
+    dispatch(updatePaneContent({
+      tabId,
+      paneId,
+      content: { ...paneContent, status: session.status },
+    }))
+  }, [session?.status, paneContent, tabId, paneId, dispatch])
 
   // Send sdk.create when the pane first mounts with a createRequestId but no sessionId
   useEffect(() => {
@@ -35,9 +68,39 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
       paneId,
       content: { ...paneContent, status: 'starting' },
     }))
-  }, [paneContent.createRequestId, paneContent.sessionId, paneContent.status])
+  }, [paneContent.createRequestId, paneContent.sessionId, paneContent.status, tabId, paneId, dispatch, ws])
+
+  // Auto-scroll on new messages
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [session?.messages.length, session?.streamingActive])
+
+  const handleSend = useCallback((text: string) => {
+    if (!paneContent.sessionId) return
+    dispatch(addUserMessage({ sessionId: paneContent.sessionId, text }))
+    ws.send({ type: 'sdk.send', sessionId: paneContent.sessionId, text })
+  }, [paneContent.sessionId, dispatch, ws])
+
+  const handleInterrupt = useCallback(() => {
+    if (!paneContent.sessionId) return
+    ws.send({ type: 'sdk.interrupt', sessionId: paneContent.sessionId })
+  }, [paneContent.sessionId, ws])
+
+  const handlePermissionAllow = useCallback((requestId: string) => {
+    if (!paneContent.sessionId) return
+    ws.send({ type: 'sdk.permission.respond', sessionId: paneContent.sessionId, requestId, behavior: 'allow' })
+  }, [paneContent.sessionId, ws])
+
+  const handlePermissionDeny = useCallback((requestId: string) => {
+    if (!paneContent.sessionId) return
+    ws.send({ type: 'sdk.permission.respond', sessionId: paneContent.sessionId, requestId, behavior: 'deny' })
+  }, [paneContent.sessionId, ws])
 
   if (hidden) return null
+
+  const isInteractive = paneContent.status === 'idle' || paneContent.status === 'connected'
+  const isRunning = paneContent.status === 'running'
+  const pendingPermissions = session ? Object.values(session.pendingPermissions) : []
 
   return (
     <div className="h-full w-full flex flex-col" role="region" aria-label="Claude Web Chat">
@@ -57,35 +120,61 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
         )}
       </div>
 
-      {/* Message area (placeholder) */}
-      <div className="flex-1 overflow-y-auto p-4">
-        <div className="text-center text-muted-foreground text-sm py-8">
-          <p className="font-medium mb-2">Claude Web Chat</p>
-          <p>Rich chat UI for Claude Code sessions.</p>
-          <p className="text-xs mt-2">Session: {paneContent.sessionId ?? 'pending'}</p>
-        </div>
+      {/* Message area */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        {!session?.messages.length && (
+          <div className="text-center text-muted-foreground text-sm py-8">
+            <p className="font-medium mb-2">Claude Web Chat</p>
+            <p>Rich chat UI for Claude Code sessions.</p>
+            <p className="text-xs mt-2">Session: {paneContent.sessionId ?? 'pending'}</p>
+          </div>
+        )}
+
+        {session?.messages.map((msg, i) => (
+          <MessageBubble
+            key={i}
+            role={msg.role}
+            content={msg.content}
+            timestamp={msg.timestamp}
+            model={msg.model}
+          />
+        ))}
+
+        {session?.streamingActive && session.streamingText && (
+          <MessageBubble
+            role="assistant"
+            content={[{ type: 'text', text: session.streamingText }]}
+          />
+        )}
+
+        {/* Permission banners */}
+        {pendingPermissions.map((perm) => (
+          <PermissionBanner
+            key={perm.requestId}
+            permission={perm}
+            onAllow={() => handlePermissionAllow(perm.requestId)}
+            onDeny={() => handlePermissionDeny(perm.requestId)}
+          />
+        ))}
+
+        {/* Error display */}
+        {session?.lastError && (
+          <div className="text-sm text-red-500 bg-red-500/10 rounded-lg p-3" role="alert">
+            {session.lastError}
+          </div>
+        )}
+
+        <div ref={messagesEndRef} />
       </div>
 
-      {/* Composer (placeholder) */}
-      <div className="border-t p-3">
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            className="flex-1 rounded border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-            placeholder={paneContent.status === 'idle' || paneContent.status === 'connected' ? 'Message Claude...' : 'Waiting for connection...'}
-            disabled={paneContent.status !== 'idle' && paneContent.status !== 'connected'}
-            aria-label="Chat message input"
-          />
-          <button
-            type="button"
-            className="px-3 py-2 text-sm rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-            disabled={paneContent.status !== 'idle' && paneContent.status !== 'connected'}
-            aria-label="Send message"
-          >
-            Send
-          </button>
-        </div>
-      </div>
+      {/* Composer */}
+      <ChatComposer
+        onSend={handleSend}
+        onInterrupt={handleInterrupt}
+        disabled={!isInteractive && !isRunning}
+        isRunning={isRunning}
+        placeholder={isInteractive ? 'Message Claude...' : 'Waiting for connection...'}
+      />
     </div>
   )
 }

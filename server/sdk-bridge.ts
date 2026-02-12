@@ -215,6 +215,9 @@ export class SdkBridge extends EventEmitter {
       const state = this.sessions.get(sessionId)
       if (state) state.status = 'exited'
       this.broadcastToSession(sessionId, { type: 'sdk.exit', sessionId, exitCode: code ?? undefined })
+      // Clean up Maps to prevent memory leaks
+      this.processes.delete(sessionId)
+      this.sessions.delete(sessionId)
     })
 
     return proc
@@ -312,7 +315,7 @@ export class SdkBridge extends EventEmitter {
       }
 
       case 'result': {
-        if (msg.cost_usd) state.costUsd += msg.cost_usd
+        if (msg.cost_usd != null) state.costUsd += msg.cost_usd
         if (msg.usage) {
           state.totalInputTokens += msg.usage.input_tokens
           state.totalOutputTokens += msg.usage.output_tokens

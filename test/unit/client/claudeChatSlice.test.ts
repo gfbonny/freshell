@@ -12,6 +12,9 @@ import claudeChatReducer, {
   setSessionStatus,
   turnResult,
   sessionExited,
+  replayHistory,
+  sessionError,
+  removeSession,
 } from '../../../src/store/claudeChatSlice'
 
 describe('claudeChatSlice', () => {
@@ -117,5 +120,48 @@ describe('claudeChatSlice', () => {
   it('ignores actions for unknown sessions', () => {
     const state = claudeChatReducer(initial, addUserMessage({ sessionId: 'nonexistent', text: 'hello' }))
     expect(state).toEqual(initial)
+  })
+
+  it('replays history messages into session', () => {
+    let state = claudeChatReducer(initial, sessionCreated({ requestId: 'r', sessionId: 's1' }))
+    state = claudeChatReducer(state, replayHistory({
+      sessionId: 's1',
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'hello' }], timestamp: '2026-01-01T00:00:00Z' },
+        { role: 'assistant', content: [{ type: 'text', text: 'hi' }], timestamp: '2026-01-01T00:00:01Z' },
+      ],
+    }))
+    expect(state.sessions['s1'].messages).toHaveLength(2)
+    expect(state.sessions['s1'].messages[0].role).toBe('user')
+    expect(state.sessions['s1'].messages[1].role).toBe('assistant')
+  })
+
+  it('sets lastError on sessionError', () => {
+    let state = claudeChatReducer(initial, sessionCreated({ requestId: 'r', sessionId: 's1' }))
+    state = claudeChatReducer(state, sessionError({ sessionId: 's1', message: 'CLI crashed' }))
+    expect(state.sessions['s1'].lastError).toBe('CLI crashed')
+  })
+
+  it('removes a session', () => {
+    let state = claudeChatReducer(initial, sessionCreated({ requestId: 'r', sessionId: 's1' }))
+    state = claudeChatReducer(state, removeSession({ sessionId: 's1' }))
+    expect(state.sessions['s1']).toBeUndefined()
+  })
+
+  it('accumulates cost when costUsd is 0', () => {
+    let state = claudeChatReducer(initial, sessionCreated({ requestId: 'r', sessionId: 's1' }))
+    state = claudeChatReducer(state, turnResult({
+      sessionId: 's1',
+      costUsd: 0.05,
+      usage: { input_tokens: 100, output_tokens: 50 },
+    }))
+    state = claudeChatReducer(state, turnResult({
+      sessionId: 's1',
+      costUsd: 0,
+      usage: { input_tokens: 0, output_tokens: 0 },
+    }))
+    // costUsd 0 should still be accumulated (no-op, but not skipped)
+    expect(state.sessions['s1'].totalCostUsd).toBe(0.05)
+    expect(state.sessions['s1'].totalInputTokens).toBe(100)
   })
 })

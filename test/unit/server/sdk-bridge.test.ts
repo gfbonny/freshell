@@ -59,6 +59,21 @@ describe('SdkBridge', () => {
     it('returns false when killing nonexistent session', () => {
       expect(bridge.killSession('nonexistent')).toBe(false)
     })
+
+    it('cleans up session and process maps on process exit', () => {
+      const session = bridge.createSession({ cwd: '/tmp' })
+      const sid = session.sessionId
+      expect(bridge.getSession(sid)).toBeDefined()
+      expect(bridge.listSessions()).toHaveLength(1)
+
+      // Simulate process exit
+      const sp = (bridge as any).processes.get(sid)
+      sp.proc.emit('exit', 0)
+
+      // Session and process should be cleaned up
+      expect(bridge.getSession(sid)).toBeUndefined()
+      expect(bridge.listSessions()).toHaveLength(0)
+    })
   })
 
   describe('CLI message handling', () => {
@@ -189,6 +204,25 @@ describe('SdkBridge', () => {
         result: 'success',
       })
       expect(bridge.getSession(session.sessionId)?.status).toBe('idle')
+    })
+
+    it('accumulates cost_usd of 0 without skipping', () => {
+      const session = bridge.createSession({ cwd: '/tmp' })
+      ;(bridge as any).handleCliMessage(session.sessionId, {
+        type: 'result',
+        result: 'success',
+        cost_usd: 0.05,
+        usage: { input_tokens: 1000, output_tokens: 500 },
+      })
+      ;(bridge as any).handleCliMessage(session.sessionId, {
+        type: 'result',
+        result: 'success',
+        cost_usd: 0,
+        usage: { input_tokens: 0, output_tokens: 0 },
+      })
+      const state = bridge.getSession(session.sessionId)
+      expect(state?.costUsd).toBe(0.05)
+      expect(state?.totalInputTokens).toBe(1000)
     })
 
     it('sets status to running on assistant message', () => {

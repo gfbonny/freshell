@@ -188,24 +188,56 @@ describe('SDK Message Handler', () => {
     )
   })
 
-  it('handles sdk.history without dispatching', () => {
+  it('handles sdk.history by dispatching replayHistory', () => {
+    const messages = [
+      { role: 'user', content: [{ type: 'text', text: 'hello' }], timestamp: '2026-01-01T00:00:00Z' },
+      { role: 'assistant', content: [{ type: 'text', text: 'hi' }], timestamp: '2026-01-01T00:00:01Z' },
+    ]
     const handled = handleSdkMessage(dispatch, {
       type: 'sdk.history',
       sessionId: 'sess-1',
-      messages: [],
+      messages,
     })
     expect(handled).toBe(true)
-    expect(dispatch).not.toHaveBeenCalled()
+    expect(dispatch).toHaveBeenCalledWith(
+      claudeChatSlice.replayHistory({ sessionId: 'sess-1', messages })
+    )
   })
 
-  it('handles sdk.error without dispatching', () => {
+  it('handles sdk.error by dispatching sessionError', () => {
     const handled = handleSdkMessage(dispatch, {
       type: 'sdk.error',
       sessionId: 'sess-1',
-      error: 'Something went wrong',
+      message: 'Something went wrong',
     })
     expect(handled).toBe(true)
-    expect(dispatch).not.toHaveBeenCalled()
+    expect(dispatch).toHaveBeenCalledWith(
+      claudeChatSlice.sessionError({ sessionId: 'sess-1', message: 'Something went wrong' })
+    )
+  })
+
+  it('handles sdk.error with legacy error field', () => {
+    const handled = handleSdkMessage(dispatch, {
+      type: 'sdk.error',
+      sessionId: 'sess-1',
+      error: 'Legacy error',
+    })
+    expect(handled).toBe(true)
+    expect(dispatch).toHaveBeenCalledWith(
+      claudeChatSlice.sessionError({ sessionId: 'sess-1', message: 'Legacy error' })
+    )
+  })
+
+  it('handles sdk.killed by dispatching removeSession', () => {
+    const handled = handleSdkMessage(dispatch, {
+      type: 'sdk.killed',
+      sessionId: 'sess-1',
+      success: true,
+    })
+    expect(handled).toBe(true)
+    expect(dispatch).toHaveBeenCalledWith(
+      claudeChatSlice.removeSession({ sessionId: 'sess-1' })
+    )
   })
 
   it('returns false for non-SDK messages', () => {

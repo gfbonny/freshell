@@ -11,6 +11,9 @@ import {
   setSessionStatus,
   turnResult,
   sessionExited,
+  replayHistory,
+  sessionError,
+  removeSession,
 } from '@/store/claudeChatSlice'
 
 /**
@@ -104,12 +107,24 @@ export function handleSdkMessage(dispatch: AppDispatch, msg: Record<string, unkn
       return true
 
     case 'sdk.history':
-      // History replay - add all messages to the session
-      // For now just acknowledge the message type
+      dispatch(replayHistory({
+        sessionId: msg.sessionId as string,
+        messages: msg.messages as Array<{ role: 'user' | 'assistant'; content: any[]; timestamp?: string }>,
+      }))
       return true
 
     case 'sdk.error':
-      // Could display a toast or similar
+      dispatch(sessionError({
+        sessionId: msg.sessionId as string,
+        message: (msg.message as string) || (msg.error as string) || 'Unknown error',
+      }))
+      return true
+
+    case 'sdk.killed':
+      // Session killed confirmation — clean up client state
+      dispatch(removeSession({
+        sessionId: msg.sessionId as string,
+      }))
       return true
 
     default:

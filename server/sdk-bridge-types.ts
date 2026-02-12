@@ -192,6 +192,7 @@ export type SdkServerMessage =
   | { type: 'sdk.error'; sessionId: string; message: string }
   | { type: 'sdk.history'; sessionId: string; messages: Array<{ role: 'user' | 'assistant'; content: ContentBlock[]; timestamp?: string }> }
   | { type: 'sdk.exit'; sessionId: string; exitCode?: number }
+  | { type: 'sdk.killed'; sessionId: string; success: boolean }
 
 export type SdkSessionStatus = 'creating' | 'starting' | 'connected' | 'running' | 'idle' | 'compacting' | 'exited'
 
