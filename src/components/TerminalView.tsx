@@ -44,6 +44,8 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   const activeTabId = useAppSelector((s) => s.tabs.activeTabId)
   const activePaneId = useAppSelector((s) => s.panes.activePane[tabId])
   const settings = useAppSelector((s) => s.settings.settings)
+  const hasAttention = useAppSelector((s) => !!s.turnCompletion?.attentionByTab?.[tabId])
+  const hasAttentionRef = useRef(hasAttention)
 
   // All hooks MUST be called before any conditional returns
   const ws = useMemo(() => getWsClient(), [])
@@ -87,6 +89,10 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   useEffect(() => {
     warnExternalLinksRef.current = settings.terminal.warnExternalLinks
   }, [settings.terminal.warnExternalLinks])
+
+  useEffect(() => {
+    hasAttentionRef.current = hasAttention
+  }, [hasAttention])
 
   const shouldFocusActiveTerminal = !hidden && activeTabId === tabId && activePaneId === paneId
 
@@ -157,8 +163,9 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   const sendInput = useCallback((data: string) => {
     const tid = terminalIdRef.current
     if (!tid) return
-    // Clear attention indicator when user starts typing
-    dispatch(clearTabAttention({ tabId }))
+    if (hasAttentionRef.current) {
+      dispatch(clearTabAttention({ tabId }))
+    }
     ws.send({ type: 'terminal.input', terminalId: tid, data })
   }, [dispatch, tabId, ws])
 
@@ -187,10 +194,10 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         activate: (_event: MouseEvent, uri: string) => {
           if (warnExternalLinksRef.current !== false) {
             if (confirm(`Do you want to navigate to ${uri}?\n\nWARNING: This link could potentially be dangerous`)) {
-              window.open(uri, '_blank')
+              window.open(uri, '_blank', 'noopener,noreferrer')
             }
           } else {
-            window.open(uri, '_blank')
+            window.open(uri, '_blank', 'noopener,noreferrer')
           }
         },
       },

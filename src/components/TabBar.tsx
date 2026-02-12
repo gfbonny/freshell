@@ -26,7 +26,7 @@ import {
   useSortable,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import type { Tab } from '@/store/types'
+import type { Tab, TabAttentionStyle } from '@/store/types'
 import type { PaneContent } from '@/store/paneTypes'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
 
@@ -40,7 +40,7 @@ interface SortableTabProps {
   renameValue: string
   paneContents?: PaneContent[]
   iconsOnTabs?: boolean
-  tabAttentionStyle?: string
+  tabAttentionStyle?: TabAttentionStyle
   onRenameChange: (value: string) => void
   onRenameBlur: () => void
   onRenameKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void

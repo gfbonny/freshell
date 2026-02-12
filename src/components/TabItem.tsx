@@ -3,7 +3,7 @@ import { useRef, useEffect } from 'react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import PaneIcon from '@/components/icons/PaneIcon'
-import type { Tab } from '@/store/types'
+import type { Tab, TabAttentionStyle } from '@/store/types'
 import type { PaneContent } from '@/store/paneTypes'
 import type { MouseEvent, KeyboardEvent } from 'react'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
@@ -42,7 +42,7 @@ export interface TabItemProps {
   renameValue: string
   paneContents?: PaneContent[]
   iconsOnTabs?: boolean
-  tabAttentionStyle?: string
+  tabAttentionStyle?: TabAttentionStyle
   onRenameChange: (value: string) => void
   onRenameBlur: () => void
   onRenameKeyDown: (e: KeyboardEvent<HTMLInputElement>) => void
@@ -110,7 +110,7 @@ export default function TabItem({
         isActive
           ? cn(
               "z-30 -mb-px border-b border-b-background bg-background text-foreground after:pointer-events-none after:absolute after:inset-x-0 after:-bottom-px after:h-[2px] after:bg-background after:content-['']",
-              needsAttention && tabAttentionStyle !== 'none' && tabAttentionStyle === 'pulse' && 'animate-pulse'
+              needsAttention && tabAttentionStyle === 'pulse' && 'animate-pulse'
             )
           : needsAttention && tabAttentionStyle !== 'none'
             ? tabAttentionStyle === 'darken'
