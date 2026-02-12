@@ -6,23 +6,31 @@ const initialState: ClaudeChatState = {
   pendingCreates: {},
 }
 
+/** Create a default empty session if one doesn't already exist. */
+function ensureSession(state: ClaudeChatState, sessionId: string): ChatSessionState {
+  if (!state.sessions[sessionId]) {
+    state.sessions[sessionId] = {
+      sessionId,
+      status: 'starting',
+      messages: [],
+      streamingText: '',
+      streamingActive: false,
+      pendingPermissions: {},
+      totalCostUsd: 0,
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+    }
+  }
+  return state.sessions[sessionId]
+}
+
 const claudeChatSlice = createSlice({
   name: 'claudeChat',
   initialState,
   reducers: {
     sessionCreated(state, action: PayloadAction<{ requestId: string; sessionId: string }>) {
       const { requestId, sessionId } = action.payload
-      state.sessions[sessionId] = {
-        sessionId,
-        status: 'starting',
-        messages: [],
-        streamingText: '',
-        streamingActive: false,
-        pendingPermissions: {},
-        totalCostUsd: 0,
-        totalInputTokens: 0,
-        totalOutputTokens: 0,
-      }
+      ensureSession(state, sessionId)
       state.pendingCreates[requestId] = sessionId
     },
 
@@ -33,8 +41,7 @@ const claudeChatSlice = createSlice({
       cwd?: string
       tools?: Array<{ name: string }>
     }>) {
-      const session = state.sessions[action.payload.sessionId]
-      if (!session) return
+      const session = ensureSession(state, action.payload.sessionId)
       session.cliSessionId = action.payload.cliSessionId
       session.model = action.payload.model
       session.cwd = action.payload.cwd
@@ -119,8 +126,7 @@ const claudeChatSlice = createSlice({
       sessionId: string
       status: ChatSessionState['status']
     }>) {
-      const session = state.sessions[action.payload.sessionId]
-      if (!session) return
+      const session = ensureSession(state, action.payload.sessionId)
       session.status = action.payload.status
     },
 
@@ -153,15 +159,13 @@ const claudeChatSlice = createSlice({
       sessionId: string
       messages: Array<{ role: 'user' | 'assistant'; content: ChatContentBlock[]; timestamp?: string }>
     }>) {
-      const session = state.sessions[action.payload.sessionId]
-      if (!session) return
-      for (const msg of action.payload.messages) {
-        session.messages.push({
-          role: msg.role,
-          content: msg.content,
-          timestamp: msg.timestamp || new Date().toISOString(),
-        })
-      }
+      const session = ensureSession(state, action.payload.sessionId)
+      // Replace messages (not append) — server sends full history on attach/reconnect
+      session.messages = action.payload.messages.map((msg) => ({
+        role: msg.role,
+        content: msg.content,
+        timestamp: msg.timestamp || new Date().toISOString(),
+      }))
     },
 
     sessionError(state, action: PayloadAction<{ sessionId: string; message: string }>) {

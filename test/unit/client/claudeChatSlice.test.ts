@@ -123,8 +123,13 @@ describe('claudeChatSlice', () => {
     expect(state).toEqual(initial)
   })
 
-  it('replays history messages into session', () => {
+  it('replays history messages into session (replaces, not appends)', () => {
     let state = claudeChatReducer(initial, sessionCreated({ requestId: 'r', sessionId: 's1' }))
+    // Add an existing message
+    state = claudeChatReducer(state, addUserMessage({ sessionId: 's1', text: 'existing' }))
+    expect(state.sessions['s1'].messages).toHaveLength(1)
+
+    // Replay should replace, not append
     state = claudeChatReducer(state, replayHistory({
       sessionId: 's1',
       messages: [
@@ -134,7 +139,39 @@ describe('claudeChatSlice', () => {
     }))
     expect(state.sessions['s1'].messages).toHaveLength(2)
     expect(state.sessions['s1'].messages[0].role).toBe('user')
+    expect(state.sessions['s1'].messages[0].content[0].text).toBe('hello')
     expect(state.sessions['s1'].messages[1].role).toBe('assistant')
+  })
+
+  it('bootstraps session on replayHistory for unknown sessionId', () => {
+    const state = claudeChatReducer(initial, replayHistory({
+      sessionId: 'unknown-sess',
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'hello' }], timestamp: '2026-01-01T00:00:00Z' },
+      ],
+    }))
+    expect(state.sessions['unknown-sess']).toBeDefined()
+    expect(state.sessions['unknown-sess'].messages).toHaveLength(1)
+  })
+
+  it('bootstraps session on setSessionStatus for unknown sessionId', () => {
+    const state = claudeChatReducer(initial, setSessionStatus({
+      sessionId: 'unknown-sess',
+      status: 'idle',
+    }))
+    expect(state.sessions['unknown-sess']).toBeDefined()
+    expect(state.sessions['unknown-sess'].status).toBe('idle')
+  })
+
+  it('bootstraps session on sessionInit for unknown sessionId', () => {
+    const state = claudeChatReducer(initial, sessionInit({
+      sessionId: 'unknown-sess',
+      cliSessionId: 'cli-123',
+      model: 'claude-opus-4-6',
+    }))
+    expect(state.sessions['unknown-sess']).toBeDefined()
+    expect(state.sessions['unknown-sess'].cliSessionId).toBe('cli-123')
+    expect(state.sessions['unknown-sess'].status).toBe('connected')
   })
 
   it('sets lastError on sessionError', () => {

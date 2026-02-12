@@ -331,7 +331,7 @@ export default function App() {
         }
 
         // SDK message handling (Claude Web pane)
-        handleSdkMessage(dispatch, msg)
+        handleSdkMessage(dispatch, msg, ws)
       })
 
       cleanup = () => {

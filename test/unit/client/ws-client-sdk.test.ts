@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { handleSdkMessage } from '../../../src/lib/sdk-message-handler'
+import { handleSdkMessage, cancelCreate, _resetCancelledCreates } from '../../../src/lib/sdk-message-handler'
 import * as claudeChatSlice from '../../../src/store/claudeChatSlice'
 
 describe('SDK Message Handler', () => {
@@ -7,6 +7,7 @@ describe('SDK Message Handler', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    _resetCancelledCreates()
   })
 
   it('handles sdk.created', () => {
@@ -19,6 +20,36 @@ describe('SDK Message Handler', () => {
     expect(dispatch).toHaveBeenCalledWith(
       claudeChatSlice.sessionCreated({ requestId: 'req-1', sessionId: 'sess-1' })
     )
+  })
+
+  it('kills orphan on sdk.created when createRequestId was cancelled', () => {
+    const wsMock = { send: vi.fn() }
+    cancelCreate('req-orphan')
+    const handled = handleSdkMessage(dispatch, {
+      type: 'sdk.created',
+      requestId: 'req-orphan',
+      sessionId: 'sess-orphan',
+    }, wsMock)
+    expect(handled).toBe(true)
+    // Should NOT dispatch sessionCreated
+    expect(dispatch).not.toHaveBeenCalled()
+    // Should send sdk.kill to the server
+    expect(wsMock.send).toHaveBeenCalledWith({ type: 'sdk.kill', sessionId: 'sess-orphan' })
+  })
+
+  it('does not kill non-cancelled creates', () => {
+    const wsMock = { send: vi.fn() }
+    cancelCreate('req-other')
+    const handled = handleSdkMessage(dispatch, {
+      type: 'sdk.created',
+      requestId: 'req-1',
+      sessionId: 'sess-1',
+    }, wsMock)
+    expect(handled).toBe(true)
+    expect(dispatch).toHaveBeenCalledWith(
+      claudeChatSlice.sessionCreated({ requestId: 'req-1', sessionId: 'sess-1' })
+    )
+    expect(wsMock.send).not.toHaveBeenCalled()
   })
 
   it('handles sdk.session.init', () => {

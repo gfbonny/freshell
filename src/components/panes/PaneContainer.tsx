@@ -23,6 +23,7 @@ import { ContextIds } from '@/components/context-menu/context-menu-constants'
 import type { CodingCliProviderName } from '@/lib/coding-cli-types'
 import { updateSettingsLocal } from '@/store/settingsSlice'
 import { clearPendingCreate, removeSession } from '@/store/claudeChatSlice'
+import { cancelCreate } from '@/lib/sdk-message-handler'
 import type { TerminalMetaRecord } from '@/store/terminalMetaSlice'
 
 // Stable empty object to avoid selector memoization issues
@@ -187,6 +188,10 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
       const sessionId = content.sessionId || sdkPendingCreates[content.createRequestId]
       if (sessionId) {
         ws.send({ type: 'sdk.kill', sessionId })
+      } else {
+        // No sessionId yet — sdk.created hasn't arrived. Mark the createRequestId as
+        // cancelled so the message handler will kill the orphan when it does arrive.
+        cancelCreate(content.createRequestId)
       }
       // Clean up Redux state for orphaned pending creates
       if (!content.sessionId && sdkPendingCreates[content.createRequestId]) {

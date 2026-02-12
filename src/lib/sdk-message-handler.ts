@@ -18,17 +18,44 @@ import {
 } from '@/store/claudeChatSlice'
 
 /**
+ * Tracks createRequestIds whose owning pane was closed before sdk.created arrived.
+ * When sdk.created arrives for a cancelled ID, we skip session creation and send sdk.kill.
+ */
+const cancelledCreateRequestIds = new Set<string>()
+
+/** Mark a createRequestId as cancelled so the arriving sdk.created will be killed. */
+export function cancelCreate(requestId: string): void {
+  cancelledCreateRequestIds.add(requestId)
+}
+
+/** Visible for testing — clear all cancelled creates. */
+export function _resetCancelledCreates(): void {
+  cancelledCreateRequestIds.clear()
+}
+
+interface SdkMessageSink {
+  send: (msg: unknown) => void
+}
+
+/**
  * Handle incoming SDK WebSocket messages and dispatch Redux actions.
  * Returns true if the message was handled (i.e. it was an sdk.* message).
+ * @param ws Optional WS client — needed to kill orphaned sessions from cancelled creates.
  */
-export function handleSdkMessage(dispatch: AppDispatch, msg: Record<string, unknown>): boolean {
+export function handleSdkMessage(dispatch: AppDispatch, msg: Record<string, unknown>, ws?: SdkMessageSink): boolean {
   switch (msg.type) {
-    case 'sdk.created':
-      dispatch(sessionCreated({
-        requestId: msg.requestId as string,
-        sessionId: msg.sessionId as string,
-      }))
+    case 'sdk.created': {
+      const requestId = msg.requestId as string
+      const sessionId = msg.sessionId as string
+      // If the pane was closed before sdk.created arrived, kill the orphan
+      if (cancelledCreateRequestIds.has(requestId)) {
+        cancelledCreateRequestIds.delete(requestId)
+        ws?.send({ type: 'sdk.kill', sessionId })
+        return true
+      }
+      dispatch(sessionCreated({ requestId, sessionId }))
       return true
+    }
 
     case 'sdk.session.init':
       dispatch(sessionInit({
