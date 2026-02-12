@@ -25,6 +25,7 @@ interface SessionProcess {
   cliSocket?: WebSocket
   browserListeners: Set<(msg: SdkServerMessage) => void>
   pendingMessages: string[]
+  killTimer?: ReturnType<typeof setTimeout>
 }
 
 export class SdkBridge extends EventEmitter {
@@ -98,7 +99,7 @@ export class SdkBridge extends EventEmitter {
 
     try {
       sp.proc.kill('SIGTERM')
-      setTimeout(() => {
+      sp.killTimer = setTimeout(() => {
         try { sp.proc.kill('SIGKILL') } catch { /* ignore */ }
       }, GRACEFUL_KILL_TIMEOUT_MS)
     } catch { /* ignore */ }
@@ -214,6 +215,9 @@ export class SdkBridge extends EventEmitter {
       log.info({ sessionId, exitCode: code }, 'Claude Code CLI exited')
       const state = this.sessions.get(sessionId)
       if (state) state.status = 'exited'
+      // Clear any pending SIGKILL timer
+      const sp = this.processes.get(sessionId)
+      if (sp?.killTimer) clearTimeout(sp.killTimer)
       this.broadcastToSession(sessionId, { type: 'sdk.exit', sessionId, exitCode: code ?? undefined })
       // Clean up Maps to prevent memory leaks
       this.processes.delete(sessionId)

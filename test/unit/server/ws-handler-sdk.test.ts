@@ -293,6 +293,12 @@ describe('WS Handler SDK Integration', () => {
     it('routes sdk.permission.respond to sdkBridge.respondPermission', async () => {
       const ws = await connectAndAuth()
       try {
+        // First create a session so client owns it
+        await sendAndWaitForResponse(ws, {
+          type: 'sdk.create',
+          requestId: 'req-perm',
+        }, 'sdk.created')
+
         ws.send(JSON.stringify({
           type: 'sdk.permission.respond',
           sessionId: 'sdk-sess-1',
@@ -310,9 +316,31 @@ describe('WS Handler SDK Integration', () => {
       }
     })
 
+    it('rejects sdk.permission.respond for unowned session', async () => {
+      const ws = await connectAndAuth()
+      try {
+        const response = await sendAndWaitForResponse(ws, {
+          type: 'sdk.permission.respond',
+          sessionId: 'not-my-session',
+          requestId: 'perm-1',
+          behavior: 'allow',
+        }, 'error')
+
+        expect(response.code).toBe('UNAUTHORIZED')
+      } finally {
+        ws.close()
+      }
+    })
+
     it('routes sdk.interrupt to sdkBridge.interrupt', async () => {
       const ws = await connectAndAuth()
       try {
+        // First create a session so client owns it
+        await sendAndWaitForResponse(ws, {
+          type: 'sdk.create',
+          requestId: 'req-int',
+        }, 'sdk.created')
+
         ws.send(JSON.stringify({
           type: 'sdk.interrupt',
           sessionId: 'sdk-sess-1',
@@ -329,6 +357,12 @@ describe('WS Handler SDK Integration', () => {
     it('routes sdk.kill and returns sdk.killed', async () => {
       const ws = await connectAndAuth()
       try {
+        // First create a session so client owns it
+        await sendAndWaitForResponse(ws, {
+          type: 'sdk.create',
+          requestId: 'req-kill',
+        }, 'sdk.created')
+
         const response = await sendAndWaitForResponse(ws, {
           type: 'sdk.kill',
           sessionId: 'sdk-sess-1',
@@ -402,8 +436,7 @@ describe('WS Handler SDK Integration', () => {
       }
     })
 
-    it('returns error for sdk.send with unknown session', async () => {
-      mockSdkBridge.sendUserMessage.mockReturnValue(false)
+    it('returns error for sdk.send with unowned session', async () => {
       const ws = await connectAndAuth()
       try {
         const response = await sendAndWaitForResponse(ws, {
@@ -413,7 +446,7 @@ describe('WS Handler SDK Integration', () => {
         }, 'error')
 
         expect(response.type).toBe('error')
-        expect(response.code).toBe('INVALID_SESSION_ID')
+        expect(response.code).toBe('UNAUTHORIZED')
       } finally {
         ws.close()
       }

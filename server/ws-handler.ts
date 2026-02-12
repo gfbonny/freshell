@@ -1501,6 +1501,10 @@ export class WsHandler {
           this.sendError(ws, { code: 'INTERNAL_ERROR', message: 'SDK bridge not enabled' })
           return
         }
+        if (!state.sdkSessions.has(m.sessionId) && !state.sdkSubscriptions.has(m.sessionId)) {
+          this.sendError(ws, { code: 'UNAUTHORIZED', message: 'Not subscribed to this SDK session' })
+          return
+        }
         const ok = this.sdkBridge.sendUserMessage(m.sessionId, m.text, m.images)
         if (!ok) {
           this.sendError(ws, { code: 'INVALID_SESSION_ID', message: 'SDK session not found' })
@@ -1511,6 +1515,10 @@ export class WsHandler {
       case 'sdk.permission.respond': {
         if (!this.sdkBridge) {
           this.sendError(ws, { code: 'INTERNAL_ERROR', message: 'SDK bridge not enabled' })
+          return
+        }
+        if (!state.sdkSessions.has(m.sessionId) && !state.sdkSubscriptions.has(m.sessionId)) {
+          this.sendError(ws, { code: 'UNAUTHORIZED', message: 'Not subscribed to this SDK session' })
           return
         }
         const ok = this.sdkBridge.respondPermission(m.sessionId, m.requestId, m.behavior, m.updatedInput, m.message)
@@ -1525,6 +1533,10 @@ export class WsHandler {
           this.sendError(ws, { code: 'INTERNAL_ERROR', message: 'SDK bridge not enabled' })
           return
         }
+        if (!state.sdkSessions.has(m.sessionId) && !state.sdkSubscriptions.has(m.sessionId)) {
+          this.sendError(ws, { code: 'UNAUTHORIZED', message: 'Not subscribed to this SDK session' })
+          return
+        }
         this.sdkBridge.interrupt(m.sessionId)
         return
       }
@@ -1532,6 +1544,10 @@ export class WsHandler {
       case 'sdk.kill': {
         if (!this.sdkBridge) {
           this.sendError(ws, { code: 'INTERNAL_ERROR', message: 'SDK bridge not enabled' })
+          return
+        }
+        if (!state.sdkSessions.has(m.sessionId) && !state.sdkSubscriptions.has(m.sessionId)) {
+          this.sendError(ws, { code: 'UNAUTHORIZED', message: 'Not subscribed to this SDK session' })
           return
         }
         const killed = this.sdkBridge.killSession(m.sessionId)

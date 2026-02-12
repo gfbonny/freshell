@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from 'react'
 import type { ClaudeChatPaneContent } from '@/store/paneTypes'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { updatePaneContent } from '@/store/panesSlice'
-import { addUserMessage } from '@/store/claudeChatSlice'
+import { addUserMessage, clearPendingCreate } from '@/store/claudeChatSlice'
 import { getWsClient } from '@/lib/ws-client'
 import MessageBubble from './MessageBubble'
 import PermissionBanner from './PermissionBanner'
@@ -20,6 +20,10 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
   const ws = getWsClient()
   const createSentRef = useRef(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  // Keep a ref to the latest paneContent to avoid stale closures in effects
+  // while using only primitive deps for triggering.
+  const paneContentRef = useRef(paneContent)
+  paneContentRef.current = paneContent
 
   // Resolve pendingCreates -> pane sessionId
   const pendingSessionId = useAppSelector(
@@ -35,19 +39,28 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
     dispatch(updatePaneContent({
       tabId,
       paneId,
-      content: { ...paneContent, sessionId: pendingSessionId, status: 'starting' },
+      content: { ...paneContentRef.current, sessionId: pendingSessionId, status: 'starting' },
     }))
-  }, [pendingSessionId, paneContent, tabId, paneId, dispatch])
+    dispatch(clearPendingCreate({ requestId: paneContent.createRequestId }))
+  }, [pendingSessionId, paneContent.sessionId, paneContent.createRequestId, tabId, paneId, dispatch])
 
   // Update pane status from session state
+  const sessionStatus = session?.status
   useEffect(() => {
-    if (!session || session.status === paneContent.status) return
+    if (!sessionStatus || sessionStatus === paneContent.status) return
     dispatch(updatePaneContent({
       tabId,
       paneId,
-      content: { ...paneContent, status: session.status },
+      content: { ...paneContentRef.current, status: sessionStatus },
     }))
-  }, [session?.status, paneContent, tabId, paneId, dispatch])
+  }, [sessionStatus, paneContent.status, tabId, paneId, dispatch])
+
+  // Reset createSentRef when createRequestId changes
+  const prevCreateRequestIdRef = useRef(paneContent.createRequestId)
+  if (prevCreateRequestIdRef.current !== paneContent.createRequestId) {
+    prevCreateRequestIdRef.current = paneContent.createRequestId
+    createSentRef.current = false
+  }
 
   // Send sdk.create when the pane first mounts with a createRequestId but no sessionId
   useEffect(() => {

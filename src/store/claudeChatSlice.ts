@@ -170,6 +170,10 @@ const claudeChatSlice = createSlice({
       session.lastError = action.payload.message
     },
 
+    clearPendingCreate(state, action: PayloadAction<{ requestId: string }>) {
+      delete state.pendingCreates[action.payload.requestId]
+    },
+
     removeSession(state, action: PayloadAction<{ sessionId: string }>) {
       delete state.sessions[action.payload.sessionId]
     },
@@ -191,6 +195,7 @@ export const {
   sessionExited,
   replayHistory,
   sessionError,
+  clearPendingCreate,
   removeSession,
 } = claudeChatSlice.actions
 

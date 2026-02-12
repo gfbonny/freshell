@@ -14,6 +14,7 @@ import claudeChatReducer, {
   sessionExited,
   replayHistory,
   sessionError,
+  clearPendingCreate,
   removeSession,
 } from '../../../src/store/claudeChatSlice'
 
@@ -140,6 +141,13 @@ describe('claudeChatSlice', () => {
     let state = claudeChatReducer(initial, sessionCreated({ requestId: 'r', sessionId: 's1' }))
     state = claudeChatReducer(state, sessionError({ sessionId: 's1', message: 'CLI crashed' }))
     expect(state.sessions['s1'].lastError).toBe('CLI crashed')
+  })
+
+  it('clears a pendingCreates entry', () => {
+    let state = claudeChatReducer(initial, sessionCreated({ requestId: 'req-1', sessionId: 's1' }))
+    expect(state.pendingCreates['req-1']).toBe('s1')
+    state = claudeChatReducer(state, clearPendingCreate({ requestId: 'req-1' }))
+    expect(state.pendingCreates['req-1']).toBeUndefined()
   })
 
   it('removes a session', () => {

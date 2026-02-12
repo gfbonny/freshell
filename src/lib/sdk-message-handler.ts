@@ -1,4 +1,5 @@
 import type { AppDispatch } from '@/store/store'
+import type { ChatContentBlock } from '@/store/claudeChatTypes'
 import {
   sessionCreated,
   sessionInit,
@@ -42,7 +43,7 @@ export function handleSdkMessage(dispatch: AppDispatch, msg: Record<string, unkn
     case 'sdk.assistant':
       dispatch(addAssistantMessage({
         sessionId: msg.sessionId as string,
-        content: msg.content as any[],
+        content: msg.content as ChatContentBlock[],
         model: msg.model as string | undefined,
       }))
       return true
