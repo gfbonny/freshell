@@ -55,10 +55,30 @@ export type PickerPaneContent = {
   kind: 'picker'
 }
 
+/** SDK session statuses — richer than TerminalStatus to reflect Claude Code lifecycle */
+export type SdkSessionStatus = 'creating' | 'starting' | 'connected' | 'running' | 'idle' | 'compacting' | 'exited'
+
+/**
+ * Claude Web chat pane — rich chat UI powered by Claude Code SDK mode.
+ */
+export type ClaudeChatPaneContent = {
+  kind: 'claude-chat'
+  /** SDK session ID (undefined until created) */
+  sessionId?: string
+  /** Idempotency key for sdk.create */
+  createRequestId: string
+  /** Current status — uses SdkSessionStatus, not TerminalStatus */
+  status: SdkSessionStatus
+  /** Claude session to resume */
+  resumeSessionId?: string
+  /** Working directory */
+  initialCwd?: string
+}
+
 /**
  * Union type for all pane content types.
  */
-export type PaneContent = TerminalPaneContent | BrowserPaneContent | EditorPaneContent | PickerPaneContent
+export type PaneContent = TerminalPaneContent | BrowserPaneContent | EditorPaneContent | PickerPaneContent | ClaudeChatPaneContent
 
 /**
  * Input type for creating terminal panes.
@@ -79,7 +99,16 @@ export type EditorPaneInput = EditorPaneContent
  * Input type for splitPane/initLayout actions.
  * Accepts either full content or partial terminal input.
  */
-export type PaneContentInput = TerminalPaneInput | BrowserPaneContent | EditorPaneInput | PickerPaneContent
+/**
+ * Input type for Claude Chat panes.
+ * Lifecycle fields (createRequestId, status) are optional - reducer generates defaults.
+ */
+export type ClaudeChatPaneInput = Omit<ClaudeChatPaneContent, 'createRequestId' | 'status'> & {
+  createRequestId?: string
+  status?: SdkSessionStatus
+}
+
+export type PaneContentInput = TerminalPaneInput | BrowserPaneContent | EditorPaneInput | PickerPaneContent | ClaudeChatPaneInput
 
 /**
  * Recursive tree structure for pane layouts.

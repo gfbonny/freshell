@@ -29,7 +29,17 @@ function normalizeContent(input: PaneContentInput): PaneContent {
       initialCwd: input.initialCwd,
     }
   }
-  // Browser content passes through unchanged
+  if (input.kind === 'claude-chat') {
+    return {
+      kind: 'claude-chat',
+      sessionId: input.sessionId,
+      createRequestId: input.createRequestId || nanoid(),
+      status: input.status || 'creating',
+      resumeSessionId: input.resumeSessionId,
+      initialCwd: input.initialCwd,
+    }
+  }
+  // Browser/editor/picker content passes through unchanged
   return input
 }
 

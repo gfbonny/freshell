@@ -148,7 +148,7 @@ describe('PanePicker', () => {
       expect(screen.queryByRole('button', { name: 'Codex' })).not.toBeInTheDocument()
     })
 
-    it('renders options in correct order: CLIs, Editor, Browser, Shell', () => {
+    it('renders options in correct order: CLIs, Claude Web, Editor, Browser, Shell', () => {
       renderPicker({
         availableClis: { claude: true, codex: true },
         enabledProviders: ['claude', 'codex'],
@@ -157,9 +157,10 @@ describe('PanePicker', () => {
       const labels = buttons.map(b => b.getAttribute('aria-label'))
       expect(labels[0]).toBe('Claude')
       expect(labels[1]).toBe('Codex')
-      expect(labels[2]).toBe('Editor')
-      expect(labels[3]).toBe('Browser')
-      expect(labels[4]).toBe('Shell')
+      expect(labels[2]).toBe('Claude Web')
+      expect(labels[3]).toBe('Editor')
+      expect(labels[4]).toBe('Browser')
+      expect(labels[5]).toBe('Shell')
     })
 
     it('shows only non-CLI options when no CLIs are available', () => {

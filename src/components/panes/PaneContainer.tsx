@@ -8,6 +8,7 @@ import PaneDivider from './PaneDivider'
 import TerminalView from '../TerminalView'
 import BrowserPane from './BrowserPane'
 import EditorPane from './EditorPane'
+import ClaudeChatView from '../claude-chat/ClaudeChatView'
 import PanePicker, { type PanePickerType } from './PanePicker'
 import DirectoryPicker from './DirectoryPicker'
 import { getProviderLabel, isCodingCliProviderName } from '@/lib/coding-cli-utils'
@@ -176,6 +177,13 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
         dispatch(updateTab({ id: tabId, updates: { terminalId: undefined } }))
       }
     }
+    // Clean up SDK session if this pane has one
+    if (content.kind === 'claude-chat' && content.sessionId) {
+      ws.send({
+        type: 'sdk.kill',
+        sessionId: content.sessionId,
+      })
+    }
     dispatch(closePane({ tabId, paneId }))
   }, [dispatch, tabId, tabTerminalId, ws])
 
@@ -249,7 +257,11 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
   if (node.type === 'leaf') {
     const explicitTitle = paneTitles[node.id]
     const paneTitle = explicitTitle ?? derivePaneTitle(node.content)
-    const paneStatus = node.content.kind === 'terminal' ? node.content.status : 'running'
+    const paneStatus = node.content.kind === 'terminal'
+      ? node.content.status
+      : node.content.kind === 'claude-chat'
+        ? (node.content.status === 'exited' ? 'exited' : 'running')
+        : 'running'
     const isRenaming = renamingPaneId === node.id
     const paneProvider: CodingCliProviderName | undefined =
       node.content.kind === 'terminal'
@@ -363,9 +375,19 @@ function PickerWrapper({
   const [step, setStep] = useState<
     | { step: 'type' }
     | { step: 'directory'; providerType: CodingCliProviderName }
+    | { step: 'directory'; providerType: 'claude-web' }
   >({ step: 'type' })
 
   const createContentForType = useCallback((type: PanePickerType, cwd?: string): PaneContent => {
+    if (type === 'claude-web') {
+      return {
+        kind: 'claude-chat',
+        createRequestId: nanoid(),
+        status: 'creating',
+        ...(cwd ? { initialCwd: cwd } : {}),
+      }
+    }
+
     if (isCodingCliProviderName(type)) {
       return {
         kind: 'terminal',
@@ -431,6 +453,11 @@ function PickerWrapper({
   }, [])
 
   const handleSelect = useCallback((type: PanePickerType) => {
+    if (type === 'claude-web') {
+      setStep({ step: 'directory', providerType: 'claude-web' })
+      return
+    }
+
     if (isCodingCliProviderName(type)) {
       setStep({ step: 'directory', providerType: type })
       return
@@ -447,9 +474,11 @@ function PickerWrapper({
     const newContent = createContentForType(providerType, cwd)
     dispatch(updatePaneContent({ tabId, paneId, content: newContent }))
 
-    const existingProviderSettings = settings?.codingCli?.providers?.[providerType] || {}
+    // Save the selected directory for the provider (use 'claude' key for claude-web)
+    const settingsKey = providerType === 'claude-web' ? 'claude' : providerType
+    const existingProviderSettings = settings?.codingCli?.providers?.[settingsKey] || {}
     const patch = {
-      codingCli: { providers: { [providerType]: { ...existingProviderSettings, cwd } } },
+      codingCli: { providers: { [settingsKey]: { ...existingProviderSettings, cwd } } },
     }
     dispatch(updateSettingsLocal(patch as any))
     void api.patch('/api/settings', patch).catch((err) => {
@@ -463,8 +492,9 @@ function PickerWrapper({
 
   if (step.step === 'directory') {
     const providerType = step.providerType
-    const providerLabel = getProviderLabel(providerType)
-    const defaultCwd = settings?.codingCli?.providers?.[providerType]?.cwd
+    const providerLabel = providerType === 'claude-web' ? 'Claude Web' : getProviderLabel(providerType)
+    const settingsKey = providerType === 'claude-web' ? 'claude' : providerType
+    const defaultCwd = settings?.codingCli?.providers?.[settingsKey]?.cwd
     return (
       <DirectoryPicker
         providerType={providerType}
@@ -510,6 +540,10 @@ function renderContent(tabId: string, paneId: string, content: PaneContent, isOn
         viewMode={content.viewMode}
       />
     )
+  }
+
+  if (content.kind === 'claude-chat') {
+    return <ClaudeChatView key={paneId} tabId={tabId} paneId={paneId} paneContent={content} hidden={hidden} />
   }
 
   if (content.kind === 'picker') {

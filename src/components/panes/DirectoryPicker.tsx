@@ -5,7 +5,7 @@ import { fuzzyMatch } from '@/lib/fuzzy-match'
 import { cn } from '@/lib/utils'
 
 type DirectoryPickerProps = {
-  providerType: CodingCliProviderName
+  providerType: CodingCliProviderName | 'claude-web'
   providerLabel: string
   defaultCwd?: string
   onConfirm: (cwd: string) => void
