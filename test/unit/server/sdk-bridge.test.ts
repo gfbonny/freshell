@@ -60,6 +60,27 @@ describe('SdkBridge', () => {
       expect(bridge.killSession('nonexistent')).toBe(false)
     })
 
+    it('cleans up on spawn error and broadcasts sdk.error + sdk.exit', () => {
+      const session = bridge.createSession({ cwd: '/tmp' })
+      const sid = session.sessionId
+      const received: unknown[] = []
+      bridge.subscribe(sid, (msg) => received.push(msg))
+
+      // Simulate spawn error (e.g. CLI not found)
+      const sp = (bridge as any).processes.get(sid)
+      sp.proc.emit('error', new Error('spawn claude ENOENT'))
+
+      // Session should be cleaned up
+      expect(bridge.getSession(sid)).toBeUndefined()
+      expect(bridge.listSessions()).toHaveLength(0)
+
+      // Should have broadcast sdk.error then sdk.exit
+      expect(received).toHaveLength(2)
+      expect((received[0] as any).type).toBe('sdk.error')
+      expect((received[0] as any).message).toContain('spawn claude ENOENT')
+      expect((received[1] as any).type).toBe('sdk.exit')
+    })
+
     it('cleans up session and process maps on process exit', () => {
       const session = bridge.createSession({ cwd: '/tmp' })
       const sid = session.sessionId

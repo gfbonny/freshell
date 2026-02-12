@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from 'react'
 import type { ClaudeChatPaneContent } from '@/store/paneTypes'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { updatePaneContent } from '@/store/panesSlice'
-import { addUserMessage, clearPendingCreate } from '@/store/claudeChatSlice'
+import { addUserMessage, clearPendingCreate, removePermission } from '@/store/claudeChatSlice'
 import { getWsClient } from '@/lib/ws-client'
 import MessageBubble from './MessageBubble'
 import PermissionBanner from './PermissionBanner'
@@ -83,6 +83,25 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
     }))
   }, [paneContent.createRequestId, paneContent.sessionId, paneContent.status, tabId, paneId, dispatch, ws])
 
+  // Attach to existing session on mount (e.g. after page refresh with persisted pane)
+  const attachSentRef = useRef(false)
+  useEffect(() => {
+    if (!paneContent.sessionId || attachSentRef.current) return
+    // Only attach if we didn't just create this session ourselves
+    if (createSentRef.current) return
+
+    attachSentRef.current = true
+    ws.send({ type: 'sdk.attach', sessionId: paneContent.sessionId })
+  }, [paneContent.sessionId, ws])
+
+  // Re-attach on WS reconnect so server re-subscribes this client
+  useEffect(() => {
+    if (!paneContent.sessionId) return
+    return ws.onReconnect(() => {
+      ws.send({ type: 'sdk.attach', sessionId: paneContent.sessionId! })
+    })
+  }, [paneContent.sessionId, ws])
+
   // Auto-scroll on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -101,13 +120,15 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
 
   const handlePermissionAllow = useCallback((requestId: string) => {
     if (!paneContent.sessionId) return
+    dispatch(removePermission({ sessionId: paneContent.sessionId, requestId }))
     ws.send({ type: 'sdk.permission.respond', sessionId: paneContent.sessionId, requestId, behavior: 'allow' })
-  }, [paneContent.sessionId, ws])
+  }, [paneContent.sessionId, dispatch, ws])
 
   const handlePermissionDeny = useCallback((requestId: string) => {
     if (!paneContent.sessionId) return
+    dispatch(removePermission({ sessionId: paneContent.sessionId, requestId }))
     ws.send({ type: 'sdk.permission.respond', sessionId: paneContent.sessionId, requestId, behavior: 'deny' })
-  }, [paneContent.sessionId, ws])
+  }, [paneContent.sessionId, dispatch, ws])
 
   if (hidden) return null
 

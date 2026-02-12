@@ -22,12 +22,14 @@ import { nanoid } from 'nanoid'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
 import type { CodingCliProviderName } from '@/lib/coding-cli-types'
 import { updateSettingsLocal } from '@/store/settingsSlice'
+import { clearPendingCreate, removeSession } from '@/store/claudeChatSlice'
 import type { TerminalMetaRecord } from '@/store/terminalMetaSlice'
 
 // Stable empty object to avoid selector memoization issues
 const EMPTY_PANE_TITLES: Record<string, string> = {}
 const EMPTY_TERMINAL_META_BY_ID: Record<string, TerminalMetaRecord> = {}
 const EMPTY_ATTENTION_BY_PANE: Record<string, boolean> = {}
+const EMPTY_PENDING_CREATES: Record<string, string> = {}
 
 interface PaneContainerProps {
   tabId: string
@@ -112,6 +114,9 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
   const containerRef = useRef<HTMLDivElement>(null)
   const ws = useMemo(() => getWsClient(), [])
   const snapThreshold = useAppSelector((s) => s.settings?.settings?.panes?.snapThreshold ?? 2)
+  const sdkPendingCreates = useAppSelector(
+    (s) => s.claudeChat?.pendingCreates ?? EMPTY_PENDING_CREATES
+  )
 
   // Drag state for snapping: track the original size and accumulated delta
   const dragStartSizeRef = useRef<number>(0)
@@ -178,14 +183,19 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
       }
     }
     // Clean up SDK session if this pane has one
-    if (content.kind === 'claude-chat' && content.sessionId) {
-      ws.send({
-        type: 'sdk.kill',
-        sessionId: content.sessionId,
-      })
+    if (content.kind === 'claude-chat') {
+      const sessionId = content.sessionId || sdkPendingCreates[content.createRequestId]
+      if (sessionId) {
+        ws.send({ type: 'sdk.kill', sessionId })
+      }
+      // Clean up Redux state for orphaned pending creates
+      if (!content.sessionId && sdkPendingCreates[content.createRequestId]) {
+        dispatch(removeSession({ sessionId: sdkPendingCreates[content.createRequestId] }))
+        dispatch(clearPendingCreate({ requestId: content.createRequestId }))
+      }
     }
     dispatch(closePane({ tabId, paneId }))
-  }, [dispatch, tabId, tabTerminalId, ws])
+  }, [dispatch, tabId, tabTerminalId, ws, sdkPendingCreates])
 
   const handleFocus = useCallback((paneId: string) => {
     dispatch(setActivePane({ tabId, paneId }))

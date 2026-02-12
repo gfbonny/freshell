@@ -203,6 +203,20 @@ export class SdkBridge extends EventEmitter {
       stdio: ['ignore', 'pipe', 'pipe'],
     })
 
+    proc.on('error', (err) => {
+      log.error({ sessionId, err }, 'Failed to spawn Claude Code CLI')
+      const state = this.sessions.get(sessionId)
+      if (state) state.status = 'exited'
+      this.broadcastToSession(sessionId, {
+        type: 'sdk.error' as const,
+        sessionId,
+        message: `Failed to spawn CLI: ${err.message}`,
+      })
+      this.broadcastToSession(sessionId, { type: 'sdk.exit', sessionId, exitCode: undefined })
+      this.processes.delete(sessionId)
+      this.sessions.delete(sessionId)
+    })
+
     proc.stdout?.on('data', (data: Buffer) => {
       log.debug({ sessionId, stdout: data.toString().slice(0, 200) }, 'CLI stdout')
     })

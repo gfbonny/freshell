@@ -68,6 +68,7 @@ const ErrorCode = z.enum([
   'FILE_WATCHER_ERROR',
   'INTERNAL_ERROR',
   'RATE_LIMITED',
+  'UNAUTHORIZED',
 ])
 
 function nowIso() {
