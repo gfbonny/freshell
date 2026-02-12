@@ -1469,7 +1469,7 @@ export class WsHandler {
           return
         }
         try {
-          const session = this.sdkBridge.createSession({
+          const session = await this.sdkBridge.createSession({
             cwd: m.cwd,
             resumeSessionId: m.resumeSessionId,
             model: m.model,

@@ -33,15 +33,24 @@ export class SdkBridge extends EventEmitter {
   private sessions = new Map<string, SdkSessionState>()
   private processes = new Map<string, SessionProcess>()
   private port: number
+  /** Resolves once the internal WebSocketServer is listening and the port is known. */
+  private portReady: Promise<number>
 
   constructor(options: SdkBridgeOptions = {}) {
     super()
     this.port = options.port ?? 0
     this.wss = new WebSocketServer({ host: '127.0.0.1', port: this.port, path: '/ws/sdk' })
-    this.wss.on('listening', () => {
-      const addr = this.wss.address()
-      this.port = typeof addr === 'object' ? addr.port : this.port
-      log.info({ port: this.port }, 'SDK bridge WebSocket server listening')
+    this.portReady = new Promise<number>((resolve, reject) => {
+      this.wss.on('listening', () => {
+        const addr = this.wss.address()
+        this.port = typeof addr === 'object' && addr ? addr.port : this.port
+        log.info({ port: this.port }, 'SDK bridge WebSocket server listening')
+        resolve(this.port)
+      })
+      this.wss.on('error', (err) => {
+        log.error({ err }, 'SDK bridge WebSocket server failed to start')
+        reject(err)
+      })
     })
     this.wss.on('connection', (ws, req) => this.onCliConnection(ws, req))
   }
@@ -50,12 +59,13 @@ export class SdkBridge extends EventEmitter {
     return this.port
   }
 
-  createSession(options: {
+  async createSession(options: {
     cwd?: string
     resumeSessionId?: string
     model?: string
     permissionMode?: string
-  }): SdkSessionState {
+  }): Promise<SdkSessionState> {
+    await this.portReady
     const sessionId = nanoid()
     const state: SdkSessionState = {
       sessionId,

@@ -30,27 +30,27 @@ describe('SdkBridge', () => {
   })
 
   describe('session lifecycle', () => {
-    it('creates a session with unique ID', () => {
-      const session = bridge.createSession({ cwd: '/tmp' })
+    it('creates a session with unique ID', async () => {
+      const session = await bridge.createSession({ cwd: '/tmp' })
       expect(session.sessionId).toBeTruthy()
       expect(session.status).toBe('starting')
       expect(session.cwd).toBe('/tmp')
     })
 
-    it('lists active sessions', () => {
-      bridge.createSession({ cwd: '/tmp' })
-      bridge.createSession({ cwd: '/home' })
+    it('lists active sessions', async () => {
+      await bridge.createSession({ cwd: '/tmp' })
+      await bridge.createSession({ cwd: '/home' })
       expect(bridge.listSessions()).toHaveLength(2)
     })
 
-    it('gets session by ID', () => {
-      const session = bridge.createSession({ cwd: '/tmp' })
+    it('gets session by ID', async () => {
+      const session = await bridge.createSession({ cwd: '/tmp' })
       expect(bridge.getSession(session.sessionId)).toBeDefined()
       expect(bridge.getSession('nonexistent')).toBeUndefined()
     })
 
-    it('kills a session', () => {
-      const session = bridge.createSession({ cwd: '/tmp' })
+    it('kills a session', async () => {
+      const session = await bridge.createSession({ cwd: '/tmp' })
       const killed = bridge.killSession(session.sessionId)
       expect(killed).toBe(true)
       expect(bridge.getSession(session.sessionId)?.status).toBe('exited')
@@ -60,8 +60,8 @@ describe('SdkBridge', () => {
       expect(bridge.killSession('nonexistent')).toBe(false)
     })
 
-    it('cleans up on spawn error and broadcasts sdk.error + sdk.exit', () => {
-      const session = bridge.createSession({ cwd: '/tmp' })
+    it('cleans up on spawn error and broadcasts sdk.error + sdk.exit', async () => {
+      const session = await bridge.createSession({ cwd: '/tmp' })
       const sid = session.sessionId
       const received: unknown[] = []
       bridge.subscribe(sid, (msg) => received.push(msg))
@@ -81,8 +81,8 @@ describe('SdkBridge', () => {
       expect((received[1] as any).type).toBe('sdk.exit')
     })
 
-    it('cleans up session and process maps on process exit', () => {
-      const session = bridge.createSession({ cwd: '/tmp' })
+    it('cleans up session and process maps on process exit', async () => {
+      const session = await bridge.createSession({ cwd: '/tmp' })
       const sid = session.sessionId
       expect(bridge.getSession(sid)).toBeDefined()
       expect(bridge.listSessions()).toHaveLength(1)
@@ -98,8 +98,8 @@ describe('SdkBridge', () => {
   })
 
   describe('CLI message handling', () => {
-    it('processes a valid assistant message and stores it', () => {
-      const session = bridge.createSession({ cwd: '/tmp' })
+    it('processes a valid assistant message and stores it', async () => {
+      const session = await bridge.createSession({ cwd: '/tmp' })
       ;(bridge as any).handleCliMessage(session.sessionId, {
         type: 'assistant',
         message: { content: [{ type: 'text', text: 'hi' }] },
@@ -107,16 +107,16 @@ describe('SdkBridge', () => {
       expect(bridge.getSession(session.sessionId)?.messages).toHaveLength(1)
     })
 
-    it('ignores messages with unknown types gracefully', () => {
-      const session = bridge.createSession({ cwd: '/tmp' })
+    it('ignores messages with unknown types gracefully', async () => {
+      const session = await bridge.createSession({ cwd: '/tmp' })
       ;(bridge as any).handleCliMessage(session.sessionId, { type: 'bogus_unknown' })
       expect(bridge.getSession(session.sessionId)?.messages).toHaveLength(0)
     })
   })
 
   describe('message routing', () => {
-    it('stores assistant messages in session history', () => {
-      const session = bridge.createSession({ cwd: '/tmp' })
+    it('stores assistant messages in session history', async () => {
+      const session = await bridge.createSession({ cwd: '/tmp' })
       ;(bridge as any).handleCliMessage(session.sessionId, {
         type: 'assistant',
         message: {
@@ -129,8 +129,8 @@ describe('SdkBridge', () => {
       expect(state?.messages[0].role).toBe('assistant')
     })
 
-    it('tracks permission requests', () => {
-      const session = bridge.createSession({ cwd: '/tmp' })
+    it('tracks permission requests', async () => {
+      const session = await bridge.createSession({ cwd: '/tmp' })
       ;(bridge as any).handleCliMessage(session.sessionId, {
         type: 'control_request',
         id: 'perm-1',
@@ -142,8 +142,8 @@ describe('SdkBridge', () => {
       expect(state?.pendingPermissions.get('perm-1')).toBeDefined()
     })
 
-    it('updates session state on system/init', () => {
-      const session = bridge.createSession({ cwd: '/tmp' })
+    it('updates session state on system/init', async () => {
+      const session = await bridge.createSession({ cwd: '/tmp' })
       ;(bridge as any).handleCliMessage(session.sessionId, {
         type: 'system',
         subtype: 'init',
@@ -157,8 +157,8 @@ describe('SdkBridge', () => {
       expect(state?.status).toBe('connected')
     })
 
-    it('updates cost tracking on result', () => {
-      const session = bridge.createSession({ cwd: '/tmp' })
+    it('updates cost tracking on result', async () => {
+      const session = await bridge.createSession({ cwd: '/tmp' })
       ;(bridge as any).handleCliMessage(session.sessionId, {
         type: 'result',
         result: 'success',
@@ -170,8 +170,8 @@ describe('SdkBridge', () => {
       expect(state?.totalInputTokens).toBe(1000)
     })
 
-    it('broadcasts to subscribed listeners', () => {
-      const session = bridge.createSession({ cwd: '/tmp' })
+    it('broadcasts to subscribed listeners', async () => {
+      const session = await bridge.createSession({ cwd: '/tmp' })
       const received: unknown[] = []
       bridge.subscribe(session.sessionId, (msg) => received.push(msg))
 
@@ -184,8 +184,8 @@ describe('SdkBridge', () => {
       expect((received[0] as any).type).toBe('sdk.assistant')
     })
 
-    it('unsubscribe removes listener', () => {
-      const session = bridge.createSession({ cwd: '/tmp' })
+    it('unsubscribe removes listener', async () => {
+      const session = await bridge.createSession({ cwd: '/tmp' })
       const received: unknown[] = []
       const unsub = bridge.subscribe(session.sessionId, (msg) => received.push(msg))
 
@@ -204,8 +204,8 @@ describe('SdkBridge', () => {
       expect(unsub).toBeNull()
     })
 
-    it('emits message event on broadcast', () => {
-      const session = bridge.createSession({ cwd: '/tmp' })
+    it('emits message event on broadcast', async () => {
+      const session = await bridge.createSession({ cwd: '/tmp' })
       const emitted: unknown[] = []
       bridge.on('message', (_sid, msg) => emitted.push(msg))
 
@@ -218,8 +218,8 @@ describe('SdkBridge', () => {
       expect((emitted[0] as any).type).toBe('sdk.assistant')
     })
 
-    it('sets status to idle on result', () => {
-      const session = bridge.createSession({ cwd: '/tmp' })
+    it('sets status to idle on result', async () => {
+      const session = await bridge.createSession({ cwd: '/tmp' })
       ;(bridge as any).handleCliMessage(session.sessionId, {
         type: 'result',
         result: 'success',
@@ -227,8 +227,8 @@ describe('SdkBridge', () => {
       expect(bridge.getSession(session.sessionId)?.status).toBe('idle')
     })
 
-    it('accumulates cost_usd of 0 without skipping', () => {
-      const session = bridge.createSession({ cwd: '/tmp' })
+    it('accumulates cost_usd of 0 without skipping', async () => {
+      const session = await bridge.createSession({ cwd: '/tmp' })
       ;(bridge as any).handleCliMessage(session.sessionId, {
         type: 'result',
         result: 'success',
@@ -246,8 +246,8 @@ describe('SdkBridge', () => {
       expect(state?.totalInputTokens).toBe(1000)
     })
 
-    it('sets status to running on assistant message', () => {
-      const session = bridge.createSession({ cwd: '/tmp' })
+    it('sets status to running on assistant message', async () => {
+      const session = await bridge.createSession({ cwd: '/tmp' })
       ;(bridge as any).handleCliMessage(session.sessionId, {
         type: 'assistant',
         message: { content: [{ type: 'text', text: 'working...' }] },
@@ -255,8 +255,8 @@ describe('SdkBridge', () => {
       expect(bridge.getSession(session.sessionId)?.status).toBe('running')
     })
 
-    it('broadcasts stream events', () => {
-      const session = bridge.createSession({ cwd: '/tmp' })
+    it('broadcasts stream events', async () => {
+      const session = await bridge.createSession({ cwd: '/tmp' })
       const received: unknown[] = []
       bridge.subscribe(session.sessionId, (msg) => received.push(msg))
 
@@ -271,8 +271,8 @@ describe('SdkBridge', () => {
   })
 
   describe('sendUserMessage', () => {
-    it('stores user message in session history', () => {
-      const session = bridge.createSession({ cwd: '/tmp' })
+    it('stores user message in session history', async () => {
+      const session = await bridge.createSession({ cwd: '/tmp' })
       bridge.sendUserMessage(session.sessionId, 'hello')
       const state = bridge.getSession(session.sessionId)
       expect(state?.messages).toHaveLength(1)
@@ -285,8 +285,8 @@ describe('SdkBridge', () => {
   })
 
   describe('respondPermission', () => {
-    it('removes pending permission after response', () => {
-      const session = bridge.createSession({ cwd: '/tmp' })
+    it('removes pending permission after response', async () => {
+      const session = await bridge.createSession({ cwd: '/tmp' })
       ;(bridge as any).handleCliMessage(session.sessionId, {
         type: 'control_request',
         id: 'perm-1',
@@ -305,8 +305,8 @@ describe('SdkBridge', () => {
       expect(bridge.interrupt('nonexistent')).toBe(false)
     })
 
-    it('queues interrupt message for existing session', () => {
-      const session = bridge.createSession({ cwd: '/tmp' })
+    it('queues interrupt message for existing session', async () => {
+      const session = await bridge.createSession({ cwd: '/tmp' })
       expect(bridge.interrupt(session.sessionId)).toBe(true)
     })
   })
