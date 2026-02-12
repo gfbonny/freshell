@@ -36,6 +36,7 @@ import { Wifi, WifiOff, Moon, Sun, Share2, X, Copy, Check, PanelLeftClose, Panel
 import { updateSettingsLocal, markSaved } from '@/store/settingsSlice'
 import { clearIdleWarning, recordIdleWarning } from '@/store/idleWarningsSlice'
 import { setTerminalMetaSnapshot, upsertTerminalMeta, removeTerminalMeta } from '@/store/terminalMetaSlice'
+import { handleSdkMessage } from '@/lib/sdk-message-handler'
 
 const SIDEBAR_MIN_WIDTH = 200
 const SIDEBAR_MAX_WIDTH = 500
@@ -328,6 +329,9 @@ export default function App() {
         if (msg.type === 'perf.logging') {
           setClientPerfEnabled(!!msg.enabled, 'server')
         }
+
+        // SDK message handling (Claude Web pane)
+        handleSdkMessage(dispatch, msg)
       })
 
       cleanup = () => {
