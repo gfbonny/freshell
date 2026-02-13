@@ -18,6 +18,7 @@ Freshell is a self-hosted, browser-accessible terminal multiplexer and session o
 - Server uses NodeNext/ESM; relative imports must include `.js` extensions
 - Always consider checking logs for debugging; server logs (including client console logs) are in the server process stdout/stderr (e.g., `npm run dev`/`npm start`).
 - Debug logging toggle (UI Settings → Debugging → Debug logging) enables debug-level logs and perf logging; keep OFF outside perf investigations.
+- When adding new user-facing features or making significant UI changes, update the landing page at `docs/index.html` (served at freshell.net) to reflect them.
 
 ## Merging to Main (CRITICAL - Read This)
 
