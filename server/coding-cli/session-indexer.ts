@@ -252,6 +252,17 @@ export class CodingCliSessionIndexer {
     const delay = Math.max(this.debounceMs, this.throttleMs - elapsed)
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = null
+      // Re-check throttle at fire-time: an in-flight refresh may have completed
+      // since scheduling, updating lastRefreshAt. Without this, a timer scheduled
+      // during an in-flight refresh would fire too soon after it completes.
+      const fireElapsed = Date.now() - this.lastRefreshAt
+      if (this.throttleMs > 0 && fireElapsed < this.throttleMs) {
+        this.refreshTimer = setTimeout(() => {
+          this.refreshTimer = null
+          this.refresh().catch((err) => logger.warn({ err }, 'Refresh failed'))
+        }, this.throttleMs - fireElapsed)
+        return
+      }
       this.refresh().catch((err) => logger.warn({ err }, 'Refresh failed'))
     }, delay)
   }

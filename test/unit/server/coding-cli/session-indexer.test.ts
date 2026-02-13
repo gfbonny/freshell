@@ -469,6 +469,56 @@ describe('CodingCliSessionIndexer', () => {
       }
     })
 
+    it('applies full throttle delay when scheduleRefresh is called during in-flight refresh', async () => {
+      vi.useFakeTimers()
+      try {
+        const fileA = path.join(tempDir, 'session-a.jsonl')
+        await fsp.writeFile(fileA, JSON.stringify({ cwd: '/project/a', title: 'Title A' }) + '\n')
+
+        const snapshotMock = vi.mocked(configStore.snapshot)
+        const refreshDeferred = createDeferred<ReturnType<typeof configStore.snapshot>>()
+
+        const provider = makeProvider([fileA])
+        const indexer = new CodingCliSessionIndexer([provider], { debounceMs: 100, throttleMs: 2000 })
+
+        // t=0: Initial refresh completes, lastRefreshAt=0
+        await indexer.refresh()
+
+        // t=0: Start a slow in-flight refresh by making snapshot hang
+        snapshotMock.mockReturnValueOnce(refreshDeferred.promise)
+        const inflightPromise = indexer.refresh()
+
+        // t=0: While refresh is in-flight, schedule another refresh.
+        // BUG: scheduleRefresh sees lastRefreshAt=0, elapsed=0, sets timer for 2000ms.
+        indexer.scheduleRefresh()
+
+        // t=1500: Advance time, then complete the in-flight refresh.
+        // In-flight completes at t=1500, so lastRefreshAt=1500.
+        await vi.advanceTimersByTimeAsync(1500)
+        refreshDeferred.resolve({
+          sessionOverrides: {},
+          settings: { codingCli: { enabledProviders: ['claude'], providers: {} } },
+        })
+        await inflightPromise
+
+        const callsAfterInflight = snapshotMock.mock.calls.length
+
+        // t=2000: The buggy timer fires (set at t=0 for 2000ms).
+        // That's only 500ms after in-flight completed at t=1500 — violates 2000ms throttle.
+        // With the fix, the timer should not fire until at least t=3500 (1500 + 2000).
+        await vi.advanceTimersByTimeAsync(500)
+        // Should NOT have refreshed — only 500ms since last completed refresh
+        expect(snapshotMock).toHaveBeenCalledTimes(callsAfterInflight)
+
+        // t=3500: Advance past throttle from in-flight completion
+        await vi.advanceTimersByTimeAsync(1600)
+        // NOW should have refreshed
+        expect(snapshotMock).toHaveBeenCalledTimes(callsAfterInflight + 1)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
     it('debounce resets on repeated scheduleRefresh calls', async () => {
       vi.useFakeTimers()
       try {
