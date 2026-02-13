@@ -690,7 +690,10 @@ function animateTerminal(containerId, lines, callback) {
     if (existing) existing.remove();
     const c = document.createElement('span');
     c.className = 'term-cursor';
-    el.appendChild(c);
+    // Append cursor inside the last term-line so it sits next to the prompt
+    const lastLine = el.querySelector('.term-line:last-of-type');
+    if (lastLine) lastLine.appendChild(c);
+    else el.appendChild(c);
     el.scrollTop = el.scrollHeight;
   }
 
@@ -757,6 +760,8 @@ const content = {
     { html: '', delay: 300 },
     { html: '  <span class="t-dim">Your coding CLIs, organized in the browser.</span>', delay: 80 },
     { html: '  <span class="t-dim">GitHub:</span> <a href="https://github.com/danshapiro/freshell" target="_blank" class="t-blue">https://github.com/danshapiro/freshell</a>', delay: 80 },
+    { html: '' },
+    { html: '  <span class="t-dim">Try the tabs at the top to learn more.</span>', delay: 80 },
     { html: '' },
     { typed: true, prompt: FP, command: '', delay: 0 },
   ],
