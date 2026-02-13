@@ -8,6 +8,7 @@ import reducer, {
   recordTurnComplete,
   type TurnCompletionState,
 } from '@/store/turnCompletionSlice'
+import { closePane, removeLayout } from '@/store/panesSlice'
 
 describe('turnCompletionSlice', () => {
   it('records latest event with sequence id', () => {
@@ -111,5 +112,46 @@ describe('turnCompletionSlice', () => {
     // Should return exact same state reference — no draft modification
     const next = reducer(state, clearPaneAttention({ paneId: 'pane-1' }))
     expect(next).toBe(state)
+  })
+
+  describe('extraReducers — pane/tab close cleanup', () => {
+    function stateWithAttention(overrides?: Partial<TurnCompletionState>): TurnCompletionState {
+      return {
+        seq: 0,
+        lastEvent: null,
+        pendingEvents: [],
+        attentionByTab: { 'tab-1': true },
+        attentionByPane: { 'pane-1': true },
+        ...overrides,
+      }
+    }
+
+    it('closePane clears both pane and tab attention', () => {
+      const state = stateWithAttention()
+      const next = reducer(state, closePane({ tabId: 'tab-1', paneId: 'pane-1' }))
+      expect(next.attentionByTab['tab-1']).toBeUndefined()
+      expect(next.attentionByPane['pane-1']).toBeUndefined()
+    })
+
+    it('closePane on a pane without attention is a no-op', () => {
+      const state = stateWithAttention()
+      const next = reducer(state, closePane({ tabId: 'tab-2', paneId: 'pane-99' }))
+      // Existing attention for tab-1/pane-1 is untouched
+      expect(next.attentionByTab['tab-1']).toBe(true)
+      expect(next.attentionByPane['pane-1']).toBe(true)
+    })
+
+    it('removeLayout clears tab attention', () => {
+      const state = stateWithAttention()
+      const next = reducer(state, removeLayout({ tabId: 'tab-1' }))
+      expect(next.attentionByTab['tab-1']).toBeUndefined()
+      // Pane entries are orphaned but not cleared (no tab→pane mapping in this slice)
+    })
+
+    it('removeLayout on a tab without attention is a no-op', () => {
+      const state = stateWithAttention()
+      const next = reducer(state, removeLayout({ tabId: 'tab-99' }))
+      expect(next.attentionByTab['tab-1']).toBe(true)
+    })
   })
 })
