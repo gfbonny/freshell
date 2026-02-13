@@ -3,8 +3,10 @@ import { Terminal, History, Settings, LayoutGrid, Search, Loader2, X, Archive } 
 import { List, type RowComponentProps } from 'react-window'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
-import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { openSessionTab } from '@/store/tabsSlice'
+import { useAppDispatch, useAppSelector, useAppStore } from '@/store/hooks'
+import { openSessionTab, setActiveTab } from '@/store/tabsSlice'
+import { addPane, setActivePane } from '@/store/panesSlice'
+import { findPaneForSession } from '@/lib/session-utils'
 import { getWsClient } from '@/lib/ws-client'
 import { searchSessions, type SearchResult } from '@/lib/api'
 import { getProviderLabel } from '@/lib/coding-cli-utils'
@@ -50,6 +52,7 @@ export default function Sidebar({
   width?: number
 }) {
   const dispatch = useAppDispatch()
+  const store = useAppStore()
   const settings = useAppSelector((s) => s.settings.settings)
   const tabs = useAppSelector((s) => s.tabs.tabs)
   const activeTabId = useAppSelector((s) => s.tabs.activeTabId)
@@ -201,15 +204,48 @@ export default function Sidebar({
 
   const handleItemClick = useCallback((item: SessionItem) => {
     const provider = item.provider as CodingCliProviderName
-    dispatch(openSessionTab({
-      sessionId: item.sessionId,
-      title: item.title,
-      cwd: item.cwd,
-      provider,
-      terminalId: item.isRunning ? item.runningTerminalId : undefined,
+    const state = store.getState()
+    const runningTerminalId = item.isRunning ? item.runningTerminalId : undefined
+
+    // 1. Dedup: if session is already open in a pane, focus it
+    const existing = findPaneForSession(state, provider, item.sessionId)
+    if (existing) {
+      dispatch(setActiveTab(existing.tabId))
+      if (existing.paneId) {
+        dispatch(setActivePane({ tabId: existing.tabId, paneId: existing.paneId }))
+      }
+      onNavigate('terminal')
+      return
+    }
+
+    // 2. Fallback: no active tab or active tab has no layout → create new tab
+    const activeLayout = activeTabId ? state.panes.layouts[activeTabId] : undefined
+    if (!activeTabId || !activeLayout) {
+      dispatch(openSessionTab({
+        sessionId: item.sessionId,
+        title: item.title,
+        cwd: item.cwd,
+        provider,
+        terminalId: runningTerminalId,
+      }))
+      onNavigate('terminal')
+      return
+    }
+
+    // 3. Normal: split a new pane in the current tab
+    dispatch(addPane({
+      tabId: activeTabId,
+      newContent: {
+        kind: 'terminal',
+        mode: provider,
+        resumeSessionId: item.sessionId,
+        initialCwd: item.cwd,
+        terminalId: runningTerminalId,
+        status: runningTerminalId ? 'running' : 'creating',
+      },
     }))
     onNavigate('terminal')
-  }, [dispatch, onNavigate])
+  }, [dispatch, onNavigate, activeTabId, store])
 
   const nav = [
     { id: 'terminal' as const, label: 'Terminal', icon: Terminal, shortcut: 'T' },
