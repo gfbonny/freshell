@@ -22,6 +22,7 @@ import { nanoid } from 'nanoid'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
 import type { CodingCliProviderName } from '@/lib/coding-cli-types'
 import { updateSettingsLocal } from '@/store/settingsSlice'
+import { clearPaneAttention, clearTabAttention } from '@/store/turnCompletionSlice'
 import { clearPendingCreate, removeSession } from '@/store/claudeChatSlice'
 import { cancelCreate } from '@/lib/sdk-message-handler'
 import type { TerminalMetaRecord } from '@/store/terminalMetaSlice'
@@ -111,6 +112,9 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
   )
   const tabAttentionStyle = useAppSelector(
     (s) => s.settings?.settings?.panes?.tabAttentionStyle ?? 'highlight'
+  )
+  const attentionDismiss = useAppSelector(
+    (s) => s.settings?.settings?.panes?.attentionDismiss ?? 'click'
   )
   const containerRef = useRef<HTMLDivElement>(null)
   const ws = useMemo(() => getWsClient(), [])
@@ -203,8 +207,12 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
   }, [dispatch, tabId, tabTerminalId, ws, sdkPendingCreates])
 
   const handleFocus = useCallback((paneId: string) => {
+    if (attentionDismiss === 'click' && attentionByPane[paneId]) {
+      dispatch(clearPaneAttention({ paneId }))
+      dispatch(clearTabAttention({ tabId }))
+    }
     dispatch(setActivePane({ tabId, paneId }))
-  }, [dispatch, tabId])
+  }, [dispatch, tabId, attentionDismiss, attentionByPane])
 
   const handleToggleZoom = useCallback((paneId: string) => {
     dispatch(toggleZoom({ tabId, paneId }))
