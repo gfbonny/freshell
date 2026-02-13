@@ -417,6 +417,41 @@ describe('terminal.create session repair wait', () => {
     }
   })
 
+  it('does not create terminal if client disconnects during repair wait', async () => {
+    sessionRepairService.waitForSessionDelay = 500
+
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`)
+
+    try {
+      await new Promise<void>((resolve) => ws.on('open', () => resolve()))
+      ws.send(JSON.stringify({ type: 'hello', token: 'testtoken-testtoken' }))
+      await waitForMessage(ws, (m) => m.type === 'ready')
+
+      const requestId = 'resume-disconnect-1'
+      ws.send(JSON.stringify({
+        type: 'terminal.create',
+        requestId,
+        mode: 'claude',
+        resumeSessionId: VALID_SESSION_ID,
+      }))
+
+      // Close the socket while repair is in progress
+      await new Promise(r => setTimeout(r, 50))
+      ws.close()
+      await new Promise<void>((resolve) => ws.once('close', () => resolve()))
+
+      // Wait for repair to complete
+      await new Promise(r => setTimeout(r, 600))
+
+      // No terminal should have been created
+      expect(registry.records.size).toBe(0)
+    } finally {
+      if (ws.readyState !== WebSocket.CLOSED) {
+        await closeWebSocket(ws)
+      }
+    }
+  })
+
   it('ignores invalid resumeSessionId and skips session repair wait', async () => {
     const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`)
 

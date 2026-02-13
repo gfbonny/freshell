@@ -1132,7 +1132,7 @@ export class WsHandler {
             }
             state.terminalCreateTimestamps.push(now)
           }
-          // Kick off session repair without blocking terminal creation.
+          // Resolve session repair before terminal creation.
           let effectiveResumeSessionId = m.resumeSessionId
           if (m.mode === 'claude' && effectiveResumeSessionId && !isValidClaudeSessionId(effectiveResumeSessionId)) {
             log.warn({ resumeSessionId: effectiveResumeSessionId, connectionId: ws.connectionId }, 'Ignoring invalid Claude resumeSessionId')
@@ -1190,6 +1190,16 @@ export class WsHandler {
                 log.debug({ err, sessionId, connectionId: ws.connectionId }, 'Session repair wait failed, proceeding with resume')
               }
             }
+          }
+
+          // After async repair wait, check if the client disconnected
+          if (ws.readyState !== WebSocket.OPEN) {
+            log.debug({ connectionId: ws.connectionId, requestId: m.requestId },
+              'Client disconnected during session repair wait, aborting terminal.create')
+            if (state.createdByRequestId.get(m.requestId) === REPAIR_PENDING_SENTINEL) {
+              state.createdByRequestId.delete(m.requestId)
+            }
+            return
           }
 
           const record = this.registry.create({
