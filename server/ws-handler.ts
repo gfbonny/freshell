@@ -37,6 +37,8 @@ const ATTACH_FRAME_SEND_TIMEOUT_MS = Number(process.env.WS_ATTACH_FRAME_SEND_TIM
 // Rate limit: max terminal.create requests per client within a sliding window
 const TERMINAL_CREATE_RATE_LIMIT = Number(process.env.TERMINAL_CREATE_RATE_LIMIT || 10)
 const TERMINAL_CREATE_RATE_WINDOW_MS = Number(process.env.TERMINAL_CREATE_RATE_WINDOW_MS || 10_000)
+/** Sentinel value reserved in createdByRequestId while awaiting async session repair */
+const REPAIR_PENDING_SENTINEL = '__repair_pending__'
 
 const log = logger.child({ component: 'ws' })
 const perfConfig = getPerfConfig()
@@ -1089,6 +1091,11 @@ export class WsHandler {
         try {
           const existingId = state.createdByRequestId.get(m.requestId)
           if (existingId) {
+            if (existingId === REPAIR_PENDING_SENTINEL) {
+              log.debug({ requestId: m.requestId, connectionId: ws.connectionId },
+                'terminal.create already in progress (repair pending), ignoring duplicate')
+              return
+            }
             const existing = this.registry.get(existingId)
             if (existing) {
               this.registry.attach(existingId, ws, { pendingSnapshot: true })
@@ -1164,22 +1171,24 @@ export class WsHandler {
               log.info({ sessionId, connectionId: ws.connectionId }, 'Session previously marked missing; resume will start fresh')
               effectiveResumeSessionId = undefined
             } else {
+              // Reserve requestId to prevent duplicate creates during async repair wait
+              state.createdByRequestId.set(m.requestId, REPAIR_PENDING_SENTINEL)
               const endRepairTimer = startPerfTimer(
                 'terminal_create_repair_wait',
                 { connectionId: ws.connectionId, sessionId },
                 { minDurationMs: perfConfig.slowTerminalCreateMs, level: 'warn' },
               )
-              void this.sessionRepairService.waitForSession(sessionId, 10000)
-                .then((result) => {
-                  endRepairTimer({ status: result.status })
-                  if (result.status === 'missing') {
-                    log.info({ sessionId, connectionId: ws.connectionId }, 'Session file missing; resume may start fresh')
-                  }
-                })
-                .catch((err) => {
-                  endRepairTimer({ error: err instanceof Error ? err.message : String(err) })
-                  log.debug({ err, sessionId, connectionId: ws.connectionId }, 'Session repair wait failed, proceeding')
-                })
+              try {
+                const result = await this.sessionRepairService.waitForSession(sessionId, 10000)
+                endRepairTimer({ status: result.status })
+                if (result.status === 'missing') {
+                  log.info({ sessionId, connectionId: ws.connectionId }, 'Session file missing; resume will start fresh')
+                  effectiveResumeSessionId = undefined
+                }
+              } catch (err) {
+                endRepairTimer({ error: err instanceof Error ? err.message : String(err) })
+                log.debug({ err, sessionId, connectionId: ws.connectionId }, 'Session repair wait failed, proceeding with resume')
+              }
             }
           }
 
@@ -1218,6 +1227,10 @@ export class WsHandler {
           this.broadcast({ type: 'terminal.list.updated' })
         } catch (err: any) {
           error = true
+          // Clean up repair sentinel if terminal creation failed
+          if (state.createdByRequestId.get(m.requestId) === REPAIR_PENDING_SENTINEL) {
+            state.createdByRequestId.delete(m.requestId)
+          }
           log.warn({ err, connectionId: ws.connectionId }, 'terminal.create failed')
           this.sendError(ws, {
             code: 'PTY_SPAWN_FAILED',

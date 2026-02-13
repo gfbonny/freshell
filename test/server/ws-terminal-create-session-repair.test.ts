@@ -157,6 +157,9 @@ class FakeRegistry {
 class FakeSessionRepairService extends EventEmitter {
   waitForSessionCalls: string[] = []
   result: SessionScanResult | undefined
+  waitForSessionResult: SessionScanResult | undefined
+  waitForSessionDelay: number = 0
+  waitForSessionShouldThrow: boolean = false
 
   prioritizeSessions() {}
 
@@ -164,9 +167,27 @@ class FakeSessionRepairService extends EventEmitter {
     return this.result
   }
 
-  waitForSession(sessionId: string): Promise<SessionScanResult> {
+  async waitForSession(sessionId: string, _timeoutMs?: number): Promise<SessionScanResult> {
     this.waitForSessionCalls.push(sessionId)
-    return new Promise<SessionScanResult>(() => {})
+    if (this.waitForSessionDelay > 0) {
+      await new Promise(r => setTimeout(r, this.waitForSessionDelay))
+    }
+    if (this.waitForSessionShouldThrow) {
+      throw new Error('Timeout')
+    }
+    if (this.waitForSessionResult) {
+      return this.waitForSessionResult
+    }
+    // Default: resolve as healthy
+    return {
+      sessionId,
+      filePath: `/tmp/${sessionId}.jsonl`,
+      status: 'healthy',
+      chainDepth: 10,
+      orphanCount: 0,
+      fileSize: 1024,
+      messageCount: 10,
+    }
   }
 }
 
@@ -198,6 +219,9 @@ describe('terminal.create session repair wait', () => {
   beforeEach(() => {
     sessionRepairService.waitForSessionCalls = []
     sessionRepairService.result = undefined
+    sessionRepairService.waitForSessionResult = undefined
+    sessionRepairService.waitForSessionDelay = 0
+    sessionRepairService.waitForSessionShouldThrow = false
     registry.records.clear()
     registry.lastCreateOpts = null
   })
@@ -207,7 +231,9 @@ describe('terminal.create session repair wait', () => {
     await new Promise<void>((resolve) => server.close(() => resolve()))
   }, HOOK_TIMEOUT_MS)
 
-  it('does not block terminal.create while session repair runs', async () => {
+  it('blocks terminal.create until session repair completes', async () => {
+    sessionRepairService.waitForSessionDelay = 100
+
     const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`)
 
     try {
@@ -226,6 +252,7 @@ describe('terminal.create session repair wait', () => {
       const created = await waitForMessage(
         ws,
         (m) => m.type === 'terminal.created' && m.requestId === requestId,
+        3000,
       )
 
       expect(created.terminalId).toMatch(/^term_/)
@@ -273,6 +300,120 @@ describe('terminal.create session repair wait', () => {
     } finally {
       await closeWebSocket(ws)
       sessionRepairService.result = undefined
+    }
+  })
+
+  it('drops resumeSessionId when repair resolves as missing', async () => {
+    sessionRepairService.waitForSessionResult = {
+      sessionId: VALID_SESSION_ID,
+      filePath: `/tmp/${VALID_SESSION_ID}.jsonl`,
+      status: 'missing',
+      chainDepth: 0,
+      orphanCount: 0,
+      fileSize: 0,
+      messageCount: 0,
+    }
+
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`)
+
+    try {
+      await new Promise<void>((resolve) => ws.on('open', () => resolve()))
+      ws.send(JSON.stringify({ type: 'hello', token: 'testtoken-testtoken' }))
+      await waitForMessage(ws, (m) => m.type === 'ready')
+
+      const requestId = 'resume-repair-missing-1'
+      ws.send(JSON.stringify({
+        type: 'terminal.create',
+        requestId,
+        mode: 'claude',
+        resumeSessionId: VALID_SESSION_ID,
+      }))
+
+      const created = await waitForMessage(
+        ws,
+        (m) => m.type === 'terminal.created' && m.requestId === requestId,
+      )
+
+      expect(registry.lastCreateOpts?.resumeSessionId).toBeUndefined()
+      expect(created.effectiveResumeSessionId).toBeUndefined()
+    } finally {
+      await closeWebSocket(ws)
+    }
+  })
+
+  it('proceeds with resume when repair wait throws (timeout)', async () => {
+    sessionRepairService.waitForSessionShouldThrow = true
+
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`)
+
+    try {
+      await new Promise<void>((resolve) => ws.on('open', () => resolve()))
+      ws.send(JSON.stringify({ type: 'hello', token: 'testtoken-testtoken' }))
+      await waitForMessage(ws, (m) => m.type === 'ready')
+
+      const requestId = 'resume-timeout-1'
+      ws.send(JSON.stringify({
+        type: 'terminal.create',
+        requestId,
+        mode: 'claude',
+        resumeSessionId: VALID_SESSION_ID,
+      }))
+
+      const created = await waitForMessage(
+        ws,
+        (m) => m.type === 'terminal.created' && m.requestId === requestId,
+        3000,
+      )
+
+      // Should still create with the resumeSessionId (repair failed, but we proceed)
+      expect(created.terminalId).toMatch(/^term_/)
+      expect(created.effectiveResumeSessionId).toBe(VALID_SESSION_ID)
+    } finally {
+      await closeWebSocket(ws)
+    }
+  })
+
+  it('prevents duplicate terminal creation during async repair wait', async () => {
+    sessionRepairService.waitForSessionDelay = 300
+
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`)
+
+    try {
+      await new Promise<void>((resolve) => ws.on('open', () => resolve()))
+      ws.send(JSON.stringify({ type: 'hello', token: 'testtoken-testtoken' }))
+      await waitForMessage(ws, (m) => m.type === 'ready')
+
+      const requestId = 'resume-dup-1'
+
+      // Send two creates with the same requestId in quick succession
+      ws.send(JSON.stringify({
+        type: 'terminal.create',
+        requestId,
+        mode: 'claude',
+        resumeSessionId: VALID_SESSION_ID,
+      }))
+      ws.send(JSON.stringify({
+        type: 'terminal.create',
+        requestId,
+        mode: 'claude',
+        resumeSessionId: VALID_SESSION_ID,
+      }))
+
+      const created = await waitForMessage(
+        ws,
+        (m) => m.type === 'terminal.created' && m.requestId === requestId,
+        3000,
+      )
+
+      expect(created.terminalId).toMatch(/^term_/)
+
+      // Wait a bit to ensure no second terminal.created arrives
+      await new Promise(r => setTimeout(r, 500))
+
+      // Only one terminal should have been created
+      expect(registry.records.size).toBe(1)
+    } finally {
+      await closeWebSocket(ws)
     }
   })
 
