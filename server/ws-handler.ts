@@ -1481,6 +1481,19 @@ export class WsHandler {
           // before any buffered messages (sdk.session.init, sdk.error) arrive.
           this.send(ws, { type: 'sdk.created', requestId: m.requestId, sessionId: session.sessionId })
 
+          // Send preliminary sdk.session.init so the client can start interacting.
+          // The SDK subprocess only emits system/init after the first user message,
+          // which deadlocks with the UI waiting for init before showing the input.
+          // This breaks the deadlock using the info we already have from create options.
+          // When system/init arrives (after first user message), session info updates.
+          this.send(ws, {
+            type: 'sdk.session.init',
+            sessionId: session.sessionId,
+            model: session.model,
+            cwd: session.cwd,
+            tools: [],
+          })
+
           // Subscribe this client to session events (replays buffered messages)
           const off = this.sdkBridge.subscribe(session.sessionId, (msg: SdkServerMessage) => {
             this.safeSend(ws, msg)

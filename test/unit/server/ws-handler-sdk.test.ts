@@ -479,6 +479,49 @@ describe('WS Handler SDK Integration', () => {
       }
     })
 
+    it('sends preliminary sdk.session.init to break init deadlock', async () => {
+      // The SDK subprocess only emits system/init after the first user message,
+      // but the UI waits for sdk.session.init before showing the chat input.
+      // The ws-handler must send a preliminary sdk.session.init immediately
+      // after sdk.created so the client can start interacting.
+      mockSdkBridge.createSession = vi.fn().mockReturnValue({
+        sessionId: 'sdk-sess-1',
+        status: 'starting',
+        model: 'claude-sonnet-4-5-20250929',
+        cwd: '/tmp/project',
+        messages: [],
+      })
+
+      const ws = await connectAndAuth()
+      try {
+        const received: any[] = []
+        ws.on('message', (data: WebSocket.RawData) => {
+          const parsed = JSON.parse(data.toString())
+          if (parsed.type === 'sdk.created' || parsed.type === 'sdk.session.init') {
+            received.push(parsed)
+          }
+        })
+
+        ws.send(JSON.stringify({
+          type: 'sdk.create',
+          requestId: 'req-init',
+          cwd: '/tmp/project',
+          model: 'claude-sonnet-4-5-20250929',
+        }))
+
+        await vi.waitFor(() => expect(received.length).toBeGreaterThanOrEqual(2), { timeout: 3000 })
+
+        expect(received[0].type).toBe('sdk.created')
+        expect(received[1].type).toBe('sdk.session.init')
+        expect(received[1].sessionId).toBe('sdk-sess-1')
+        expect(received[1].model).toBe('claude-sonnet-4-5-20250929')
+        expect(received[1].cwd).toBe('/tmp/project')
+        expect(received[1].tools).toEqual([])
+      } finally {
+        ws.close()
+      }
+    })
+
     it('returns error for sdk.send with unowned session', async () => {
       const ws = await connectAndAuth()
       try {
