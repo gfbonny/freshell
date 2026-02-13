@@ -403,6 +403,101 @@ describe('CodingCliSessionIndexer', () => {
     expect(vi.mocked(configStore.snapshot)).toHaveBeenCalledTimes(2)
   })
 
+  describe('scheduleRefresh debounce and throttle', () => {
+    it('uses configurable debounce delay before triggering refresh', async () => {
+      vi.useFakeTimers()
+      try {
+        const fileA = path.join(tempDir, 'session-a.jsonl')
+        await fsp.writeFile(fileA, JSON.stringify({ cwd: '/project/a', title: 'Title A' }) + '\n')
+
+        const provider = makeProvider([fileA])
+        const snapshotMock = vi.mocked(configStore.snapshot)
+
+        const indexer = new CodingCliSessionIndexer([provider], { debounceMs: 500, throttleMs: 0 })
+        // Do initial refresh to populate cache
+        await indexer.refresh()
+        const callsAfterInitial = snapshotMock.mock.calls.length
+
+        // Trigger a scheduled refresh (simulates file watcher event)
+        indexer.scheduleRefresh()
+
+        // Advance past the old hardcoded debounce (250ms) but not our configured one (500ms)
+        await vi.advanceTimersByTimeAsync(300)
+        // Should NOT have refreshed yet — still within debounce window
+        expect(snapshotMock).toHaveBeenCalledTimes(callsAfterInitial)
+
+        // Advance past the 500ms debounce
+        await vi.advanceTimersByTimeAsync(250)
+        // NOW should have refreshed
+        expect(snapshotMock).toHaveBeenCalledTimes(callsAfterInitial + 1)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('throttles scheduled refreshes to minimum interval after last refresh', async () => {
+      vi.useFakeTimers()
+      try {
+        const fileA = path.join(tempDir, 'session-a.jsonl')
+        await fsp.writeFile(fileA, JSON.stringify({ cwd: '/project/a', title: 'Title A' }) + '\n')
+
+        const snapshotMock = vi.mocked(configStore.snapshot)
+        const provider = makeProvider([fileA])
+        const indexer = new CodingCliSessionIndexer([provider], { debounceMs: 100, throttleMs: 2000 })
+
+        // Initial refresh completes at time 0
+        await indexer.refresh()
+        const callsAfterInitial = snapshotMock.mock.calls.length
+
+        // Immediately schedule another refresh (simulates file change)
+        indexer.scheduleRefresh()
+
+        // Advance past debounce (100ms) but within throttle (2000ms)
+        await vi.advanceTimersByTimeAsync(150)
+        // Should NOT have refreshed — throttled
+        expect(snapshotMock).toHaveBeenCalledTimes(callsAfterInitial)
+
+        // Advance to just before throttle expires (total 1900ms since refresh)
+        await vi.advanceTimersByTimeAsync(1700)
+        expect(snapshotMock).toHaveBeenCalledTimes(callsAfterInitial)
+
+        // Advance past throttle (total 2100ms since refresh)
+        await vi.advanceTimersByTimeAsync(300)
+        expect(snapshotMock).toHaveBeenCalledTimes(callsAfterInitial + 1)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('debounce resets on repeated scheduleRefresh calls', async () => {
+      vi.useFakeTimers()
+      try {
+        const fileA = path.join(tempDir, 'session-a.jsonl')
+        await fsp.writeFile(fileA, JSON.stringify({ cwd: '/project/a', title: 'Title A' }) + '\n')
+
+        const snapshotMock = vi.mocked(configStore.snapshot)
+        const provider = makeProvider([fileA])
+        // No throttle, just debounce
+        const indexer = new CodingCliSessionIndexer([provider], { debounceMs: 500, throttleMs: 0 })
+        await indexer.refresh()
+        const callsAfterInitial = snapshotMock.mock.calls.length
+
+        // Schedule, then reschedule before debounce fires
+        indexer.scheduleRefresh()
+        await vi.advanceTimersByTimeAsync(300) // 300ms < 500ms debounce
+        indexer.scheduleRefresh() // resets debounce timer
+        await vi.advanceTimersByTimeAsync(300) // 600ms total but only 300ms since last schedule
+        // Still shouldn't have fired
+        expect(snapshotMock).toHaveBeenCalledTimes(callsAfterInitial)
+
+        await vi.advanceTimersByTimeAsync(250) // 550ms since last schedule > 500ms debounce
+        expect(snapshotMock).toHaveBeenCalledTimes(callsAfterInitial + 1)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+  })
+
   it('groups worktree sessions under the parent repo', async () => {
     // Set up a real git repo structure in tempDir
     const repoDir = path.join(tempDir, 'repo')

@@ -89,6 +89,14 @@ type CachedSessionEntry = {
   baseSession: CodingCliSession | null
 }
 
+export type SessionIndexerOptions = {
+  debounceMs?: number
+  throttleMs?: number
+}
+
+const DEFAULT_DEBOUNCE_MS = 2_000
+const DEFAULT_THROTTLE_MS = 5_000
+
 export class CodingCliSessionIndexer {
   private watcher: chokidar.FSWatcher | null = null
   private projects: ProjectGroup[] = []
@@ -101,14 +109,20 @@ export class CodingCliSessionIndexer {
   private deletedFiles = new Set<string>()
   private needsFullScan = true
   private lastEnabledKey = ''
+  private lastRefreshAt = 0
+  private readonly debounceMs: number
+  private readonly throttleMs: number
 
-  constructor(private providers: CodingCliProvider[]) {}
+  constructor(private providers: CodingCliProvider[], options: SessionIndexerOptions = {}) {
+    this.debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS
+    this.throttleMs = options.throttleMs ?? DEFAULT_THROTTLE_MS
+  }
 
   async start() {
     this.needsFullScan = true
     await this.refresh()
     const globs = this.providers.map((p) => p.getSessionGlob())
-    logger.info({ globs }, 'Starting coding CLI sessions watcher')
+    logger.info({ globs, debounceMs: this.debounceMs, throttleMs: this.throttleMs }, 'Starting coding CLI sessions watcher')
 
     this.watcher = chokidar.watch(globs, {
       ignoreInitial: true,
@@ -232,11 +246,14 @@ export class CodingCliSessionIndexer {
     })
   }
 
-  private scheduleRefresh() {
+  scheduleRefresh() {
     if (this.refreshTimer) clearTimeout(this.refreshTimer)
+    const elapsed = Date.now() - this.lastRefreshAt
+    const delay = Math.max(this.debounceMs, this.throttleMs - elapsed)
     this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = null
       this.refresh().catch((err) => logger.warn({ err }, 'Refresh failed'))
-    }, 250)
+    }, delay)
   }
 
   async refresh() {
@@ -252,6 +269,7 @@ export class CodingCliSessionIndexer {
       } while (this.refreshQueued)
     } finally {
       this.refreshInFlight = false
+      this.lastRefreshAt = Date.now()
     }
   }
 
