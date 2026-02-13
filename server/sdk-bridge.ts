@@ -71,6 +71,7 @@ export class SdkBridge extends EventEmitter {
         resume: options.resumeSessionId,
         model: options.model,
         permissionMode: options.permissionMode as any,
+        pathToClaudeCodeExecutable: process.env.CLAUDE_CMD || undefined,
         includePartialMessages: true,
         abortController,
         canUseTool: async (toolName, input, ctx) => {
@@ -167,15 +168,21 @@ export class SdkBridge extends EventEmitter {
           sessionId,
           exitCode: undefined,
         })
-        // End the input stream before removing the process entry
-        sp?.inputStream.end()
-        this.processes.delete(sessionId)
         this.sessions.delete(sessionId)
       } else {
-        // Stream ended naturally (query turn completed) -- session stays alive
-        // for multi-turn conversations. Status set by message handlers is preserved.
+        // Stream ended naturally (SDK query completed). Session state stays for
+        // display but process resources are cleaned up so sendUserMessage/
+        // subscribe/interrupt correctly return false instead of silently
+        // pushing into a dead queue.
+        if (state) state.status = 'idle'
         log.debug({ sessionId }, 'SDK query stream ended naturally')
       }
+
+      // Always clean up process resources (input stream + process entry).
+      // Must happen AFTER broadcasts above since broadcastToSession reads
+      // the process entry.
+      sp?.inputStream.end()
+      this.processes.delete(sessionId)
     }
   }
 
@@ -427,9 +434,9 @@ export class SdkBridge extends EventEmitter {
     const sp = this.processes.get(sessionId)
     if (!sp) return false
 
-    try {
-      sp.query.interrupt()
-    } catch { /* ignore */ }
+    sp.query.interrupt().catch((err) => {
+      log.warn({ sessionId, err }, 'Interrupt failed')
+    })
     return true
   }
 
