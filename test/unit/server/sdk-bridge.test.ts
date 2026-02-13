@@ -536,6 +536,11 @@ describe('SdkBridge', () => {
       }
     })
 
+    it('passes stderr callback to SDK query', async () => {
+      await bridge.createSession({ cwd: '/tmp' })
+      expect(mockQueryOptions?.stderr).toBeInstanceOf(Function)
+    })
+
     it('passes env even when CLAUDECODE is not set', async () => {
       const original = process.env.CLAUDECODE
       try {

@@ -80,6 +80,9 @@ export class SdkBridge extends EventEmitter {
         includePartialMessages: true,
         abortController,
         env: cleanEnv,
+        stderr: (data: string) => {
+          log.warn({ sessionId, data: data.trimEnd() }, 'SDK subprocess stderr')
+        },
         canUseTool: async (toolName, input, ctx) => {
           return this.handlePermissionRequest(sessionId, toolName, input as Record<string, unknown>, ctx)
         },
