@@ -54,6 +54,9 @@ describe('settingsSlice', () => {
         tabAttentionStyle: 'highlight',
         attentionDismiss: 'click',
       })
+      expect(state.settings.notifications).toEqual({
+        soundEnabled: true,
+      })
       expect(state.settings.codingCli).toEqual({
         enabledProviders: ['claude', 'codex'],
         providers: {

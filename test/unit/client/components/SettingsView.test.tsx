@@ -118,6 +118,9 @@ describe('SettingsView Component', () => {
       expect(screen.getByText('Debugging')).toBeInTheDocument()
       expect(screen.getByText('Debug-level logs and perf instrumentation')).toBeInTheDocument()
 
+      expect(screen.getByText('Notifications')).toBeInTheDocument()
+      expect(screen.getByText('Sound and alert preferences')).toBeInTheDocument()
+
       expect(screen.getByText('Coding CLIs')).toBeInTheDocument()
       expect(screen.getByText('Providers and defaults for coding sessions')).toBeInTheDocument()
 
@@ -174,6 +177,9 @@ describe('SettingsView Component', () => {
       expect(screen.getByText('Auto-kill idle (minutes)')).toBeInTheDocument()
       expect(screen.getByText('Warn before kill (minutes)')).toBeInTheDocument()
       expect(screen.getByText('Default working directory')).toBeInTheDocument()
+
+      // Notifications section
+      expect(screen.getByText('Sound on completion')).toBeInTheDocument()
 
       // Coding CLI section
       expect(screen.getByText('Enable Claude')).toBeInTheDocument()
@@ -716,6 +722,31 @@ describe('SettingsView Component', () => {
       fireEvent.click(showBadgesToggle)
 
       expect(store.getState().settings.settings.sidebar.showProjectBadges).toBe(false)
+    })
+
+    it('toggles notification sound', async () => {
+      const store = createTestStore({
+        settings: {
+          ...defaultSettings,
+          notifications: { soundEnabled: true },
+        },
+      })
+      renderWithStore(store)
+
+      const soundRow = screen.getByText('Sound on completion').closest('div')
+      expect(soundRow).toBeTruthy()
+      const soundToggle = within(soundRow!).getByRole('button')
+      fireEvent.click(soundToggle)
+
+      expect(store.getState().settings.settings.notifications.soundEnabled).toBe(false)
+
+      await act(async () => {
+        vi.advanceTimersByTime(500)
+      })
+
+      expect(api.patch).toHaveBeenCalledWith('/api/settings', {
+        notifications: { soundEnabled: false },
+      })
     })
 
     it('toggles cursor blink', async () => {
