@@ -1522,7 +1522,10 @@ export class WsHandler {
           this.sendError(ws, { code: 'UNAUTHORIZED', message: 'Not subscribed to this SDK session' })
           return
         }
-        const ok = this.sdkBridge.respondPermission(m.sessionId, m.requestId, m.behavior, m.updatedInput, m.message)
+        const decision: import('./sdk-bridge-types.js').PermissionResult = m.behavior === 'allow'
+          ? { behavior: 'allow', updatedInput: m.updatedInput, updatedPermissions: m.updatedPermissions as import('./sdk-bridge-types.js').PermissionUpdate[] | undefined }
+          : { behavior: 'deny', message: m.message || 'Denied by user', interrupt: m.interrupt }
+        const ok = this.sdkBridge.respondPermission(m.sessionId, m.requestId, decision)
         if (!ok) {
           this.sendError(ws, { code: 'INVALID_SESSION_ID', message: 'SDK session not found' })
         }
