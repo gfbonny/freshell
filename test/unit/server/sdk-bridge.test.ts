@@ -488,7 +488,7 @@ describe('SdkBridge', () => {
     })
   })
 
-  describe('CLAUDE_CMD override', () => {
+  describe('environment handling', () => {
     it('passes CLAUDE_CMD env var as pathToClaudeCodeExecutable', async () => {
       const original = process.env.CLAUDE_CMD
       try {
@@ -515,6 +515,40 @@ describe('SdkBridge', () => {
           process.env.CLAUDE_CMD = original
         } else {
           delete process.env.CLAUDE_CMD
+        }
+      }
+    })
+
+    it('strips CLAUDECODE from env passed to SDK query', async () => {
+      const original = process.env.CLAUDECODE
+      try {
+        process.env.CLAUDECODE = '1'
+        await bridge.createSession({ cwd: '/tmp' })
+        const passedEnv = mockQueryOptions?.env
+        expect(passedEnv).toBeDefined()
+        expect(passedEnv.CLAUDECODE).toBeUndefined()
+      } finally {
+        if (original !== undefined) {
+          process.env.CLAUDECODE = original
+        } else {
+          delete process.env.CLAUDECODE
+        }
+      }
+    })
+
+    it('passes env even when CLAUDECODE is not set', async () => {
+      const original = process.env.CLAUDECODE
+      try {
+        delete process.env.CLAUDECODE
+        await bridge.createSession({ cwd: '/tmp' })
+        const passedEnv = mockQueryOptions?.env
+        expect(passedEnv).toBeDefined()
+        expect(passedEnv.CLAUDECODE).toBeUndefined()
+      } finally {
+        if (original !== undefined) {
+          process.env.CLAUDECODE = original
+        } else {
+          delete process.env.CLAUDECODE
         }
       }
     })

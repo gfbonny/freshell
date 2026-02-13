@@ -64,6 +64,11 @@ export class SdkBridge extends EventEmitter {
     const abortController = new AbortController()
     const { iterable: inputIterable, handle: inputStream } = this.createInputStream()
 
+    // Strip env vars that prevent nested Claude Code subprocess startup.
+    // CLAUDECODE is set by parent Claude Code sessions and causes the child
+    // to refuse startup with "cannot be launched inside another session".
+    const { CLAUDECODE: _, ...cleanEnv } = process.env
+
     const sdkQuery = query({
       prompt: inputIterable as AsyncIterable<any>,
       options: {
@@ -74,6 +79,7 @@ export class SdkBridge extends EventEmitter {
         pathToClaudeCodeExecutable: process.env.CLAUDE_CMD || undefined,
         includePartialMessages: true,
         abortController,
+        env: cleanEnv,
         canUseTool: async (toolName, input, ctx) => {
           return this.handlePermissionRequest(sessionId, toolName, input as Record<string, unknown>, ctx)
         },
