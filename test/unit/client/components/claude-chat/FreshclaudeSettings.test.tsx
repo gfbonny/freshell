@@ -52,7 +52,7 @@ describe('FreshclaudeSettings', () => {
       />
     )
     expect(screen.getByText('Model')).toBeInTheDocument()
-    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
+    fireEvent.keyDown(document, { key: 'Escape' })
     expect(screen.queryByText('Model')).not.toBeInTheDocument()
   })
 

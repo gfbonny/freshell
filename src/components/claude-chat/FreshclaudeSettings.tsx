@@ -25,7 +25,7 @@ const MODEL_OPTIONS = [
 ]
 
 const PERMISSION_OPTIONS = [
-  { value: 'dangerouslySkipPermissions', label: 'Skip permissions' },
+  { value: 'bypassPermissions', label: 'Skip permissions' },
   { value: 'default', label: 'Default (ask)' },
 ]
 
@@ -74,13 +74,18 @@ export default function FreshclaudeSettings({
     return () => document.removeEventListener('mousedown', handleMouseDown)
   }, [open, handleClose])
 
-  // Close on Escape key (handled via onKeyDown on the dialog)
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      e.stopPropagation()
-      handleClose()
+  // Close on Escape key — uses document listener so it works regardless of focus location
+  useEffect(() => {
+    if (!open) return
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation()
+        handleClose()
+      }
     }
-  }, [handleClose])
+    document.addEventListener('keydown', handleEscape)
+    return () => document.removeEventListener('keydown', handleEscape)
+  }, [open, handleClose])
 
   return (
     <div className="relative">
@@ -104,7 +109,6 @@ export default function FreshclaudeSettings({
           className="absolute right-0 top-full mt-1 z-50 w-64 rounded-lg border bg-popover p-3 shadow-lg"
           role="dialog"
           aria-label="freshclaude settings"
-          onKeyDown={handleKeyDown}
         >
           <div className="space-y-3">
             {/* Model */}

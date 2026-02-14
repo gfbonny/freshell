@@ -76,6 +76,7 @@ export class SdkBridge extends EventEmitter {
         resume: options.resumeSessionId,
         model: options.model,
         permissionMode: options.permissionMode as any,
+        ...(options.permissionMode === 'bypassPermissions' && { allowDangerouslySkipPermissions: true }),
         pathToClaudeCodeExecutable: process.env.CLAUDE_CMD || undefined,
         includePartialMessages: true,
         abortController,

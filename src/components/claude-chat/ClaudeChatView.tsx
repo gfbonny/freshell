@@ -11,7 +11,7 @@ import ChatComposer from './ChatComposer'
 import FreshclaudeSettings from './FreshclaudeSettings'
 
 const DEFAULT_MODEL = 'claude-opus-4-6'
-const DEFAULT_PERMISSION_MODE = 'dangerouslySkipPermissions'
+const DEFAULT_PERMISSION_MODE = 'bypassPermissions'
 
 interface ClaudeChatViewProps {
   tabId: string

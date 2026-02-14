@@ -75,7 +75,7 @@ export type ClaudeChatPaneContent = {
   initialCwd?: string
   /** Model to use (default: claude-opus-4-6) */
   model?: string
-  /** Permission mode (default: dangerouslySkipPermissions) */
+  /** Permission mode (default: bypassPermissions) */
   permissionMode?: string
   /** Show thinking blocks in message feed (default: true) */
   showThinking?: boolean
