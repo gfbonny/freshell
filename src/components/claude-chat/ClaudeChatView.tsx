@@ -10,6 +10,7 @@ import PermissionBanner from './PermissionBanner'
 import ChatComposer from './ChatComposer'
 import FreshclaudeSettings from './FreshclaudeSettings'
 import ThinkingIndicator from './ThinkingIndicator'
+import { useStreamDebounce } from './useStreamDebounce'
 
 const DEFAULT_MODEL = 'claude-opus-4-6'
 const DEFAULT_PERMISSION_MODE = 'bypassPermissions'
@@ -197,6 +198,21 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
     }
   }, [messages])
 
+  // Debounce streaming text to limit markdown re-parsing to ~20x/sec
+  const debouncedStreamingText = useStreamDebounce(
+    session?.streamingText ?? '',
+    session?.streamingActive ?? false,
+  )
+
+  // Memoize the content array so React.memo on MessageBubble works.
+  // Without this, a new array reference is created every render, defeating memo.
+  const streamingContent = useMemo(
+    () => debouncedStreamingText
+      ? [{ type: 'text' as const, text: debouncedStreamingText }]
+      : [],
+    [debouncedStreamingText],
+  )
+
   return (
     <div className={cn('h-full w-full flex flex-col', hidden ? 'tab-hidden' : 'tab-visible')} role="region" aria-label="freshclaude Chat">
       {/* Status bar */}
@@ -254,10 +270,10 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
           />
         ))}
 
-        {session?.streamingActive && session.streamingText && (
+        {session?.streamingActive && streamingContent.length > 0 && (
           <MessageBubble
             role="assistant"
-            content={[{ type: 'text', text: session.streamingText }]}
+            content={streamingContent}
             showThinking={paneContent.showThinking ?? true}
             showTools={paneContent.showTools ?? true}
             showTimecodes={paneContent.showTimecodes ?? false}
