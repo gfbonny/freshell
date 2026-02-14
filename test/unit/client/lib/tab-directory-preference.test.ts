@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { getTabDirectoryPreference } from '@/lib/tab-directory-preference'
+import { getTabDirectoryPreference, rankCandidateDirectories } from '@/lib/tab-directory-preference'
 import type { PaneNode } from '@/store/paneTypes'
 
 // Helper to create a terminal leaf
@@ -137,5 +137,73 @@ describe('getTabDirectoryPreference', () => {
     )
     const result = getTabDirectoryPreference(node)
     expect(result).toEqual({ defaultCwd: undefined, tabDirectories: [] })
+  })
+})
+
+describe('rankCandidateDirectories', () => {
+  it('boosts tab directories and global default above other candidates', () => {
+    const candidates = ['/code/gamma', '/code/alpha', '/code/beta', '/code/delta']
+    const tabDirectories = ['/code/alpha', '/code/beta']
+    const globalDefault = '/code/gamma'
+
+    const result = rankCandidateDirectories(candidates, tabDirectories, globalDefault)
+
+    // Tab dirs first (in tab frequency order), then global default, then rest
+    expect(result).toEqual([
+      '/code/alpha',
+      '/code/beta',
+      '/code/gamma',
+      '/code/delta',
+    ])
+  })
+
+  it('deduplicates when global default is also a tab directory', () => {
+    const candidates = ['/code/alpha', '/code/beta', '/code/gamma']
+    const tabDirectories = ['/code/alpha']
+    const globalDefault = '/code/alpha'
+
+    const result = rankCandidateDirectories(candidates, tabDirectories, globalDefault)
+
+    expect(result).toEqual(['/code/alpha', '/code/beta', '/code/gamma'])
+  })
+
+  it('preserves original order for non-boosted candidates', () => {
+    const candidates = ['/z/last', '/a/first', '/m/middle']
+    const tabDirectories: string[] = []
+    const globalDefault = undefined
+
+    const result = rankCandidateDirectories(candidates, tabDirectories, globalDefault)
+
+    expect(result).toEqual(['/z/last', '/a/first', '/m/middle'])
+  })
+
+  it('includes global default even if not in candidate list', () => {
+    const candidates = ['/code/alpha']
+    const tabDirectories: string[] = []
+    const globalDefault = '/code/beta'
+
+    const result = rankCandidateDirectories(candidates, tabDirectories, globalDefault)
+
+    expect(result).toEqual(['/code/beta', '/code/alpha'])
+  })
+
+  it('includes tab directories even if not in candidate list', () => {
+    const candidates = ['/code/gamma']
+    const tabDirectories = ['/code/alpha']
+    const globalDefault = undefined
+
+    const result = rankCandidateDirectories(candidates, tabDirectories, globalDefault)
+
+    expect(result).toEqual(['/code/alpha', '/code/gamma'])
+  })
+
+  it('handles empty candidates gracefully', () => {
+    const result = rankCandidateDirectories([], ['/code/alpha'], '/code/beta')
+    expect(result).toEqual(['/code/alpha', '/code/beta'])
+  })
+
+  it('handles everything empty', () => {
+    const result = rankCandidateDirectories([], [], undefined)
+    expect(result).toEqual([])
   })
 })

@@ -48,3 +48,43 @@ export function getTabDirectoryPreference(root: PaneNode): TabDirectoryPreferenc
     tabDirectories: sorted.map(([dir]) => dir),
   }
 }
+
+/**
+ * Re-rank a candidate directory list by boosting tab directories and the
+ * global provider default above the general candidates.
+ *
+ * Order: tab directories (in frequency order) -> global default -> rest (original order preserved).
+ * All entries are deduplicated.
+ */
+export function rankCandidateDirectories(
+  candidates: string[],
+  tabDirectories: string[],
+  globalDefault: string | undefined,
+): string[] {
+  const result: string[] = []
+  const seen = new Set<string>()
+
+  // 1. Tab directories first (already sorted by frequency)
+  for (const dir of tabDirectories) {
+    if (!seen.has(dir)) {
+      seen.add(dir)
+      result.push(dir)
+    }
+  }
+
+  // 2. Global default next
+  if (globalDefault && !seen.has(globalDefault)) {
+    seen.add(globalDefault)
+    result.push(globalDefault)
+  }
+
+  // 3. Remaining candidates in original order
+  for (const dir of candidates) {
+    if (!seen.has(dir)) {
+      seen.add(dir)
+      result.push(dir)
+    }
+  }
+
+  return result
+}
