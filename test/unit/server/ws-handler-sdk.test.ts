@@ -309,7 +309,7 @@ describe('WS Handler SDK Integration', () => {
         await new Promise((resolve) => setTimeout(resolve, 100))
 
         expect(mockSdkBridge.respondPermission).toHaveBeenCalledWith(
-          'sdk-sess-1', 'perm-1', { behavior: 'allow', updatedInput: undefined, updatedPermissions: undefined },
+          'sdk-sess-1', 'perm-1', { behavior: 'allow', updatedInput: {} },
         )
       } finally {
         ws.close()
