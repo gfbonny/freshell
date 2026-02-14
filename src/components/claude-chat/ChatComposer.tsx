@@ -30,7 +30,11 @@ export default function ChatComposer({ onSend, onInterrupt, disabled, isRunning,
       e.preventDefault()
       handleSend()
     }
-  }, [handleSend])
+    if (e.key === 'Escape' && isRunning) {
+      e.preventDefault()
+      onInterrupt()
+    }
+  }, [handleSend, isRunning, onInterrupt])
 
   const handleInput = useCallback(() => {
     const el = textareaRef.current
