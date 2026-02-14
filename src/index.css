@@ -23,6 +23,14 @@
   --warning-foreground: 0 0% 100%;
   --radius: 0.5rem;
 
+  /* Claude chat message type colors */
+  --claude-user: 30 90% 45%;           /* warm orange */
+  --claude-assistant: 210 60% 55%;     /* sky blue */
+  --claude-tool: 240 5% 55%;           /* neutral gray */
+  --claude-error: 0 72% 51%;           /* red - reuse destructive */
+  --claude-warning: 38 92% 50%;        /* yellow - reuse warning */
+  --claude-success: 142 71% 45%;       /* green - reuse success */
+
   /* Shadows for light mode */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
   --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.06);
@@ -48,6 +56,14 @@
   --success-foreground: 0 0% 100%;
   --warning: 38 92% 50%;
   --warning-foreground: 0 0% 100%;
+
+  /* Claude chat message type colors (dark) */
+  --claude-user: 30 85% 55%;
+  --claude-assistant: 210 55% 60%;
+  --claude-tool: 240 5% 45%;
+  --claude-error: 0 62% 50%;
+  --claude-warning: 38 92% 50%;
+  --claude-success: 142 71% 45%;
 
   /* Shadows for dark mode */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
