@@ -10,9 +10,12 @@ interface MessageBubbleProps {
   content: ChatContentBlock[]
   timestamp?: string
   model?: string
+  showThinking?: boolean
+  showTools?: boolean
+  showTimecodes?: boolean
 }
 
-function MessageBubble({ role, content, timestamp, model }: MessageBubbleProps) {
+function MessageBubble({ role, content, timestamp, model, showThinking = true, showTools = true, showTimecodes = false }: MessageBubbleProps) {
   return (
     <div
       className={cn(
@@ -43,6 +46,7 @@ function MessageBubble({ role, content, timestamp, model }: MessageBubbleProps) 
           }
 
           if (block.type === 'thinking' && block.thinking) {
+            if (!showThinking) return null
             return (
               <details key={i} className="text-xs text-muted-foreground mt-1">
                 <summary className="cursor-pointer select-none">
@@ -54,6 +58,7 @@ function MessageBubble({ role, content, timestamp, model }: MessageBubbleProps) 
           }
 
           if (block.type === 'tool_use' && block.name) {
+            if (!showTools) return null
             return (
               <ToolBlock
                 key={block.id || i}
@@ -65,6 +70,7 @@ function MessageBubble({ role, content, timestamp, model }: MessageBubbleProps) 
           }
 
           if (block.type === 'tool_result') {
+            if (!showTools) return null
             const resultContent = typeof block.content === 'string' ? block.content : JSON.stringify(block.content)
             return (
               <ToolBlock
@@ -81,9 +87,9 @@ function MessageBubble({ role, content, timestamp, model }: MessageBubbleProps) 
         })}
       </div>
 
-      {(timestamp || model) && (
+      {((showTimecodes && timestamp) || model) && (
         <div className="flex items-center gap-2 text-xs text-muted-foreground px-1">
-          {timestamp && <time>{new Date(timestamp).toLocaleTimeString()}</time>}
+          {showTimecodes && timestamp && <time>{new Date(timestamp).toLocaleTimeString()}</time>}
           {model && <span className="opacity-60">{model}</span>}
         </div>
       )}
