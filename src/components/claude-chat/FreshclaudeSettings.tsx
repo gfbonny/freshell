@@ -106,7 +106,7 @@ export default function FreshclaudeSettings({
       {open && (
         <div
           ref={popoverRef}
-          className="absolute right-0 top-full mt-1 z-50 w-64 rounded-lg border bg-popover p-3 shadow-lg"
+          className="absolute right-0 top-full mt-1 z-50 w-64 rounded-lg border bg-card p-3 shadow-lg"
           role="dialog"
           aria-label="freshclaude settings"
         >

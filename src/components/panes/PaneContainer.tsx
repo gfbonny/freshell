@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils'
 import { getWsClient } from '@/lib/ws-client'
 import { api } from '@/lib/api'
 import { derivePaneTitle } from '@/lib/derivePaneTitle'
+import { getTabDirectoryPreference } from '@/lib/tab-directory-preference'
 import { formatPaneRuntimeLabel, formatPaneRuntimeTooltip } from '@/lib/format-terminal-title-meta'
 import { snap1D, collectCollinearSnapTargets, convertThresholdToLocal } from '@/lib/pane-snap'
 import { nanoid } from 'nanoid'
@@ -395,6 +396,11 @@ function PickerWrapper({
 }) {
   const dispatch = useAppDispatch()
   const settings = useAppSelector((s) => s.settings?.settings)
+  const paneLayout = useAppSelector((s) => s.panes.layouts[tabId])
+  const tabPref = useMemo(
+    () => paneLayout ? getTabDirectoryPreference(paneLayout) : { defaultCwd: undefined, tabDirectories: [] },
+    [paneLayout],
+  )
   const [step, setStep] = useState<
     | { step: 'type' }
     | { step: 'directory'; providerType: CodingCliProviderName }
@@ -517,12 +523,15 @@ function PickerWrapper({
     const providerType = step.providerType
     const providerLabel = providerType === 'claude-web' ? 'freshclaude' : getProviderLabel(providerType)
     const settingsKey = providerType === 'claude-web' ? 'claude' : providerType
-    const defaultCwd = settings?.codingCli?.providers?.[settingsKey]?.cwd
+    const globalDefault = settings?.codingCli?.providers?.[settingsKey]?.cwd
+    const defaultCwd = tabPref.defaultCwd ?? globalDefault
     return (
       <DirectoryPicker
         providerType={providerType}
         providerLabel={providerLabel}
         defaultCwd={defaultCwd}
+        tabDirectories={tabPref.tabDirectories}
+        globalDefault={globalDefault}
         onConfirm={handleDirectoryConfirm}
         onBack={() => setStep({ step: 'type' })}
       />

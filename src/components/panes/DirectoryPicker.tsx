@@ -2,12 +2,15 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type Keyboard
 import type { CodingCliProviderName } from '@/lib/coding-cli-types'
 import { api } from '@/lib/api'
 import { fuzzyMatch } from '@/lib/fuzzy-match'
+import { rankCandidateDirectories } from '@/lib/tab-directory-preference'
 import { cn } from '@/lib/utils'
 
 type DirectoryPickerProps = {
   providerType: CodingCliProviderName | 'claude-web'
   providerLabel: string
   defaultCwd?: string
+  tabDirectories?: string[]
+  globalDefault?: string
   onConfirm: (cwd: string) => void
   onBack: () => void
 }
@@ -40,6 +43,8 @@ export default function DirectoryPicker({
   providerType,
   providerLabel,
   defaultCwd,
+  tabDirectories,
+  globalDefault,
   onConfirm,
   onBack,
 }: DirectoryPickerProps) {
@@ -71,17 +76,20 @@ export default function DirectoryPicker({
     api.get<{ directories?: string[] }>('/api/files/candidate-dirs')
       .then((result) => {
         if (cancelled) return
-        const merged = dedupeDirectories([...(result.directories || []), defaultCwd || ''])
-        setCandidates(merged)
+        const raw = dedupeDirectories([...(result.directories || []), defaultCwd || ''])
+        const ranked = rankCandidateDirectories(raw, tabDirectories ?? [], globalDefault)
+        setCandidates(ranked)
       })
       .catch(() => {
         if (cancelled) return
-        setCandidates(dedupeDirectories([defaultCwd || '']))
+        const fallback = dedupeDirectories([defaultCwd || ''])
+        const ranked = rankCandidateDirectories(fallback, tabDirectories ?? [], globalDefault)
+        setCandidates(ranked)
       })
     return () => {
       cancelled = true
     }
-  }, [defaultCwd])
+  }, [defaultCwd, tabDirectories, globalDefault])
 
   const fuzzySuggestions = useMemo(() => {
     if (pathMode) return []
