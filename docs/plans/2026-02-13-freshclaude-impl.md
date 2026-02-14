@@ -4,22 +4,31 @@
 
 **Goal:** Rename Claude Web to freshclaude, add per-pane settings popover with model/permissions/display toggles, fix scroll preservation, fix permission status text, and add a new icon.
 
-**Architecture:** Per-pane settings stored in `ClaudeChatPaneContent` (Redux + localStorage persistence). CSS-based hiding for scroll preservation. New `FreshclaudeSettings` popover component. New inline SVG icon component in `provider-icons.tsx`.
+**Architecture:** Per-pane settings stored in `ClaudeChatPaneContent` (Redux + localStorage persistence). CSS-based hiding for scroll preservation. New `FreshclaudeSettings` popover component with click-outside-to-close and Escape key handling. Uses existing `Switch` component from `@/components/ui/switch`. New inline SVG icon component in `provider-icons.tsx`.
 
-**Tech Stack:** React 18, Redux Toolkit, Tailwind CSS, shadcn/ui (Popover), Vitest, Testing Library
+**Tech Stack:** React 18, Redux Toolkit, Tailwind CSS, existing shadcn-style UI components (Switch), Vitest, Testing Library
+
+**Important notes:**
+- Line numbers are approximate — earlier tasks modify `ClaudeChatView.tsx` so later tasks must locate code by semantic context, not line numbers.
+- `DEFAULT_MODEL` and `DEFAULT_PERMISSION_MODE` constants are defined once in Task 3 and reused thereafter.
+- `paneContentRef.current` (already defined in the component at line 25-26) is used in all callbacks to avoid stale closures.
+- `ClaudeChatPaneInput` (derived via `Omit` from `ClaudeChatPaneContent`) automatically inherits all new optional fields.
 
 ---
 
-### Task 1: Rename "Claude Web" → "freshclaude" (text only)
+### Task 1: Rename "Claude Web" → "freshclaude" (text + comments + tests)
 
 **Files:**
-- Modify: `src/lib/derivePaneTitle.ts:20-22`
-- Modify: `src/components/panes/PanePicker.tsx:79`
+- Modify: `src/lib/derivePaneTitle.ts:21`
+- Modify: `src/components/panes/PanePicker.tsx:77,79,82`
 - Modify: `src/components/claude-chat/ClaudeChatView.tsx:140,161`
 - Modify: `src/components/panes/PaneContainer.tsx:518`
+- Modify: `src/store/paneTypes.ts:62` (JSDoc comment)
+- Modify: `src/App.tsx:333` (comment)
 - Test: `test/unit/client/lib/derivePaneTitle.test.ts`
+- Test: `test/unit/client/components/panes/PanePicker.test.tsx:151,160`
 
-**Step 1: Update the existing test expectation and add a claude-chat test**
+**Step 1: Write failing test for claude-chat pane title**
 
 In `test/unit/client/lib/derivePaneTitle.test.ts`, add:
 
@@ -39,34 +48,34 @@ it('returns "freshclaude" for claude-chat content', () => {
 Run: `npm test -- --run test/unit/client/lib/derivePaneTitle.test.ts`
 Expected: FAIL — currently returns `'Claude Web'`
 
-**Step 3: Update derivePaneTitle.ts**
+**Step 3: Update all user-facing text and comments**
 
-In `src/lib/derivePaneTitle.ts:21`, change `'Claude Web'` to `'freshclaude'`.
+- `src/lib/derivePaneTitle.ts:21` — change `'Claude Web'` to `'freshclaude'`
+- `src/components/panes/PanePicker.tsx:79` — change `label: 'Claude Web'` to `label: 'freshclaude'`
+- `src/components/panes/PanePicker.tsx:77` — update comment `// Claude Web option:` → `// freshclaude option:`
+- `src/components/panes/PanePicker.tsx:82` — update comment `// Order: CLIs, Claude Web,` → `// Order: CLIs, freshclaude,`
+- `src/components/claude-chat/ClaudeChatView.tsx:140` — change `aria-label="Claude Web Chat"` to `aria-label="freshclaude Chat"`
+- `src/components/claude-chat/ClaudeChatView.tsx:161` — change `Claude Web Chat` to `freshclaude`
+- `src/components/panes/PaneContainer.tsx:518` — change `'Claude Web'` to `'freshclaude'`
+- `src/store/paneTypes.ts:62` — change JSDoc `Claude Web chat pane` → `freshclaude chat pane`
+- `src/App.tsx:333` — change comment `Claude Web pane` → `freshclaude pane`
 
-**Step 4: Update PanePicker.tsx**
+**Step 4: Update PanePicker test**
 
-In `src/components/panes/PanePicker.tsx:79`, change `label: 'Claude Web'` to `label: 'freshclaude'`.
+In `test/unit/client/components/panes/PanePicker.test.tsx`:
+- Line 151: change test description `'renders options in correct order: CLIs, Claude Web, Editor, Browser, Shell'` → `'renders options in correct order: CLIs, freshclaude, Editor, Browser, Shell'`
+- Line 160: change `expect(labels[2]).toBe('Claude Web')` → `expect(labels[2]).toBe('freshclaude')`
 
-**Step 5: Update ClaudeChatView.tsx**
+**Step 5: Run all affected tests**
 
-In `src/components/claude-chat/ClaudeChatView.tsx`:
-- Line 140: Change `aria-label="Claude Web Chat"` to `aria-label="freshclaude Chat"`
-- Line 161: Change `Claude Web Chat` to `freshclaude`
-
-**Step 6: Update PaneContainer.tsx**
-
-In `src/components/panes/PaneContainer.tsx:518`, change `'Claude Web'` to `'freshclaude'`.
-
-**Step 7: Run tests to verify they pass**
-
-Run: `npm test -- --run test/unit/client/lib/derivePaneTitle.test.ts`
+Run: `npm test -- --run test/unit/client/lib/derivePaneTitle.test.ts test/unit/client/components/panes/PanePicker.test.tsx`
 Expected: PASS
 
-**Step 8: Commit**
+**Step 6: Commit**
 
 ```bash
-git add src/lib/derivePaneTitle.ts src/components/panes/PanePicker.tsx src/components/claude-chat/ClaudeChatView.tsx src/components/panes/PaneContainer.tsx test/unit/client/lib/derivePaneTitle.test.ts
-git commit -m "feat: rename Claude Web to freshclaude in all user-facing text"
+git add src/lib/derivePaneTitle.ts src/components/panes/PanePicker.tsx src/components/claude-chat/ClaudeChatView.tsx src/components/panes/PaneContainer.tsx src/store/paneTypes.ts src/App.tsx test/unit/client/lib/derivePaneTitle.test.ts test/unit/client/components/panes/PanePicker.test.tsx
+git commit -m "feat: rename Claude Web to freshclaude in all user-facing text, comments, and tests"
 ```
 
 ---
@@ -78,21 +87,9 @@ git commit -m "feat: rename Claude Web to freshclaude in all user-facing text"
 
 **Step 1: Add new optional fields to ClaudeChatPaneContent**
 
-In `src/store/paneTypes.ts`, update the `ClaudeChatPaneContent` type:
+In `src/store/paneTypes.ts`, update the `ClaudeChatPaneContent` type. Add these fields after `initialCwd?`:
 
 ```typescript
-export type ClaudeChatPaneContent = {
-  kind: 'claude-chat'
-  /** SDK session ID (undefined until created) */
-  sessionId?: string
-  /** Idempotency key for sdk.create */
-  createRequestId: string
-  /** Current status — uses SdkSessionStatus, not TerminalStatus */
-  status: SdkSessionStatus
-  /** Claude session to resume */
-  resumeSessionId?: string
-  /** Working directory */
-  initialCwd?: string
   /** Model to use (default: claude-opus-4-6) */
   model?: string
   /** Permission mode (default: dangerouslySkipPermissions) */
@@ -105,8 +102,9 @@ export type ClaudeChatPaneContent = {
   showTimecodes?: boolean
   /** Whether the user has dismissed the first-launch settings popover */
   settingsDismissed?: boolean
-}
 ```
+
+Note: `ClaudeChatPaneInput` is derived via `Omit<ClaudeChatPaneContent, ...>` so it automatically inherits these new optional fields. No changes needed there.
 
 **Step 2: Run full test suite to verify no breakage**
 
@@ -125,18 +123,28 @@ git commit -m "feat: add settings fields to ClaudeChatPaneContent (model, permis
 ### Task 3: Pass model and permissionMode defaults in sdk.create
 
 **Files:**
-- Modify: `src/components/claude-chat/ClaudeChatView.tsx:66-84`
+- Modify: `src/components/claude-chat/ClaudeChatView.tsx`
 
-**Step 1: Add defaults constants and pass them in sdk.create**
+**Step 1: Add `cn` import and default constants**
 
-At the top of `ClaudeChatView.tsx`, add constants:
+Add `cn` import (needed later in Task 5 but added now to avoid forgetting):
+
+```typescript
+import { cn } from '@/lib/utils'
+```
+
+Add constants at the top of the file (outside the component):
 
 ```typescript
 const DEFAULT_MODEL = 'claude-opus-4-6'
 const DEFAULT_PERMISSION_MODE = 'dangerouslySkipPermissions'
 ```
 
-In the `sdk.create` effect (around line 71), update the `ws.send` call to include model and permissionMode from pane content, falling back to defaults:
+These constants are defined once here and reused in Task 8 (no need to re-add).
+
+**Step 2: Update the sdk.create ws.send call**
+
+In the `sdk.create` effect, find the `ws.send({ type: 'sdk.create', ... })` call and update to include model and permissionMode from pane content with defaults:
 
 ```typescript
 ws.send({
@@ -149,12 +157,12 @@ ws.send({
 })
 ```
 
-**Step 2: Run tests to verify no breakage**
+**Step 3: Run tests to verify no breakage**
 
 Run: `npm test -- --run`
 Expected: PASS
 
-**Step 3: Commit**
+**Step 4: Commit**
 
 ```bash
 git add src/components/claude-chat/ClaudeChatView.tsx
@@ -174,7 +182,22 @@ git commit -m "feat: default freshclaude to opus 4.6 and dangerouslySkipPermissi
 
 **Step 1: Write failing test for claude-chat icon**
 
-In `test/unit/client/components/icons/PaneIcon.test.tsx`, add:
+In `test/unit/client/components/icons/PaneIcon.test.tsx`:
+
+First, **replace** the existing mock (the whole `vi.mock('@/components/icons/provider-icons', ...)` block) with one that includes `FreshclaudeIcon`:
+
+```typescript
+vi.mock('@/components/icons/provider-icons', () => ({
+  ProviderIcon: ({ provider, ...props }: any) => (
+    <svg data-testid={`provider-icon-${provider}`} {...props} />
+  ),
+  FreshclaudeIcon: (props: any) => (
+    <svg data-testid="freshclaude-icon" {...props} />
+  ),
+}))
+```
+
+Then add the test:
 
 ```typescript
 it('renders freshclaude icon for claude-chat panes', () => {
@@ -191,25 +214,12 @@ it('renders freshclaude icon for claude-chat panes', () => {
 })
 ```
 
-Update the mock at top of file to include the new export:
-
-```typescript
-vi.mock('@/components/icons/provider-icons', () => ({
-  ProviderIcon: ({ provider, ...props }: any) => (
-    <svg data-testid={`provider-icon-${provider}`} {...props} />
-  ),
-  FreshclaudeIcon: (props: any) => (
-    <svg data-testid="freshclaude-icon" {...props} />
-  ),
-}))
-```
-
 **Step 2: Run test to verify it fails**
 
 Run: `npm test -- --run test/unit/client/components/icons/PaneIcon.test.tsx`
-Expected: FAIL — no `claude-chat` handler in PaneIcon
+Expected: FAIL — no `claude-chat` handler in PaneIcon, falls through to `<LayoutGrid>`
 
-**Step 3: Create the freshclaude SVG**
+**Step 3: Create the freshclaude SVG file**
 
 Create `assets/icons/freshclaude.svg` — a Claude sparkle inside a speech bubble:
 
@@ -222,7 +232,7 @@ Create `assets/icons/freshclaude.svg` — a Claude sparkle inside a speech bubbl
 
 **Step 4: Add FreshclaudeIcon component to provider-icons.tsx**
 
-In `src/components/icons/provider-icons.tsx`, add before `DefaultProviderIcon`:
+In `src/components/icons/provider-icons.tsx`, add before `DefaultProviderIcon`. Use the same SVG fallback color as the .svg file (`#fff`):
 
 ```typescript
 export function FreshclaudeIcon(props: IconProps) {
@@ -234,7 +244,7 @@ export function FreshclaudeIcon(props: IconProps) {
       {...props}
     >
       <path d="M12 2C6.48 2 2 5.58 2 10c0 2.48 1.3 4.7 3.33 6.22V20l2.78-1.54C9.33 18.8 10.63 19 12 19c5.52 0 10-3.58 10-8S17.52 2 12 2Z"/>
-      <path d="M12 6.5 13.09 9.26 16 9.64 13.95 11.54 14.47 14.5 12 13.09 9.53 14.5 10.05 11.54 8 9.64 10.91 9.26Z" fill="var(--background, #1a1a2e)"/>
+      <path d="M12 6.5 13.09 9.26 16 9.64 13.95 11.54 14.47 14.5 12 13.09 9.53 14.5 10.05 11.54 8 9.64 10.91 9.26Z" fill="var(--background, #fff)"/>
     </svg>
   )
 }
@@ -242,13 +252,13 @@ export function FreshclaudeIcon(props: IconProps) {
 
 **Step 5: Add claude-chat case to PaneIcon.tsx**
 
-In `src/components/icons/PaneIcon.tsx`, add import and handler:
+In `src/components/icons/PaneIcon.tsx`, update the import to include `FreshclaudeIcon`:
 
 ```typescript
 import { ProviderIcon, FreshclaudeIcon } from '@/components/icons/provider-icons'
 ```
 
-Add before the `// Picker` fallback:
+Add a new case before the `// Picker` fallback (after the `editor` block):
 
 ```typescript
 if (content.kind === 'claude-chat') {
@@ -259,8 +269,10 @@ if (content.kind === 'claude-chat') {
 **Step 6: Update PanePicker.tsx to use the new icon**
 
 In `src/components/panes/PanePicker.tsx`:
-- Change import: `import freshclaudeIconUrl from '../../../assets/icons/freshclaude.svg'`
-- Update the option: `iconUrl: freshclaudeIconUrl`
+- **Replace** import: `import claudeWebIconUrl from '../../../assets/icons/claude-web.svg'` → `import freshclaudeIconUrl from '../../../assets/icons/freshclaude.svg'`
+- Update the option on line 79: `iconUrl: claudeWebIconUrl` → `iconUrl: freshclaudeIconUrl`
+
+Note: The old `assets/icons/claude-web.svg` file can be kept for now (no references remain after this change; it can be cleaned up in a future housekeeping pass).
 
 **Step 7: Run tests to verify they pass**
 
@@ -280,34 +292,115 @@ git commit -m "feat: add freshclaude icon for claude-chat panes in tabs and pane
 
 **Files:**
 - Modify: `src/components/claude-chat/ClaudeChatView.tsx`
+- Test: `test/unit/client/components/claude-chat/ClaudeChatView.scroll.test.tsx`
 
-**Step 1: Replace `if (hidden) return null` with CSS-based hiding**
+**Step 1: Write failing test for CSS-based hiding**
 
-In `ClaudeChatView.tsx`, remove the line `if (hidden) return null` (line 133).
+Create `test/unit/client/components/claude-chat/ClaudeChatView.scroll.test.tsx`:
 
-Wrap the outer `<div>` with the `tab-hidden`/`tab-visible` pattern:
+```typescript
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { render, cleanup } from '@testing-library/react'
+import { configureStore } from '@reduxjs/toolkit'
+import { Provider } from 'react-redux'
+import ClaudeChatView from '@/components/claude-chat/ClaudeChatView'
+import claudeChatReducer from '@/store/claudeChatSlice'
+import panesReducer from '@/store/panesSlice'
+import type { ClaudeChatPaneContent } from '@/store/paneTypes'
+
+// Mock ws-client
+vi.mock('@/lib/ws-client', () => ({
+  getWsClient: () => ({
+    send: vi.fn(),
+    onReconnect: vi.fn(() => vi.fn()),
+  }),
+}))
+
+function makeStore() {
+  return configureStore({
+    reducer: {
+      claudeChat: claudeChatReducer,
+      panes: panesReducer,
+    },
+  })
+}
+
+const basePaneContent: ClaudeChatPaneContent = {
+  kind: 'claude-chat',
+  createRequestId: 'test-req',
+  status: 'idle',
+  sessionId: 'test-session',
+}
+
+describe('ClaudeChatView visibility', () => {
+  afterEach(cleanup)
+
+  it('renders with tab-visible class when not hidden', () => {
+    const store = makeStore()
+    const { container } = render(
+      <Provider store={store}>
+        <ClaudeChatView tabId="t1" paneId="p1" paneContent={basePaneContent} />
+      </Provider>
+    )
+    const region = container.querySelector('[role="region"]')
+    expect(region).toBeInTheDocument()
+    expect(region!.className).toContain('tab-visible')
+  })
+
+  it('renders with tab-hidden class when hidden (does NOT unmount)', () => {
+    const store = makeStore()
+    const { container } = render(
+      <Provider store={store}>
+        <ClaudeChatView tabId="t1" paneId="p1" paneContent={basePaneContent} hidden />
+      </Provider>
+    )
+    const region = container.querySelector('[role="region"]')
+    expect(region).toBeInTheDocument()
+    expect(region!.className).toContain('tab-hidden')
+  })
+})
+```
+
+**Step 2: Run test to verify it fails**
+
+Run: `npm test -- --run test/unit/client/components/claude-chat/ClaudeChatView.scroll.test.tsx`
+Expected: FAIL — component returns null when hidden, so `region` is null
+
+**Step 3: Replace `if (hidden) return null` with CSS-based hiding**
+
+In `ClaudeChatView.tsx`, remove `if (hidden) return null`.
+
+Update the outer div to use CSS-based hiding (note: `cn` was imported in Task 3):
 
 ```typescript
 return (
   <div className={cn('h-full w-full flex flex-col', hidden ? 'tab-hidden' : 'tab-visible')} role="region" aria-label="freshclaude Chat">
 ```
 
-**Step 2: Replace naive auto-scroll with smart auto-scroll**
+**Step 4: Replace naive auto-scroll with smart auto-scroll**
 
-Replace the auto-scroll effect (lines 105-108):
+Near the other refs (after `messagesEndRef` around line 22), add:
 
 ```typescript
-// Smart auto-scroll: only scroll if user is already at/near the bottom
 const scrollContainerRef = useRef<HTMLDivElement>(null)
 const isAtBottomRef = useRef(true)
+```
 
+After the existing `useCallback` hooks, add the scroll handler:
+
+```typescript
 const handleScroll = useCallback(() => {
   const el = scrollContainerRef.current
   if (!el) return
   const threshold = 50
   isAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < threshold
 }, [])
+```
 
+Replace the existing auto-scroll `useEffect`:
+
+```typescript
+// Smart auto-scroll: only scroll if user is already at/near the bottom
 useEffect(() => {
   if (isAtBottomRef.current) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -315,22 +408,26 @@ useEffect(() => {
 }, [session?.messages.length, session?.streamingActive])
 ```
 
-Add `ref={scrollContainerRef}` and `onScroll={handleScroll}` to the message area div (line 158):
+Add refs to the message area div:
 
 ```typescript
 <div ref={scrollContainerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto p-4 space-y-3">
 ```
 
-**Step 3: Run tests to verify no breakage**
+**Step 5: Run tests to verify they pass**
 
-Run: `npm test -- --run`
+Run: `npm test -- --run test/unit/client/components/claude-chat/ClaudeChatView.scroll.test.tsx`
 Expected: PASS
 
-**Step 4: Commit**
+**Step 6: Commit**
 
 ```bash
-git add src/components/claude-chat/ClaudeChatView.tsx
-git commit -m "fix: preserve scroll position in freshclaude when navigating away and back"
+git add src/components/claude-chat/ClaudeChatView.tsx test/unit/client/components/claude-chat/ClaudeChatView.scroll.test.tsx
+git commit -m "fix: preserve scroll position in freshclaude when navigating away and back
+
+Use CSS tab-hidden/tab-visible classes instead of returning null when
+hidden. Add smart auto-scroll that only scrolls to bottom when user is
+already near the bottom, preserving their scroll position."
 ```
 
 ---
@@ -338,13 +435,103 @@ git commit -m "fix: preserve scroll position in freshclaude when navigating away
 ### Task 6: Fix "Waiting for answer..." status when permissions are pending
 
 **Files:**
-- Modify: `src/components/claude-chat/ClaudeChatView.tsx:142-155,210`
+- Modify: `src/components/claude-chat/ClaudeChatView.tsx`
+- Test: `test/unit/client/components/claude-chat/ClaudeChatView.status.test.tsx`
 
-**Step 1: Update status bar to show "Waiting for answer..." when permissions are pending**
+**Step 1: Write failing test**
 
-Move `pendingPermissions` computation before the status bar JSX (it's already at line 137).
+Create `test/unit/client/components/claude-chat/ClaudeChatView.status.test.tsx`:
 
-Update the status bar span to check for pending permissions:
+```typescript
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { render, screen, cleanup } from '@testing-library/react'
+import { configureStore } from '@reduxjs/toolkit'
+import { Provider } from 'react-redux'
+import ClaudeChatView from '@/components/claude-chat/ClaudeChatView'
+import claudeChatReducer, { sessionCreated, addPermissionRequest } from '@/store/claudeChatSlice'
+import panesReducer from '@/store/panesSlice'
+import type { ClaudeChatPaneContent } from '@/store/paneTypes'
+
+vi.mock('@/lib/ws-client', () => ({
+  getWsClient: () => ({
+    send: vi.fn(),
+    onReconnect: vi.fn(() => vi.fn()),
+  }),
+}))
+
+function makeStore() {
+  return configureStore({
+    reducer: {
+      claudeChat: claudeChatReducer,
+      panes: panesReducer,
+    },
+  })
+}
+
+describe('ClaudeChatView status text', () => {
+  afterEach(cleanup)
+
+  it('shows "Waiting for answer..." when permissions are pending', () => {
+    const store = makeStore()
+    // Create a session with a pending permission
+    store.dispatch(sessionCreated({ requestId: 'req-1', sessionId: 'sess-1' }))
+    store.dispatch(addPermissionRequest({
+      sessionId: 'sess-1',
+      requestId: 'perm-1',
+      subtype: 'can_use_tool',
+      tool: { name: 'Bash', input: { command: 'ls' } },
+    }))
+
+    const paneContent: ClaudeChatPaneContent = {
+      kind: 'claude-chat',
+      createRequestId: 'req-1',
+      sessionId: 'sess-1',
+      status: 'running',
+    }
+
+    render(
+      <Provider store={store}>
+        <ClaudeChatView tabId="t1" paneId="p1" paneContent={paneContent} />
+      </Provider>
+    )
+
+    expect(screen.getByText('Waiting for answer...')).toBeInTheDocument()
+  })
+
+  it('shows "Running..." when no permissions are pending', () => {
+    const store = makeStore()
+    store.dispatch(sessionCreated({ requestId: 'req-1', sessionId: 'sess-1' }))
+
+    const paneContent: ClaudeChatPaneContent = {
+      kind: 'claude-chat',
+      createRequestId: 'req-1',
+      sessionId: 'sess-1',
+      status: 'running',
+    }
+
+    render(
+      <Provider store={store}>
+        <ClaudeChatView tabId="t1" paneId="p1" paneContent={paneContent} />
+      </Provider>
+    )
+
+    expect(screen.getByText('Running...')).toBeInTheDocument()
+  })
+})
+```
+
+Note: The exact Redux action names (`sessionCreated`, `addPermissionRequest`) may differ — check `claudeChatSlice.ts` for the actual exports and adjust accordingly.
+
+**Step 2: Run test to verify it fails**
+
+Run: `npm test -- --run test/unit/client/components/claude-chat/ClaudeChatView.status.test.tsx`
+Expected: FAIL — shows "Running..." even with pending permissions
+
+**Step 3: Update status bar text**
+
+Find the status bar `<span>` in ClaudeChatView.tsx and update to check for pending permissions. The `pendingPermissions` variable is already computed before the JSX return — no need to move it.
+
+Replace the status text span:
 
 ```typescript
 <span>
@@ -359,9 +546,9 @@ Update the status bar span to check for pending permissions:
 </span>
 ```
 
-**Step 2: Update the composer placeholder similarly**
+**Step 4: Update the composer placeholder**
 
-Change the placeholder logic (line 210):
+Find the `ChatComposer` placeholder prop and update:
 
 ```typescript
 placeholder={
@@ -373,15 +560,15 @@ placeholder={
 }
 ```
 
-**Step 3: Run tests to verify no breakage**
+**Step 5: Run tests to verify they pass**
 
-Run: `npm test -- --run`
+Run: `npm test -- --run test/unit/client/components/claude-chat/ClaudeChatView.status.test.tsx`
 Expected: PASS
 
-**Step 4: Commit**
+**Step 6: Commit**
 
 ```bash
-git add src/components/claude-chat/ClaudeChatView.tsx
+git add src/components/claude-chat/ClaudeChatView.tsx test/unit/client/components/claude-chat/ClaudeChatView.status.test.tsx
 git commit -m "fix: show 'Waiting for answer...' when permission prompt is pending"
 ```
 
@@ -393,6 +580,8 @@ git commit -m "fix: show 'Waiting for answer...' when permission prompt is pendi
 - Create: `src/components/claude-chat/FreshclaudeSettings.tsx`
 - Test: `test/unit/client/components/claude-chat/FreshclaudeSettings.test.tsx`
 
+This component uses a proper popover pattern with click-outside-to-close and Escape key handling, plus the existing `Switch` component from `@/components/ui/switch`.
+
 **Step 1: Write the failing test**
 
 Create `test/unit/client/components/claude-chat/FreshclaudeSettings.test.tsx`:
@@ -401,6 +590,11 @@ Create `test/unit/client/components/claude-chat/FreshclaudeSettings.test.tsx`:
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import FreshclaudeSettings from '@/components/claude-chat/FreshclaudeSettings'
+
+// Mock lucide-react
+vi.mock('lucide-react', () => ({
+  Settings: (props: any) => <svg data-testid="settings-icon" {...props} />,
+}))
 
 describe('FreshclaudeSettings', () => {
   afterEach(cleanup)
@@ -437,6 +631,37 @@ describe('FreshclaudeSettings', () => {
     expect(screen.getByText('Permissions')).toBeInTheDocument()
   })
 
+  it('closes popover on Escape key', () => {
+    render(
+      <FreshclaudeSettings
+        {...defaults}
+        sessionStarted={false}
+        defaultOpen={true}
+        onChange={vi.fn()}
+      />
+    )
+    expect(screen.getByText('Model')).toBeInTheDocument()
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
+    expect(screen.queryByText('Model')).not.toBeInTheDocument()
+  })
+
+  it('closes popover on click outside', () => {
+    render(
+      <div>
+        <FreshclaudeSettings
+          {...defaults}
+          sessionStarted={false}
+          defaultOpen={true}
+          onChange={vi.fn()}
+        />
+        <button data-testid="outside">Outside</button>
+      </div>
+    )
+    expect(screen.getByText('Model')).toBeInTheDocument()
+    fireEvent.mouseDown(screen.getByTestId('outside'))
+    expect(screen.queryByText('Model')).not.toBeInTheDocument()
+  })
+
   it('disables model and permission dropdowns when session has started', () => {
     render(
       <FreshclaudeSettings
@@ -448,9 +673,11 @@ describe('FreshclaudeSettings', () => {
     )
     const modelSelect = screen.getByLabelText('Model')
     expect(modelSelect).toBeDisabled()
+    const permSelect = screen.getByLabelText('Permissions')
+    expect(permSelect).toBeDisabled()
   })
 
-  it('calls onChange when a toggle is changed', () => {
+  it('calls onChange when a display toggle is changed', () => {
     const onChange = vi.fn()
     render(
       <FreshclaudeSettings
@@ -464,6 +691,20 @@ describe('FreshclaudeSettings', () => {
     expect(onChange).toHaveBeenCalledWith({ showTimecodes: true })
   })
 
+  it('calls onChange when model is changed', () => {
+    const onChange = vi.fn()
+    render(
+      <FreshclaudeSettings
+        {...defaults}
+        sessionStarted={false}
+        defaultOpen={true}
+        onChange={onChange}
+      />
+    )
+    fireEvent.change(screen.getByLabelText('Model'), { target: { value: 'claude-sonnet-4-5-20250929' } })
+    expect(onChange).toHaveBeenCalledWith({ model: 'claude-sonnet-4-5-20250929' })
+  })
+
   it('opens automatically when defaultOpen is true', () => {
     render(
       <FreshclaudeSettings
@@ -474,6 +715,21 @@ describe('FreshclaudeSettings', () => {
       />
     )
     expect(screen.getByText('Model')).toBeInTheDocument()
+  })
+
+  it('calls onDismiss when closed', () => {
+    const onDismiss = vi.fn()
+    render(
+      <FreshclaudeSettings
+        {...defaults}
+        sessionStarted={false}
+        defaultOpen={true}
+        onChange={vi.fn()}
+        onDismiss={onDismiss}
+      />
+    )
+    fireEvent.click(screen.getByRole('button', { name: /settings/i }))
+    expect(onDismiss).toHaveBeenCalled()
   })
 })
 ```
@@ -488,9 +744,13 @@ Expected: FAIL — module not found
 Create `src/components/claude-chat/FreshclaudeSettings.tsx`:
 
 ```typescript
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Settings } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { Switch } from '@/components/ui/switch'
+import type { ClaudeChatPaneContent } from '@/store/paneTypes'
+
+type SettingsFields = Pick<ClaudeChatPaneContent, 'model' | 'permissionMode' | 'showThinking' | 'showTools' | 'showTimecodes'>
 
 interface FreshclaudeSettingsProps {
   model: string
@@ -500,7 +760,7 @@ interface FreshclaudeSettingsProps {
   showTimecodes: boolean
   sessionStarted: boolean
   defaultOpen?: boolean
-  onChange: (changes: Record<string, unknown>) => void
+  onChange: (changes: Partial<SettingsFields>) => void
   onDismiss?: () => void
 }
 
@@ -527,6 +787,8 @@ export default function FreshclaudeSettings({
   onDismiss,
 }: FreshclaudeSettingsProps) {
   const [open, setOpen] = useState(defaultOpen)
+  const popoverRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
 
   const handleClose = useCallback(() => {
     setOpen(false)
@@ -541,9 +803,34 @@ export default function FreshclaudeSettings({
     }
   }, [open, handleClose])
 
+  // Close on click outside
+  useEffect(() => {
+    if (!open) return
+    const handleMouseDown = (e: MouseEvent) => {
+      const target = e.target as Node
+      if (
+        popoverRef.current && !popoverRef.current.contains(target) &&
+        buttonRef.current && !buttonRef.current.contains(target)
+      ) {
+        handleClose()
+      }
+    }
+    document.addEventListener('mousedown', handleMouseDown)
+    return () => document.removeEventListener('mousedown', handleMouseDown)
+  }, [open, handleClose])
+
+  // Close on Escape key (handled via onKeyDown on the dialog)
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      e.stopPropagation()
+      handleClose()
+    }
+  }, [handleClose])
+
   return (
     <div className="relative">
       <button
+        ref={buttonRef}
         type="button"
         onClick={handleToggle}
         className={cn(
@@ -558,9 +845,11 @@ export default function FreshclaudeSettings({
 
       {open && (
         <div
+          ref={popoverRef}
           className="absolute right-0 top-full mt-1 z-50 w-64 rounded-lg border bg-popover p-3 shadow-lg"
           role="dialog"
           aria-label="freshclaude settings"
+          onKeyDown={handleKeyDown}
         >
           <div className="space-y-3">
             {/* Model */}
@@ -599,7 +888,7 @@ export default function FreshclaudeSettings({
 
             <hr className="border-border" />
 
-            {/* Toggles */}
+            {/* Display toggles using existing Switch component */}
             <ToggleRow
               label="Show thinking"
               checked={showThinking}
@@ -626,24 +915,11 @@ function ToggleRow({ label, checked, onChange }: { label: string; checked: boole
   return (
     <div className="flex items-center justify-between">
       <span className="text-xs">{label}</span>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
+      <Switch
+        checked={checked}
+        onCheckedChange={onChange}
         aria-label={label}
-        onClick={() => onChange(!checked)}
-        className={cn(
-          'relative inline-flex h-4 w-7 items-center rounded-full transition-colors',
-          checked ? 'bg-primary' : 'bg-muted-foreground/30'
-        )}
-      >
-        <span
-          className={cn(
-            'inline-block h-3 w-3 transform rounded-full bg-white transition-transform',
-            checked ? 'translate-x-3.5' : 'translate-x-0.5'
-          )}
-        />
-      </button>
+      />
     </div>
   )
 }
@@ -658,7 +934,7 @@ Expected: PASS
 
 ```bash
 git add src/components/claude-chat/FreshclaudeSettings.tsx test/unit/client/components/claude-chat/FreshclaudeSettings.test.tsx
-git commit -m "feat: add FreshclaudeSettings popover component with model, permissions, display toggles"
+git commit -m "feat: add FreshclaudeSettings popover with click-outside, Escape, model/permissions/display toggles"
 ```
 
 ---
@@ -668,24 +944,17 @@ git commit -m "feat: add FreshclaudeSettings popover component with model, permi
 **Files:**
 - Modify: `src/components/claude-chat/ClaudeChatView.tsx`
 
-**Step 1: Import and add settings state**
-
-Add import:
+**Step 1: Add import**
 
 ```typescript
 import FreshclaudeSettings from './FreshclaudeSettings'
 ```
 
-Add defaults at top:
+Note: `DEFAULT_MODEL` and `DEFAULT_PERMISSION_MODE` were already defined in Task 3. Do not re-add them.
 
-```typescript
-const DEFAULT_MODEL = 'claude-opus-4-6'
-const DEFAULT_PERMISSION_MODE = 'dangerouslySkipPermissions'
-```
+**Step 2: Add settings change handlers**
 
-**Step 2: Add settings change handler**
-
-Inside the component, add:
+Inside the component, add after the existing `useCallback` hooks (e.g., after `handlePermissionDeny`):
 
 ```typescript
 const handleSettingsChange = useCallback((changes: Record<string, unknown>) => {
@@ -707,14 +976,16 @@ const handleSettingsDismiss = useCallback(() => {
 const sessionStarted = Boolean(session?.messages.length)
 ```
 
+Note: These use `paneContentRef.current` (already defined at line 25-26 of the existing component) to avoid stale closures.
+
 **Step 3: Add settings gear to the status bar**
 
-In the status bar div, add the settings component next to the cwd display:
+Restructure the status bar div to include a right-side group with the cwd display and settings gear:
 
 ```typescript
 <div className="flex items-center justify-between px-3 py-1.5 border-b text-xs text-muted-foreground">
   <span>
-    {/* status text */}
+    {/* ...existing status text (with pending permissions logic from Task 6)... */}
   </span>
   <div className="flex items-center gap-2">
     {paneContent.initialCwd && (
@@ -737,8 +1008,9 @@ In the status bar div, add the settings component next to the cwd display:
 
 **Step 4: Pass display toggles to MessageBubble**
 
-Update the `MessageBubble` renders to pass the display toggle props:
+Update both `MessageBubble` renders to pass the display toggle props:
 
+For the messages list:
 ```typescript
 <MessageBubble
   key={i}
@@ -752,7 +1024,16 @@ Update the `MessageBubble` renders to pass the display toggle props:
 />
 ```
 
-Same for the streaming bubble (without timestamp/model).
+For the streaming bubble:
+```typescript
+<MessageBubble
+  role="assistant"
+  content={[{ type: 'text', text: session.streamingText }]}
+  showThinking={paneContent.showThinking ?? true}
+  showTools={paneContent.showTools ?? true}
+  showTimecodes={paneContent.showTimecodes ?? false}
+/>
+```
 
 **Step 5: Run tests to verify no breakage**
 
@@ -763,7 +1044,7 @@ Expected: PASS
 
 ```bash
 git add src/components/claude-chat/ClaudeChatView.tsx
-git commit -m "feat: wire FreshclaudeSettings into ClaudeChatView status bar"
+git commit -m "feat: wire FreshclaudeSettings into ClaudeChatView status bar with display toggle props"
 ```
 
 ---
@@ -772,10 +1053,130 @@ git commit -m "feat: wire FreshclaudeSettings into ClaudeChatView status bar"
 
 **Files:**
 - Modify: `src/components/claude-chat/MessageBubble.tsx`
+- Test: `test/unit/client/components/claude-chat/MessageBubble.test.tsx`
 
-**Step 1: Add new props to MessageBubble**
+**Step 1: Write failing tests**
 
-Update the interface:
+Create `test/unit/client/components/claude-chat/MessageBubble.test.tsx`:
+
+```typescript
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { render, screen, cleanup } from '@testing-library/react'
+import MessageBubble from '@/components/claude-chat/MessageBubble'
+import type { ChatContentBlock } from '@/store/claudeChatTypes'
+
+// Mock react-markdown to render text directly
+vi.mock('react-markdown', () => ({
+  default: ({ children }: { children: string }) => <div data-testid="markdown">{children}</div>,
+}))
+
+vi.mock('remark-gfm', () => ({ default: () => {} }))
+
+// Mock ToolBlock
+vi.mock('@/components/claude-chat/ToolBlock', () => ({
+  default: ({ name }: { name: string }) => <div data-testid={`tool-${name}`}>{name}</div>,
+}))
+
+const thinkingBlock: ChatContentBlock = { type: 'thinking', thinking: 'Let me think about this...' }
+const toolUseBlock: ChatContentBlock = { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }
+const toolResultBlock: ChatContentBlock = { type: 'tool_result', tool_use_id: 't1', content: 'file.txt' }
+const textBlock: ChatContentBlock = { type: 'text', text: 'Hello world' }
+
+describe('MessageBubble display toggles', () => {
+  afterEach(cleanup)
+
+  it('hides thinking blocks when showThinking is false', () => {
+    render(
+      <MessageBubble
+        role="assistant"
+        content={[textBlock, thinkingBlock]}
+        showThinking={false}
+      />
+    )
+    expect(screen.queryByText(/Let me think/)).not.toBeInTheDocument()
+    expect(screen.getByText('Hello world')).toBeInTheDocument()
+  })
+
+  it('shows thinking blocks when showThinking is true', () => {
+    render(
+      <MessageBubble
+        role="assistant"
+        content={[thinkingBlock]}
+        showThinking={true}
+      />
+    )
+    expect(screen.getByText(/Let me think/)).toBeInTheDocument()
+  })
+
+  it('hides tool_use blocks when showTools is false', () => {
+    render(
+      <MessageBubble
+        role="assistant"
+        content={[textBlock, toolUseBlock]}
+        showTools={false}
+      />
+    )
+    expect(screen.queryByTestId('tool-Bash')).not.toBeInTheDocument()
+  })
+
+  it('hides tool_result blocks when showTools is false', () => {
+    render(
+      <MessageBubble
+        role="assistant"
+        content={[textBlock, toolResultBlock]}
+        showTools={false}
+      />
+    )
+    expect(screen.queryByTestId('tool-Result')).not.toBeInTheDocument()
+  })
+
+  it('shows timestamp when showTimecodes is true', () => {
+    render(
+      <MessageBubble
+        role="assistant"
+        content={[textBlock]}
+        timestamp="2026-02-13T10:00:00Z"
+        showTimecodes={true}
+      />
+    )
+    expect(screen.getByRole('article').querySelector('time')).toBeInTheDocument()
+  })
+
+  it('hides timestamp when showTimecodes is false', () => {
+    render(
+      <MessageBubble
+        role="assistant"
+        content={[textBlock]}
+        timestamp="2026-02-13T10:00:00Z"
+        showTimecodes={false}
+      />
+    )
+    expect(screen.getByRole('article').querySelector('time')).not.toBeInTheDocument()
+  })
+
+  it('defaults to showing thinking and tools, hiding timecodes', () => {
+    render(
+      <MessageBubble
+        role="assistant"
+        content={[textBlock, thinkingBlock, toolUseBlock]}
+        timestamp="2026-02-13T10:00:00Z"
+      />
+    )
+    expect(screen.getByText(/Let me think/)).toBeInTheDocument()
+    expect(screen.getByTestId('tool-Bash')).toBeInTheDocument()
+    expect(screen.getByRole('article').querySelector('time')).not.toBeInTheDocument()
+  })
+})
+```
+
+**Step 2: Run test to verify it fails**
+
+Run: `npm test -- --run test/unit/client/components/claude-chat/MessageBubble.test.tsx`
+Expected: FAIL — `showThinking` prop not recognized, thinking blocks still render
+
+**Step 3: Add new props to MessageBubble**
+
+Update the interface and function signature:
 
 ```typescript
 interface MessageBubbleProps {
@@ -787,38 +1188,34 @@ interface MessageBubbleProps {
   showTools?: boolean
   showTimecodes?: boolean
 }
-```
 
-**Step 2: Filter content blocks based on toggles**
-
-In the component, destructure the new props with defaults:
-
-```typescript
 function MessageBubble({ role, content, timestamp, model, showThinking = true, showTools = true, showTimecodes = false }: MessageBubbleProps) {
 ```
 
-In the content rendering, wrap the thinking and tool blocks with their toggle conditions:
+**Step 4: Add toggle guards to content block rendering**
+
+In the `content.map((block, i) => { ... })` callback, add early returns:
 
 ```typescript
 if (block.type === 'thinking' && block.thinking) {
   if (!showThinking) return null
-  // ... existing thinking render
+  // ... existing thinking render unchanged ...
 }
 
 if (block.type === 'tool_use' && block.name) {
   if (!showTools) return null
-  // ... existing tool_use render
+  // ... existing tool_use render unchanged ...
 }
 
 if (block.type === 'tool_result') {
   if (!showTools) return null
-  // ... existing tool_result render
+  // ... existing tool_result render unchanged ...
 }
 ```
 
-**Step 3: Conditionally show timestamp**
+**Step 5: Update timestamp display**
 
-Update the timestamp display at the bottom:
+Replace the existing timestamp/model footer:
 
 ```typescript
 {((showTimecodes && timestamp) || model) && (
@@ -829,15 +1226,15 @@ Update the timestamp display at the bottom:
 )}
 ```
 
-**Step 4: Run tests to verify no breakage**
+**Step 6: Run tests to verify they pass**
 
-Run: `npm test -- --run`
+Run: `npm test -- --run test/unit/client/components/claude-chat/MessageBubble.test.tsx`
 Expected: PASS
 
-**Step 5: Commit**
+**Step 7: Commit**
 
 ```bash
-git add src/components/claude-chat/MessageBubble.tsx
+git add src/components/claude-chat/MessageBubble.tsx test/unit/client/components/claude-chat/MessageBubble.test.tsx
 git commit -m "feat: MessageBubble respects showThinking, showTools, showTimecodes toggles"
 ```
 
@@ -845,14 +1242,17 @@ git commit -m "feat: MessageBubble respects showThinking, showTools, showTimecod
 
 ### Task 10: Full test suite + verify build
 
-**Step 1: Run full test suite**
+**Step 1: Run full test suite and build**
 
 Run: `npm run verify`
 Expected: Build succeeds, all tests pass
 
 **Step 2: Fix any issues found**
 
-Address any type errors or test failures.
+Address any type errors or test failures. Common things to check:
+- TypeScript errors from the new `Partial<SettingsFields>` type in `onChange`
+- Any tests that assert on the old "Claude Web" text
+- Import resolution issues
 
 **Step 3: Final commit if needed**
 
