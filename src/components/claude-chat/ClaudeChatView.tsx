@@ -179,7 +179,7 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
 
   // Auto-expand: count completed tools across all messages, expand the most recent N
   const RECENT_TOOLS_EXPANDED = 3
-  const messages = session?.messages ?? []
+  const messages = useMemo(() => session?.messages ?? [], [session?.messages])
   const { completedToolOffsets, autoExpandAbove } = useMemo(() => {
     let totalCompletedTools = 0
     const offsets: number[] = []

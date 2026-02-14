@@ -77,6 +77,9 @@ vi.mock('lucide-react', () => ({
   Square: ({ className }: { className?: string }) => (
     <svg data-testid="square-icon" className={className} />
   ),
+  Search: ({ className }: { className?: string }) => (
+    <svg data-testid="search-icon" className={className} />
+  ),
 }))
 
 // Mock PaneIcon to avoid transitive dependency issues
