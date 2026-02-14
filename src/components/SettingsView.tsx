@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { updateSettingsLocal, markSaved, defaultSettings, mergeSettings } from '@/store/settingsSlice'
 import { api } from '@/lib/api'
@@ -148,8 +148,10 @@ export default function SettingsView() {
 
   const [availableTerminalFonts, setAvailableTerminalFonts] = useState(terminalFonts)
   const [fontsReady, setFontsReady] = useState(false)
+  const [terminalAdvancedOpen, setTerminalAdvancedOpen] = useState(false)
   const [defaultCwdInput, setDefaultCwdInput] = useState(settings.defaultCwd ?? '')
   const [defaultCwdError, setDefaultCwdError] = useState<string | null>(null)
+  const terminalAdvancedId = useId()
 
   const pendingRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const defaultCwdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -758,6 +760,38 @@ export default function SettingsView() {
                 ))}
               </select>
             </SettingsRow>
+
+            <div className="pt-1 border-t border-border/40">
+              <button
+                type="button"
+                aria-expanded={terminalAdvancedOpen}
+                aria-controls={terminalAdvancedId}
+                className="h-8 px-3 text-sm bg-muted rounded-md hover:bg-muted/80 focus:outline-none focus:ring-1 focus:ring-border"
+                onClick={() => setTerminalAdvancedOpen((open) => !open)}
+              >
+                Advanced
+              </button>
+              <div
+                id={terminalAdvancedId}
+                hidden={!terminalAdvancedOpen}
+                className="mt-3 space-y-4"
+              >
+                <SettingsRow label="OSC52 clipboard access">
+                  <SegmentedControl
+                    value={settings.terminal.osc52Clipboard}
+                    options={[
+                      { value: 'ask', label: 'Ask' },
+                      { value: 'always', label: 'Always' },
+                      { value: 'never', label: 'Never' },
+                    ]}
+                    onChange={(v: string) => {
+                      dispatch(updateSettingsLocal({ terminal: { osc52Clipboard: v as 'ask' | 'always' | 'never' } } as any))
+                      scheduleSave({ terminal: { osc52Clipboard: v as 'ask' | 'always' | 'never' } })
+                    }}
+                  />
+                </SettingsRow>
+              </div>
+            </div>
           </SettingsSection>
 
           {/* Safety */}
