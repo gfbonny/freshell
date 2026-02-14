@@ -39,6 +39,10 @@
 - Modify: `test/unit/client/components/TerminalView.linkWarning.test.tsx`
 - Modify: `test/unit/client/components/TerminalView.keyboard.test.tsx`
 - Modify: `test/unit/client/components/TerminalView.lastInputAt.test.tsx`
+- Modify: `test/unit/client/components/TerminalView.test.tsx`
+- Modify: `test/unit/client/components/panes/PaneContainer.test.tsx`
+- Modify: `test/unit/client/components/panes/PaneLayout.test.tsx`
+- Modify: `test/integration/client/editor-pane.test.tsx`
 - Modify: `test/e2e/tab-focus-behavior.test.tsx`
 - Modify: `test/e2e/terminal-paste-single-ingress.test.tsx`
 - Modify: `test/e2e/turn-complete-notification-flow.test.tsx`
@@ -54,14 +58,22 @@ Expected: current baseline passes before changing imports.
 
 **Step 2: Implement package/import migration**
 
+Resolve real package versions from npm first (do not guess addon versions):
+```bash
+npm view @xterm/xterm version
+npm view @xterm/addon-fit version
+npm view @xterm/addon-search version
+npm view @xterm/addon-webgl version
+```
+
 Update runtime deps:
 ```json
 {
   "dependencies": {
-    "@xterm/xterm": "^6.0.0",
-    "@xterm/addon-fit": "^0.11.0",
-    "@xterm/addon-search": "^0.16.0",
-    "@xterm/addon-webgl": "^0.19.0"
+    "@xterm/xterm": "^<npm-view-version>",
+    "@xterm/addon-fit": "^<npm-view-version>",
+    "@xterm/addon-search": "^<npm-view-version>",
+    "@xterm/addon-webgl": "^<npm-view-version>"
   }
 }
 ```
@@ -78,7 +90,7 @@ import type { ITheme } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 ```
 
-Update all test mocks from `'xterm'` / `'xterm-addon-fit'` / `'xterm/css/xterm.css'` to scoped module ids.
+Update all test mocks from `'xterm'` / `'xterm-addon-fit'` / `'xterm/css/xterm.css'` to scoped module ids, and verify the CSS path exists after install.
 
 **Step 3: Run dependency install + typecheck**
 
@@ -86,15 +98,18 @@ Run:
 ```bash
 npm install
 npm run typecheck:client
-rg -n "\"xterm\"|xterm-addon-fit|xterm/css/xterm.css" src test package.json
+test -f node_modules/@xterm/xterm/css/xterm.css
+rg -n "\"xterm\":|\"xterm-addon-fit\":" package.json
+rg -n "from ['\\\"]xterm['\\\"]|from ['\\\"]xterm-addon-fit['\\\"]|['\\\"]xterm/css/xterm.css['\\\"]|vi\\.mock\\(['\\\"]xterm['\\\"]|vi\\.mock\\(['\\\"]xterm-addon-fit['\\\"]" src test
 ```
 
-Expected: typecheck passes with new module paths and `rg` only matches historical docs/plan files (not runtime code/tests).
+Expected: typecheck passes, CSS file path exists, and both `rg` commands return no matches.
+Also verify `npm install` completes without peer dependency conflicts between `@xterm/xterm` and `@xterm/addon-*`.
 
 **Step 4: Commit**
 
 ```bash
-git add package.json package-lock.json src/components/TerminalView.tsx src/lib/terminal-themes.ts test/unit/client/components/TerminalView.lifecycle.test.tsx test/unit/client/components/TerminalView.visibility.test.tsx test/unit/client/components/TerminalView.resumeSession.test.tsx test/unit/client/components/TerminalView.linkWarning.test.tsx test/unit/client/components/TerminalView.keyboard.test.tsx test/unit/client/components/TerminalView.lastInputAt.test.tsx test/e2e/tab-focus-behavior.test.tsx test/e2e/terminal-paste-single-ingress.test.tsx test/e2e/turn-complete-notification-flow.test.tsx
+git add package.json package-lock.json src/components/TerminalView.tsx src/lib/terminal-themes.ts test/unit/client/components/TerminalView.lifecycle.test.tsx test/unit/client/components/TerminalView.visibility.test.tsx test/unit/client/components/TerminalView.resumeSession.test.tsx test/unit/client/components/TerminalView.linkWarning.test.tsx test/unit/client/components/TerminalView.keyboard.test.tsx test/unit/client/components/TerminalView.lastInputAt.test.tsx test/unit/client/components/TerminalView.test.tsx test/unit/client/components/panes/PaneContainer.test.tsx test/unit/client/components/panes/PaneLayout.test.tsx test/integration/client/editor-pane.test.tsx test/e2e/tab-focus-behavior.test.tsx test/e2e/terminal-paste-single-ingress.test.tsx test/e2e/turn-complete-notification-flow.test.tsx
 
 git commit -m "chore(terminal): migrate to scoped @xterm v6 packages and update test mocks"
 ```
@@ -113,6 +128,7 @@ git commit -m "chore(terminal): migrate to scoped @xterm v6 packages and update 
 Create tests for:
 - `createTerminalRuntime` loads `FitAddon` and `SearchAddon` always.
 - WebGL addon is attempted and fallback path does not throw.
+- WebGL context loss event marks runtime as non-WebGL and terminal remains usable.
 
 Example test skeleton:
 ```ts
@@ -147,7 +163,8 @@ export type TerminalRuntime = {
 `attachAddons()` behavior:
 - always load fit + search
 - if webgl enabled, `try { terminal.loadAddon(new WebglAddon()) } catch {}`
-- if webgl init fails later, keep terminal functional (silent fallback)
+- register `webglAddon.onContextLoss(...)`; on loss, mark WebGL inactive and dispose addon without throwing
+- if webgl init fails or context is lost later, keep terminal functional (silent fallback)
 
 **Step 4: Integrate runtime into `TerminalView`**
 
@@ -220,6 +237,7 @@ terminal: {
 Decision mapping:
 - UI default remains `ask`
 - Renderer policy selected by user decision `3b` is implemented by defaulting to `'auto'` and enabling WebGL where supported.
+- Renderer is persisted in settings but intentionally not exposed in Settings UI in this rollout (policy stays internal with `'auto'` default).
 
 Critical server details:
 - Update duplicated server `AppSettings` type in `server/config-store.ts` (it is not shared with client type definitions).
@@ -317,6 +335,7 @@ Cover:
 - Preserve non-OSC52 output.
 - Handle chunked/incomplete sequences.
 - Decode base64 payload.
+- Support both BEL (`\u0007`) and ST (`\u001b\\` / `\u009c`) OSC terminators.
 
 Example:
 ```ts
@@ -349,6 +368,7 @@ export function extractOsc52Events(data: string, state: Osc52ParserState): { cle
 Behavior:
 - strip OSC52 control sequences from terminal output
 - produce decoded text events for policy handling
+- handle both BEL and ST terminators in stream-safe fashion
 
 **Step 4: Re-run tests**
 
@@ -387,6 +407,10 @@ Add tests for:
 - `ask + Always`: copy + dispatch settings update to always.
 - `ask + Never`: no copy + dispatch settings update to never.
 - clipboard write rejection does not surface UI error.
+- `terminal.snapshot` replay sanitizes OSC52 and preserves `term.clear()` behavior.
+- `terminal.created` non-chunked snapshot replay sanitizes OSC52 and preserves `term.clear()` behavior.
+- `terminal.attached` snapshot replay sanitizes OSC52 and preserves `term.clear()` behavior.
+- snapshot replay does not trigger turn-complete notifications/actions.
 
 **Step 2: Run tests to verify fail**
 
@@ -397,7 +421,7 @@ npx vitest run test/unit/client/components/TerminalView.osc52.test.tsx
 
 Expected: FAIL.
 
-**Step 3: Implement in output path**
+**Step 3: Implement output vs snapshot ingestion paths**
 
 Apply stream transforms in this exact order to preserve existing turn-complete behavior:
 1. `raw` -> `extractOsc52Events` (strip OSC52, collect clipboard events)
@@ -405,13 +429,30 @@ Apply stream transforms in this exact order to preserve existing turn-complete b
 3. write final cleaned text to terminal
 4. process emitted OSC52 clipboard events
 
-In `terminal.output` handling:
+Use dedicated handlers so snapshot replay has no turn-complete side effects:
 ```ts
-const osc = extractOsc52Events(raw, osc52ParserRef.current)
-const turn = extractTurnCompleteSignals(osc.cleaned, mode, turnCompleteSignalStateRef.current)
-if (turn.cleaned) term.write(turn.cleaned)
-for (const event of osc.events) handleOsc52Event(event)
+function handleTerminalOutput(raw: string) {
+  const osc = extractOsc52Events(raw, osc52ParserRef.current)
+  const turn = extractTurnCompleteSignals(osc.cleaned, mode, turnCompleteSignalStateRef.current)
+  if (turn.cleaned) term.write(turn.cleaned)
+  for (const event of osc.events) handleOsc52Event(event)
+}
+
+function handleTerminalSnapshot(snapshot: string) {
+  // snapshot is historical buffer replay: sanitize OSC52, but do not emit turn-complete events
+  const osc = extractOsc52Events(snapshot, createOsc52ParserState())
+  term.clear()
+  if (osc.cleaned) term.write(osc.cleaned)
+  for (const event of osc.events) handleOsc52Event(event)
+}
 ```
+
+Call `handleTerminalOutput(msg.data)` in `terminal.output`.
+Call `handleTerminalSnapshot(msg.snapshot)` in both snapshot write sites:
+- `terminal.snapshot`
+- `terminal.created` when `msg.snapshot && !isSnapshotChunked`
+- `terminal.attached`
+This closes OSC52 bypasses while preserving existing `term.clear()` semantics and preventing snapshot-triggered turn-complete notifications.
 
 Policy handler:
 - read `settings.terminal.osc52Clipboard`
@@ -443,7 +484,6 @@ git commit -m "feat(terminal): add OSC52 clipboard prompt flow and global Ask/Al
 **Files:**
 - Modify: `src/components/TerminalView.tsx`
 - Create: `src/components/terminal/TerminalSearchBar.tsx`
-- Modify: `src/lib/pane-action-registry.ts` (if exposing search actions)
 - Create: `test/unit/client/components/TerminalView.search.test.tsx`
 - Modify: `test/unit/client/components/TerminalView.keyboard.test.tsx`
 
@@ -492,7 +532,7 @@ Expected: pass.
 **Step 5: Commit**
 
 ```bash
-git add src/components/TerminalView.tsx src/components/terminal/TerminalSearchBar.tsx src/lib/pane-action-registry.ts test/unit/client/components/TerminalView.search.test.tsx test/unit/client/components/TerminalView.keyboard.test.tsx
+git add src/components/TerminalView.tsx src/components/terminal/TerminalSearchBar.tsx test/unit/client/components/TerminalView.search.test.tsx test/unit/client/components/TerminalView.keyboard.test.tsx
 
 git commit -m "feat(terminal): add in-pane search with Ctrl+F override and next/previous navigation"
 ```
@@ -512,6 +552,7 @@ Cover:
 - when renderer mode is `auto`, runtime attempts WebGL.
 - if addon load or activation fails, terminal still opens and works.
 - when renderer mode forced `canvas`, WebGL is not attempted.
+- when WebGL context loss is emitted after attach, runtime flips to non-WebGL state and terminal remains functional.
 
 **Step 2: Run tests to verify fail**
 
@@ -528,6 +569,7 @@ Resolution:
 - `'auto'` => attempt WebGL once per terminal instance
 - `'webgl'` => force attempt
 - `'canvas'` => skip attempt
+- register `WebglAddon.onContextLoss` to dispose the addon and mark `webglActive()` false
 
 No user-facing error surface on fallback.
 
