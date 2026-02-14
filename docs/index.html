@@ -642,7 +642,8 @@ shareBtn.addEventListener('click', () => {
 // ========== Sidebar Toggle ==========
 const sidebarToggle = document.getElementById('sidebar-toggle');
 const sidebar = document.getElementById('sidebar');
-let sidebarVisible = true;
+let sidebarVisible = window.innerWidth > 768;
+if (!sidebarVisible) sidebar.style.display = 'none';
 sidebarToggle.addEventListener('click', () => {
   sidebarVisible = !sidebarVisible;
   sidebar.style.display = sidebarVisible ? '' : 'none';
