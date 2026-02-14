@@ -2,11 +2,11 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Bring freshclaude's chat UI up to Claude Chic's level of visual polish and information density through progressive disclosure, color-coded message types, smart tool headers, auto-collapse, streaming indicators, and syntax-highlighted diffs.
+**Goal:** Bring freshclaude's chat UI up to Claude Chic's level of visual polish and information density through progressive disclosure, color-coded message types, smart tool headers, auto-collapse, streaming indicators, and color-coded diffs.
 
 **Architecture:** Incremental enhancement of existing `MessageBubble`, `ToolBlock`, and `ClaudeChatView` components. Each task is self-contained — no task depends on another unless explicitly noted. New components (`ThinkingIndicator`, `DiffView`, `CollapsedTurn`) are added alongside existing ones. CSS custom properties added for the color-coding system. A `useStreamDebounce` hook wraps the existing Redux streaming state.
 
-**Tech Stack:** React 18, Tailwind CSS, CSS custom properties, `react-markdown` + `remark-gfm` (existing), `rehype-highlight` + `highlight.js` (new — for code blocks), `diff` npm package (new — for computing diffs). Vitest + Testing Library (existing).
+**Tech Stack:** React 18, Tailwind CSS, CSS custom properties, `react-markdown` + `remark-gfm` (existing), `diff` npm package (new — for computing line diffs). Vitest + Testing Library (existing).
 
 **Reference:** [Claude Chic](https://github.com/mrocklin/claudechic) by Matthew Rocklin — Python/Textual TUI wrapping claude-agent-sdk.
 
@@ -232,7 +232,7 @@ Expected: FAIL — `border-l-[3px]` and `max-w-prose` not present in current out
 Replace `src/components/claude-chat/MessageBubble.tsx`:
 
 ```tsx
-import { memo } from 'react'
+import { memo, useMemo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { cn } from '@/lib/utils'
@@ -258,6 +258,19 @@ function MessageBubble({
   showTools = true,
   showTimecodes = false,
 }: MessageBubbleProps) {
+  // Pair tool_use blocks with their tool_result blocks for unified rendering.
+  // This allows ToolBlock to show the tool name, input preview, AND result
+  // summary in one place, instead of rendering them as separate blocks.
+  const resultMap = useMemo(() => {
+    const map = new Map<string, ChatContentBlock>()
+    for (const block of content) {
+      if (block.type === 'tool_result' && block.tool_use_id) {
+        map.set(block.tool_use_id, block)
+      }
+    }
+    return map
+  }, [content])
+
   return (
     <div
       className={cn(
@@ -295,18 +308,30 @@ function MessageBubble({
 
         if (block.type === 'tool_use' && block.name) {
           if (!showTools) return null
+          // Look up the matching tool_result to show as a unified block
+          const result = block.id ? resultMap.get(block.id) : undefined
+          const resultContent = result
+            ? (typeof result.content === 'string' ? result.content : JSON.stringify(result.content))
+            : undefined
           return (
             <ToolBlock
               key={block.id || i}
               name={block.name}
               input={block.input}
-              status="running"
+              output={resultContent}
+              isError={result?.is_error}
+              status={result ? 'complete' : 'running'}
             />
           )
         }
 
         if (block.type === 'tool_result') {
           if (!showTools) return null
+          // Skip if already merged into a matching tool_use block above
+          if (block.tool_use_id && content.some(b => b.type === 'tool_use' && b.id === block.tool_use_id)) {
+            return null
+          }
+          // Render orphaned results (no matching tool_use) as standalone
           const resultContent = typeof block.content === 'string'
             ? block.content
             : JSON.stringify(block.content)
@@ -688,54 +713,68 @@ Users can now see what happened without expanding every tool block."
 
 ## Task 4: Auto-Collapse Old Tool Blocks
 
-Only the N most recent tool blocks stay expanded; older ones auto-collapse. Managed at the `ClaudeChatView` level to coordinate across messages.
+Recent completed tool blocks auto-expand to show results; older ones start collapsed. Managed at the `ClaudeChatView` level to coordinate across messages.
 
 **Files:**
 - Modify: `src/components/claude-chat/ToolBlock.tsx`
 - Modify: `src/components/claude-chat/MessageBubble.tsx`
 - Create: `test/unit/client/components/claude-chat/ToolBlock.autocollapse.test.tsx`
 
-**Step 1: Write failing test for auto-collapse prop**
+**Step 1: Write failing test for auto-expand prop**
 
 Create `test/unit/client/components/claude-chat/ToolBlock.autocollapse.test.tsx`:
 
 ```tsx
 import { describe, it, expect, afterEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import ToolBlock from '../../../../../src/components/claude-chat/ToolBlock'
 
 describe('ToolBlock auto-collapse', () => {
   afterEach(cleanup)
 
-  it('starts collapsed when defaultCollapsed is true', () => {
+  it('starts collapsed by default (no initialExpanded)', () => {
     render(
       <ToolBlock
         name="Bash"
         input={{ command: 'echo hello' }}
         output="hello"
         status="complete"
-        defaultCollapsed={true}
       />
     )
     const button = screen.getByRole('button', { name: 'Bash tool call' })
     expect(button).toHaveAttribute('aria-expanded', 'false')
   })
 
-  it('starts expanded when defaultCollapsed is false', () => {
+  it('starts expanded when initialExpanded is true', () => {
     render(
       <ToolBlock
         name="Bash"
         input={{ command: 'echo hello' }}
         output="hello"
         status="complete"
-        defaultCollapsed={false}
+        initialExpanded={true}
       />
     )
     const button = screen.getByRole('button', { name: 'Bash tool call' })
+    expect(button).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('can be collapsed after starting expanded', async () => {
+    const user = userEvent.setup()
+    render(
+      <ToolBlock
+        name="Bash"
+        input={{ command: 'echo hello' }}
+        output="hello"
+        status="complete"
+        initialExpanded={true}
+      />
+    )
+    const button = screen.getByRole('button', { name: 'Bash tool call' })
+    expect(button).toHaveAttribute('aria-expanded', 'true')
+    await user.click(button)
     expect(button).toHaveAttribute('aria-expanded', 'false')
-    // Note: defaultCollapsed=false means "don't force collapse" — the default
-    // is still collapsed (user clicks to expand). This prop is about preventing
-    // an already-expanded tool from being forced collapsed.
   })
 })
 ```
@@ -743,9 +782,9 @@ describe('ToolBlock auto-collapse', () => {
 **Step 2: Run test to verify it fails**
 
 Run: `npm run test:client -- --run test/unit/client/components/claude-chat/ToolBlock.autocollapse.test.tsx`
-Expected: FAIL — `defaultCollapsed` prop not accepted
+Expected: FAIL — `initialExpanded` prop not accepted, second test expects `true` but gets `false`
 
-**Step 3: Add `defaultCollapsed` prop to ToolBlock**
+**Step 3: Add `initialExpanded` prop to ToolBlock**
 
 In `src/components/claude-chat/ToolBlock.tsx`, update the interface and initial state:
 
@@ -756,22 +795,23 @@ interface ToolBlockProps {
   output?: string
   isError?: boolean
   status: 'running' | 'complete'
-  defaultCollapsed?: boolean
+  /** When true, tool block starts expanded (used for recent tools). Default: false. */
+  initialExpanded?: boolean
 }
 ```
 
 And the component:
 
 ```tsx
-function ToolBlock({ name, input, output, isError, status, defaultCollapsed }: ToolBlockProps) {
-  const [expanded, setExpanded] = useState(defaultCollapsed === true ? false : false)
+function ToolBlock({ name, input, output, isError, status, initialExpanded }: ToolBlockProps) {
+  const [expanded, setExpanded] = useState(initialExpanded ?? false)
   // ... rest unchanged
 }
 ```
 
-**Step 4: Add `recentToolCount` prop to MessageBubble**
+**Step 4: Add `toolIndexOffset` and `autoExpandAbove` props to MessageBubble**
 
-In `src/components/claude-chat/MessageBubble.tsx`, add a new prop `toolCollapseIndex` — tool_use blocks with an index >= this value remain expanded (are "recent"), and those below it are auto-collapsed.
+In `src/components/claude-chat/MessageBubble.tsx`, add props so that recent completed tool blocks auto-expand:
 
 Update the MessageBubble props:
 
@@ -784,10 +824,10 @@ interface MessageBubbleProps {
   showThinking?: boolean
   showTools?: boolean
   showTimecodes?: boolean
-  /** Index offset for this message's tool blocks in the global tool sequence.
-   *  Tools at globalIndex < autoCollapseBelow get defaultCollapsed=true. */
+  /** Index offset for this message's tool blocks in the global tool sequence. */
   toolIndexOffset?: number
-  autoCollapseBelow?: number
+  /** Tools at globalIndex >= this value get initialExpanded=true. */
+  autoExpandAbove?: number
 }
 ```
 
@@ -799,6 +839,10 @@ let toolIdx = 0
 // ...inside the content.map:
 if (block.type === 'tool_use' && block.name) {
   if (!showTools) return null
+  const result = block.id ? resultMap.get(block.id) : undefined
+  const resultContent = result
+    ? (typeof result.content === 'string' ? result.content : JSON.stringify(result.content))
+    : undefined
   const globalIdx = (toolIndexOffset ?? 0) + toolIdx
   toolIdx++
   return (
@@ -806,8 +850,10 @@ if (block.type === 'tool_use' && block.name) {
       key={block.id || i}
       name={block.name}
       input={block.input}
-      status="running"
-      defaultCollapsed={autoCollapseBelow != null && globalIdx < autoCollapseBelow}
+      output={resultContent}
+      isError={result?.is_error}
+      status={result ? 'complete' : 'running'}
+      initialExpanded={autoExpandAbove != null && globalIdx >= autoExpandAbove}
     />
   )
 }
@@ -815,12 +861,12 @@ if (block.type === 'tool_use' && block.name) {
 
 **Step 5: Wire auto-collapse in ClaudeChatView**
 
-In `src/components/claude-chat/ClaudeChatView.tsx`, compute tool counts and pass collapse indices:
+In `src/components/claude-chat/ClaudeChatView.tsx`, compute tool counts and pass expand indices:
 
 ```tsx
 const RECENT_TOOLS_EXPANDED = 3
 
-// Count total tools across all messages
+// Count total completed tools across all messages
 const messages = session?.messages ?? []
 let totalTools = 0
 const toolOffsets: number[] = []
@@ -828,7 +874,7 @@ for (const msg of messages) {
   toolOffsets.push(totalTools)
   totalTools += msg.content.filter(b => b.type === 'tool_use').length
 }
-const autoCollapseBelow = Math.max(0, totalTools - RECENT_TOOLS_EXPANDED)
+const autoExpandAbove = Math.max(0, totalTools - RECENT_TOOLS_EXPANDED)
 
 // In the render:
 {messages.map((msg, i) => (
@@ -842,7 +888,7 @@ const autoCollapseBelow = Math.max(0, totalTools - RECENT_TOOLS_EXPANDED)
     showTools={paneContent.showTools ?? true}
     showTimecodes={paneContent.showTimecodes ?? false}
     toolIndexOffset={toolOffsets[i]}
-    autoCollapseBelow={autoCollapseBelow}
+    autoExpandAbove={autoExpandAbove}
   />
 ))}
 ```
@@ -856,13 +902,13 @@ Expected: All PASS
 
 ```bash
 git add src/components/claude-chat/ToolBlock.tsx src/components/claude-chat/MessageBubble.tsx src/components/claude-chat/ClaudeChatView.tsx test/unit/client/components/claude-chat/ToolBlock.autocollapse.test.tsx
-git commit -m "feat(freshclaude): auto-collapse old tool blocks
+git commit -m "feat(freshclaude): auto-expand recent tool blocks, collapse old ones
 
-Only the 3 most recent tool blocks start in their default state; older
-tools get defaultCollapsed=true. This keeps the conversation focused on
-current activity without losing access to older tool output (click to expand).
+The 3 most recent completed tool blocks start expanded (initialExpanded=true)
+so users immediately see results. Older tools start collapsed with just the
+summary header visible — click to expand and see full content.
 
-Computed globally across all messages via toolIndexOffset + autoCollapseBelow
+Computed globally across all messages via toolIndexOffset + autoExpandAbove
 passed through MessageBubble to individual ToolBlock instances."
 ```
 
@@ -870,7 +916,9 @@ passed through MessageBubble to individual ToolBlock instances."
 
 ## Task 5: In-Chat Thinking/Streaming Indicator
 
-Add a visual "thinking" indicator that appears inline in the chat when Claude is processing but no streaming text has arrived yet.
+Add a visual "thinking" indicator that appears inline in the chat when Claude is processing but no assistant response content has arrived yet.
+
+**Timing considerations:** The SDK message flow has gaps between `content_block_stop` and `sdk.assistant` where `streamingActive` is briefly false while status is still `running`. A naive condition would flash the indicator during these ~50ms gaps. To prevent this, the component uses a 200ms render delay — it only becomes visible after being mounted for 200ms, absorbing any transient gap flashes.
 
 **Files:**
 - Create: `src/components/claude-chat/ThinkingIndicator.tsx`
@@ -882,27 +930,48 @@ Add a visual "thinking" indicator that appears inline in the chat when Claude is
 Create `test/unit/client/components/claude-chat/ThinkingIndicator.test.tsx`:
 
 ```tsx
-import { describe, it, expect, afterEach } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { describe, it, expect, afterEach, vi, beforeEach } from 'vitest'
+import { render, screen, cleanup, act } from '@testing-library/react'
 import ThinkingIndicator from '../../../../../src/components/claude-chat/ThinkingIndicator'
 
 describe('ThinkingIndicator', () => {
-  afterEach(cleanup)
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    cleanup()
+  })
 
-  it('renders thinking text', () => {
+  it('does not render immediately (debounced to prevent flash)', () => {
     render(<ThinkingIndicator />)
+    expect(screen.queryByText('Thinking...')).not.toBeInTheDocument()
+  })
+
+  it('renders thinking text after 200ms delay', () => {
+    render(<ThinkingIndicator />)
+    act(() => { vi.advanceTimersByTime(200) })
     expect(screen.getByText('Thinking...')).toBeInTheDocument()
   })
 
-  it('has assistant message styling (blue border)', () => {
+  it('has assistant message styling (blue border) when visible', () => {
     const { container } = render(<ThinkingIndicator />)
+    act(() => { vi.advanceTimersByTime(200) })
     const wrapper = container.firstElementChild!
     expect(wrapper.className).toContain('border-l')
   })
 
-  it('has status role for accessibility', () => {
+  it('has status role for accessibility when visible', () => {
     render(<ThinkingIndicator />)
+    act(() => { vi.advanceTimersByTime(200) })
     expect(screen.getByRole('status')).toBeInTheDocument()
+  })
+
+  it('does not flash if unmounted before delay completes', () => {
+    const { unmount } = render(<ThinkingIndicator />)
+    act(() => { vi.advanceTimersByTime(100) })
+    unmount()
+    // No assertion needed — test verifies no errors on unmount during pending timer
   })
 })
 ```
@@ -917,11 +986,21 @@ Expected: FAIL — module not found
 Create `src/components/claude-chat/ThinkingIndicator.tsx`:
 
 ```tsx
-import { memo } from 'react'
+import { memo, useState, useEffect } from 'react'
 
-const DOTS = ['', '.', '..', '...']
+/** Delay before showing indicator, prevents flash during brief SDK message gaps. */
+const RENDER_DELAY_MS = 200
 
 function ThinkingIndicator() {
+  const [visible, setVisible] = useState(false)
+
+  useEffect(() => {
+    const timer = setTimeout(() => setVisible(true), RENDER_DELAY_MS)
+    return () => clearTimeout(timer)
+  }, [])
+
+  if (!visible) return null
+
   return (
     <div
       className="border-l-2 border-l-[hsl(var(--claude-assistant))] pl-3 py-1 max-w-prose"
@@ -945,20 +1024,25 @@ Expected: All PASS
 
 **Step 5: Wire into ClaudeChatView**
 
-In `src/components/claude-chat/ClaudeChatView.tsx`, add the indicator between the last message and the scroll anchor, when the session is running but no streaming text has appeared yet:
+In `src/components/claude-chat/ClaudeChatView.tsx`, add the indicator after the streaming block. The condition checks:
+- `status === 'running'` — Claude is actively processing
+- `!streamingActive` — no text is currently streaming
+- Last message is from the user — no assistant content has been committed to the message list yet
+
+The 200ms render delay inside ThinkingIndicator absorbs brief gaps between SDK events (e.g., between `content_block_stop` and `sdk.assistant`), preventing flashes.
 
 ```tsx
 import ThinkingIndicator from './ThinkingIndicator'
 
 // ... in the render, after the streaming MessageBubble block:
 
-{/* Thinking indicator — shown when running but no streaming text yet */}
+{/* Thinking indicator — shown when running but no response content yet.
+    The component self-debounces with a 200ms delay to prevent flash
+    during brief SDK message gaps (content_block_stop → sdk.assistant). */}
 {session?.status === 'running' && !session.streamingActive && (
   <ThinkingIndicator />
 )}
 ```
-
-This replaces the reliance on the status bar "Running..." text with a visible in-chat indicator.
 
 **Step 6: Run all claude-chat tests**
 
@@ -969,13 +1053,16 @@ Expected: All PASS
 
 ```bash
 git add src/components/claude-chat/ThinkingIndicator.tsx test/unit/client/components/claude-chat/ThinkingIndicator.test.tsx src/components/claude-chat/ClaudeChatView.tsx
-git commit -m "feat(freshclaude): add in-chat thinking indicator
+git commit -m "feat(freshclaude): add in-chat thinking indicator with flash prevention
 
 Show a pulsing 'Thinking...' indicator inline in the chat when Claude is
 processing but no streaming text has arrived yet. Uses assistant-style
-blue left border for visual consistency. Appears between the last message
-and the scroll anchor, providing immediate visual feedback that the session
-is active without relying on the status bar."
+blue left border for visual consistency.
+
+The component uses a 200ms render delay to prevent flash during brief
+SDK message gaps (e.g., between content_block_stop and sdk.assistant
+events, which are dispatched as separate Redux actions). Only sustained
+'thinking' periods (>200ms) show the indicator."
 ```
 
 ---
@@ -1134,6 +1221,7 @@ Expected: All PASS
 In `src/components/claude-chat/ClaudeChatView.tsx`:
 
 ```tsx
+import { useMemo } from 'react'
 import { useStreamDebounce } from './useStreamDebounce'
 
 // Inside the component:
@@ -1142,17 +1230,30 @@ const debouncedStreamingText = useStreamDebounce(
   session?.streamingActive ?? false,
 )
 
+// IMPORTANT: Memoize the content array so React.memo on MessageBubble
+// actually works. Without this, a new array reference is created every
+// render (even when debouncedStreamingText hasn't changed), defeating
+// the memo and causing unnecessary markdown re-parsing.
+const streamingContent = useMemo(
+  () => debouncedStreamingText
+    ? [{ type: 'text' as const, text: debouncedStreamingText }]
+    : [],
+  [debouncedStreamingText],
+)
+
 // Replace the streaming MessageBubble:
-{session?.streamingActive && debouncedStreamingText && (
+{session?.streamingActive && streamingContent.length > 0 && (
   <MessageBubble
     role="assistant"
-    content={[{ type: 'text', text: debouncedStreamingText }]}
+    content={streamingContent}
     showThinking={paneContent.showThinking ?? true}
     showTools={paneContent.showTools ?? true}
     showTimecodes={paneContent.showTimecodes ?? false}
   />
 )}
 ```
+
+> **Note:** The debounce hook limits how frequently `debouncedStreamingText` changes (~20x/sec), which directly reduces markdown re-parsing frequency. The `useMemo` around the content array ensures that when the text hasn't changed, `React.memo` on MessageBubble prevents re-renders entirely. For full optimization, a future task could extract the streaming bubble into its own Redux-connected component to avoid re-rendering the parent `ClaudeChatView` on every `appendStreamDelta` dispatch.
 
 **Step 6: Run all tests**
 
@@ -1333,7 +1434,6 @@ Create `src/components/claude-chat/CollapsedTurn.tsx`:
 ```tsx
 import { memo, useState, useMemo } from 'react'
 import { ChevronRight } from 'lucide-react'
-import { cn } from '@/lib/utils'
 import type { ChatMessage } from '@/store/claudeChatTypes'
 import MessageBubble from './MessageBubble'
 
@@ -1434,58 +1534,85 @@ Expected: All PASS
 
 **Step 5: Wire into ClaudeChatView**
 
-In `src/components/claude-chat/ClaudeChatView.tsx`, pair messages into turns and collapse old ones:
+In `src/components/claude-chat/ClaudeChatView.tsx`, pair messages into turns and collapse old ones.
+
+The pairing algorithm walks messages sequentially, pairing each user message with the immediately following assistant message. This preserves chronological order and handles edge cases (consecutive user messages, orphaned assistant messages) correctly.
 
 ```tsx
 import CollapsedTurn from './CollapsedTurn'
 
 const RECENT_TURNS_FULL = 3
 
-// Group messages into turns (user + assistant pairs)
-const turns: Array<{ user: ChatMessage; assistant: ChatMessage }> = []
-const trailing: ChatMessage[] = [] // messages not yet paired
+// Build render items in chronological order.
+// Pair adjacent user→assistant messages into turns; everything else is standalone.
+type RenderItem =
+  | { kind: 'turn'; user: ChatMessage; assistant: ChatMessage }
+  | { kind: 'standalone'; message: ChatMessage }
 
-for (const msg of messages) {
-  if (msg.role === 'user') {
-    trailing.push(msg)
-  } else if (msg.role === 'assistant' && trailing.length > 0) {
-    const userMsg = trailing.pop()!
-    turns.push({ user: userMsg, assistant: msg })
-    // If there were extra user messages before this one, render them as trailing
+const renderItems: RenderItem[] = []
+let mi = 0
+while (mi < messages.length) {
+  const msg = messages[mi]
+  // Try to pair user + immediately following assistant
+  if (
+    msg.role === 'user' &&
+    mi + 1 < messages.length &&
+    messages[mi + 1].role === 'assistant'
+  ) {
+    renderItems.push({ kind: 'turn', user: msg, assistant: messages[mi + 1] })
+    mi += 2
   } else {
-    trailing.push(msg)
+    renderItems.push({ kind: 'standalone', message: msg })
+    mi++
   }
 }
 
-const collapsedTurns = turns.slice(0, Math.max(0, turns.length - RECENT_TURNS_FULL))
-const recentTurns = turns.slice(Math.max(0, turns.length - RECENT_TURNS_FULL))
+// Count turns for collapse threshold
+const turnItems = renderItems.filter(r => r.kind === 'turn')
+const collapseThreshold = Math.max(0, turnItems.length - RECENT_TURNS_FULL)
+let turnIndex = 0
 
 // Render:
-{collapsedTurns.map((turn, i) => (
-  <CollapsedTurn
-    key={`collapsed-${i}`}
-    userMessage={turn.user}
-    assistantMessage={turn.assistant}
-    showThinking={paneContent.showThinking ?? true}
-    showTools={paneContent.showTools ?? true}
-    showTimecodes={paneContent.showTimecodes ?? false}
-  />
-))}
-
-{recentTurns.map((turn, i) => (
-  <React.Fragment key={`turn-${i}`}>
-    <MessageBubble role={turn.user.role} content={turn.user.content} ... />
-    <MessageBubble role={turn.assistant.role} content={turn.assistant.content} ... />
-  </React.Fragment>
-))}
-
-{/* Trailing unpaired messages (e.g. user message waiting for response) */}
-{trailing.map((msg, i) => (
-  <MessageBubble key={`trailing-${i}`} role={msg.role} content={msg.content} ... />
-))}
+{renderItems.map((item, i) => {
+  if (item.kind === 'turn') {
+    const isOld = turnIndex < collapseThreshold
+    turnIndex++
+    if (isOld) {
+      return (
+        <CollapsedTurn
+          key={`turn-${i}`}
+          userMessage={item.user}
+          assistantMessage={item.assistant}
+          showThinking={paneContent.showThinking ?? true}
+          showTools={paneContent.showTools ?? true}
+          showTimecodes={paneContent.showTimecodes ?? false}
+        />
+      )
+    }
+    return (
+      <React.Fragment key={`turn-${i}`}>
+        <MessageBubble role={item.user.role} content={item.user.content}
+          timestamp={item.user.timestamp} ... />
+        <MessageBubble role={item.assistant.role} content={item.assistant.content}
+          timestamp={item.assistant.timestamp} model={item.assistant.model} ... />
+      </React.Fragment>
+    )
+  }
+  // Standalone messages (unpaired user waiting for response, orphaned assistant, etc.)
+  return (
+    <MessageBubble
+      key={`msg-${i}`}
+      role={item.message.role}
+      content={item.message.content}
+      timestamp={item.message.timestamp}
+      model={item.message.model}
+      ...
+    />
+  )
+})}
 ```
 
-This replaces the flat `messages.map()` with a turn-aware renderer that collapses old turns.
+This replaces the flat `messages.map()` with a turn-aware renderer that collapses old turns while preserving strict chronological ordering.
 
 **Step 6: Run all tests**
 
@@ -1507,9 +1634,9 @@ until expanded, improving performance for long conversations."
 
 ---
 
-## Task 9: Syntax-Highlighted Diffs for Edit Tool
+## Task 9: Color-Coded Diff View for Edit Tool
 
-Render Edit tool results as proper diffs with syntax highlighting. This is the largest task.
+Render Edit tool results as proper diffs with red/green color coding for removed/added lines. This is the largest task.
 
 **Files:**
 - Install: `diff` npm package
@@ -1704,7 +1831,7 @@ Expected: All PASS
 
 ```bash
 git add package.json package-lock.json src/components/claude-chat/DiffView.tsx test/unit/client/components/claude-chat/DiffView.test.tsx src/components/claude-chat/ToolBlock.tsx
-git commit -m "feat(freshclaude): syntax-highlighted diff view for Edit tool results
+git commit -m "feat(freshclaude): color-coded diff view for Edit tool results
 
 Add DiffView component that renders Edit tool old_string/new_string as
 a proper line diff with:
@@ -1720,9 +1847,9 @@ raw JSON display of old_string/new_string."
 
 ---
 
-## Task 10: Final Integration and Cleanup
+## Task 10: Final Integration, E2E Tests, and Cleanup
 
-Run full test suite, verify build, update docs/index.html.
+Run full test suite, add e2e coverage, verify build, update docs/index.html.
 
 **Step 1: Run full test suite**
 
@@ -1739,16 +1866,31 @@ Expected: Clean build + all tests pass
 Run: `npm run lint`
 Expected: No a11y violations
 
-**Step 4: Update docs/index.html**
+**Step 4: Add e2e test coverage**
+
+Per project rules (AGENTS.md: "We ensure both unit test & e2e coverage of everything"), add browser-use e2e tests covering:
+
+- Left-border message layout renders correctly (user=orange, assistant=blue borders)
+- Tool block expand/collapse interaction (click to expand, shows content, click again to collapse)
+- Auto-collapse: old tools start collapsed, recent tools in default state
+- Collapsed turn summary: old turns show summary line, click expands full messages
+- Thinking indicator: appears when Claude is processing, disappears when content arrives
+- Diff view: Edit tool expanded view shows red/green color-coded diff
+- System reminder stripping: `<system-reminder>` tags not visible in rendered output
+
+Use the `browser-use-testing` skill for writing intent-based test instructions.
+
+**Step 5: Update docs/index.html**
 
 If the docs mock references the freshclaude chat UI, update it to reflect the new visual style (left borders instead of chat bubbles, collapsed turns, diff views).
 
-**Step 5: Final commit**
+**Step 6: Final commit**
 
 ```bash
 git add -A
-git commit -m "chore(freshclaude): final integration cleanup and lint fixes
+git commit -m "chore(freshclaude): final integration, e2e tests, and cleanup
 
+Add e2e test coverage for all freshclaude polish features.
 Ensure all tests pass, build is clean, lint has no violations.
 Update docs mock if applicable."
 ```
@@ -1760,12 +1902,12 @@ Update docs mock if applicable."
 | Task | Feature | New Files | Modified Files |
 |------|---------|-----------|----------------|
 | 1 | CSS color variables | — | `src/index.css` |
-| 2 | Left-border message layout | — | `MessageBubble.tsx` + test |
+| 2 | Left-border message layout + tool_use/result pairing | — | `MessageBubble.tsx` + test |
 | 3 | Smart tool headers + summaries | — | `ToolBlock.tsx` + test |
-| 4 | Auto-collapse old tools | 1 test | `ToolBlock.tsx`, `MessageBubble.tsx`, `ClaudeChatView.tsx` |
-| 5 | Thinking indicator | `ThinkingIndicator.tsx` + test | `ClaudeChatView.tsx` |
-| 6 | Streaming debounce | `useStreamDebounce.ts` + test | `ClaudeChatView.tsx` |
+| 4 | Auto-expand recent / collapse old tools | 1 test | `ToolBlock.tsx`, `MessageBubble.tsx`, `ClaudeChatView.tsx` |
+| 5 | Thinking indicator (with flash prevention) | `ThinkingIndicator.tsx` + test | `ClaudeChatView.tsx` |
+| 6 | Streaming debounce + memoized content | `useStreamDebounce.ts` + test | `ClaudeChatView.tsx` |
 | 7 | System reminder stripping | — | `MessageBubble.tsx` + test |
-| 8 | Collapsed turns | `CollapsedTurn.tsx` + test | `ClaudeChatView.tsx` |
-| 9 | Diff view for Edit tool | `DiffView.tsx` + test, `diff` pkg | `ToolBlock.tsx` |
-| 10 | Integration & cleanup | — | Various |
+| 8 | Collapsed turns (sequential pairing) | `CollapsedTurn.tsx` + test | `ClaudeChatView.tsx` |
+| 9 | Color-coded diff view for Edit tool | `DiffView.tsx` + test, `diff` pkg | `ToolBlock.tsx` |
+| 10 | Integration, e2e tests & cleanup | e2e tests | Various |
