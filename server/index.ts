@@ -33,6 +33,7 @@ import { getPerfConfig, initPerfLogging, setPerfLoggingEnabled, startPerfTimer, 
 import { detectPlatform, detectAvailableClis } from './platform.js'
 import { resolveVisitPort } from './startup-url.js'
 import { NetworkManager } from './network-manager.js'
+import { getNetworkHost } from './get-network-host.js'
 import cookieParser from 'cookie-parser'
 import { PortForwardManager } from './port-forward.js'
 import { getRequesterIdentity, parseTrustProxyEnv } from './request-ip.js'
@@ -839,12 +840,9 @@ async function main() {
       })
   }
 
-  // Determine bind host from config, with HOST env override for unconfigured deployments
+  // Determine bind host from config (shared logic with vite.config.ts)
   const currentSettings = await configStore.getSettings()
-  const envHost = process.env.HOST
-  const bindHost = (!currentSettings.network.configured && (envHost === '0.0.0.0' || envHost === '127.0.0.1'))
-    ? envHost
-    : currentSettings.network.host
+  const bindHost = getNetworkHost()
 
   // WSL2 port forwarding — only when bound to 0.0.0.0 (remote access active)
   if (bindHost === '0.0.0.0') {

@@ -838,6 +838,11 @@ describe('State Edge Cases', () => {
               codex: { model: 'gpt-5-codex' },
             },
           },
+          network: {
+            host: '127.0.0.1',
+            configured: false,
+            mdns: { enabled: false, hostname: 'freshell' },
+          },
         }
 
         store.dispatch(setSettings(customSettings))
