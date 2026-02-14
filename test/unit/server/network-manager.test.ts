@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import http from 'node:http'
 import { NetworkManager } from '../../../server/network-manager.js'
+import { detectLanIps } from '../../../server/bootstrap.js'
 
 // Mock external dependencies
 vi.mock('../../../server/bootstrap.js', () => ({
@@ -49,14 +50,37 @@ describe('NetworkManager', () => {
     }
   }
 
+  let savedAllowedOrigins: string | undefined
+  let savedExtraAllowedOrigins: string | undefined
+  let savedAuthToken: string | undefined
+
   beforeEach(() => {
     server = http.createServer()
     mockConfigStore = createMockConfigStore()
+    savedAllowedOrigins = process.env.ALLOWED_ORIGINS
+    savedExtraAllowedOrigins = process.env.EXTRA_ALLOWED_ORIGINS
+    savedAuthToken = process.env.AUTH_TOKEN
+    delete process.env.EXTRA_ALLOWED_ORIGINS
   })
 
   afterEach(async () => {
     if (manager) await manager.stop()
     if (server.listening) server.close()
+    if (savedAllowedOrigins !== undefined) {
+      process.env.ALLOWED_ORIGINS = savedAllowedOrigins
+    } else {
+      delete process.env.ALLOWED_ORIGINS
+    }
+    if (savedExtraAllowedOrigins !== undefined) {
+      process.env.EXTRA_ALLOWED_ORIGINS = savedExtraAllowedOrigins
+    } else {
+      delete process.env.EXTRA_ALLOWED_ORIGINS
+    }
+    if (savedAuthToken !== undefined) {
+      process.env.AUTH_TOKEN = savedAuthToken
+    } else {
+      delete process.env.AUTH_TOKEN
+    }
   })
 
   it('starts with localhost binding by default', async () => {
@@ -355,6 +379,139 @@ describe('NetworkManager', () => {
 
       const status = await manager.getStatus()
       expect(status.mdns).toBeNull()
+    })
+  })
+
+  describe('buildAllowedOrigins (via rebuildAllowedOrigins)', () => {
+    it('includes only port-qualified loopback origins on localhost', async () => {
+      manager = new NetworkManager(server, mockConfigStore, testPort)
+      await manager.initializeFromStartup('127.0.0.1', {
+        host: '127.0.0.1',
+        configured: true,
+        mdns: { enabled: false, hostname: 'freshell' },
+      })
+
+      const origins = process.env.ALLOWED_ORIGINS?.split(',') ?? []
+      expect(origins).toContain(`http://localhost:${testPort}`)
+      expect(origins).toContain(`http://127.0.0.1:${testPort}`)
+      // Must NOT include portless origins (security: broadens trust surface)
+      expect(origins).not.toContain('http://localhost')
+      expect(origins).not.toContain('http://127.0.0.1')
+    })
+
+    it('includes LAN IP origins when bound to 0.0.0.0', async () => {
+      mockConfigStore = createMockConfigStore({
+        network: {
+          host: '0.0.0.0',
+          configured: true,
+          mdns: { enabled: false, hostname: 'freshell' },
+        },
+      })
+      manager = new NetworkManager(server, mockConfigStore, testPort)
+      vi.mocked(detectLanIps).mockReturnValue(['192.168.1.100'])
+
+      await manager.initializeFromStartup('0.0.0.0', {
+        host: '0.0.0.0',
+        configured: true,
+        mdns: { enabled: false, hostname: 'freshell' },
+      })
+
+      const origins = process.env.ALLOWED_ORIGINS?.split(',') ?? []
+      expect(origins).toContain(`http://192.168.1.100:${testPort}`)
+      expect(origins).toContain(`http://localhost:${testPort}`)
+    })
+
+    it('includes mDNS .local origin when mDNS is enabled', async () => {
+      mockConfigStore = createMockConfigStore({
+        network: {
+          host: '0.0.0.0',
+          configured: true,
+          mdns: { enabled: true, hostname: 'mybox' },
+        },
+      })
+      manager = new NetworkManager(server, mockConfigStore, testPort)
+      vi.mocked(detectLanIps).mockReturnValue(['192.168.1.100'])
+
+      await manager.initializeFromStartup('0.0.0.0', {
+        host: '0.0.0.0',
+        configured: true,
+        mdns: { enabled: true, hostname: 'mybox' },
+      })
+
+      const origins = process.env.ALLOWED_ORIGINS?.split(',') ?? []
+      // Should include the machine's .local hostname
+      expect(origins.some(o => o.includes('.local:'))).toBe(true)
+    })
+
+    it('preserves EXTRA_ALLOWED_ORIGINS across rebuilds', async () => {
+      process.env.EXTRA_ALLOWED_ORIGINS = 'https://myproxy.com'
+      manager = new NetworkManager(server, mockConfigStore, testPort)
+      await manager.initializeFromStartup('127.0.0.1', {
+        host: '127.0.0.1',
+        configured: true,
+        mdns: { enabled: false, hostname: 'freshell' },
+      })
+
+      const origins = process.env.ALLOWED_ORIGINS?.split(',') ?? []
+      expect(origins).toContain('https://myproxy.com')
+    })
+
+    it('includes dev port origins when devPort is set', async () => {
+      manager = new NetworkManager(server, mockConfigStore, testPort, true, 5173)
+      await manager.initializeFromStartup('127.0.0.1', {
+        host: '127.0.0.1',
+        configured: true,
+        mdns: { enabled: false, hostname: 'freshell' },
+      })
+
+      const origins = process.env.ALLOWED_ORIGINS?.split(',') ?? []
+      expect(origins).toContain(`http://localhost:${testPort}`)
+      expect(origins).toContain('http://localhost:5173')
+      expect(origins).toContain('http://127.0.0.1:5173')
+    })
+
+    it('rebuilds origins on configure()', async () => {
+      mockConfigStore = createMockConfigStore({
+        network: {
+          host: '127.0.0.1',
+          configured: false,
+          mdns: { enabled: false, hostname: 'freshell' },
+        },
+      })
+      manager = new NetworkManager(server, mockConfigStore, testPort)
+      vi.mocked(detectLanIps).mockReturnValue(['192.168.1.100'])
+
+      // Initially localhost — no LAN origins
+      await manager.initializeFromStartup('127.0.0.1', {
+        host: '127.0.0.1',
+        configured: false,
+        mdns: { enabled: false, hostname: 'freshell' },
+      })
+      let origins = process.env.ALLOWED_ORIGINS?.split(',') ?? []
+      expect(origins).not.toContain(`http://192.168.1.100:${testPort}`)
+
+      // Configure to 0.0.0.0 — should add LAN origins
+      await manager.configure({
+        host: '0.0.0.0',
+        configured: true,
+        mdns: { enabled: false, hostname: 'freshell' },
+      })
+      origins = process.env.ALLOWED_ORIGINS?.split(',') ?? []
+      expect(origins).toContain(`http://192.168.1.100:${testPort}`)
+    })
+
+    it('deduplicates origins', async () => {
+      process.env.EXTRA_ALLOWED_ORIGINS = `http://localhost:${testPort}`
+      manager = new NetworkManager(server, mockConfigStore, testPort)
+      await manager.initializeFromStartup('127.0.0.1', {
+        host: '127.0.0.1',
+        configured: true,
+        mdns: { enabled: false, hostname: 'freshell' },
+      })
+
+      const origins = process.env.ALLOWED_ORIGINS?.split(',') ?? []
+      const localhostCount = origins.filter(o => o === `http://localhost:${testPort}`).length
+      expect(localhostCount).toBe(1)
     })
   })
 })

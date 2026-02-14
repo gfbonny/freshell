@@ -943,7 +943,7 @@ async function main() {
 
   // WSL2 port forwarding — only when bound to 0.0.0.0 (remote access active)
   if (bindHost === '0.0.0.0') {
-    const wslPortForwardResult = setupWslPortForwarding()
+    const wslPortForwardResult = setupWslPortForwarding(vitePort)
     if (wslPortForwardResult === 'success') {
       console.log('[server] WSL2 port forwarding configured')
     } else if (wslPortForwardResult === 'failed') {
