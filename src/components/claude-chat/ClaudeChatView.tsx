@@ -164,7 +164,10 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
     }))
   }, [tabId, paneId, dispatch])
 
-  const sessionStarted = Boolean(session?.messages.length)
+  // Controls (model, permissions) should be locked once sdk.create has been sent.
+  // The pane status transitions from 'creating' to 'starting' immediately after sdk.create,
+  // so any status other than 'creating' means the session is already configured.
+  const sessionStarted = paneContent.status !== 'creating'
 
   const isInteractive = paneContent.status === 'idle' || paneContent.status === 'connected'
   const isRunning = paneContent.status === 'running'

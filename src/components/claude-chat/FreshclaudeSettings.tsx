@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { Settings } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Switch } from '@/components/ui/switch'
@@ -40,6 +40,7 @@ export default function FreshclaudeSettings({
   onChange,
   onDismiss,
 }: FreshclaudeSettingsProps) {
+  const instanceId = useId()
   const [open, setOpen] = useState(defaultOpen)
   const popoverRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
@@ -108,9 +109,9 @@ export default function FreshclaudeSettings({
           <div className="space-y-3">
             {/* Model */}
             <div className="space-y-1">
-              <label htmlFor="fc-model" className="text-xs font-medium">Model</label>
+              <label htmlFor={`${instanceId}-model`} className="text-xs font-medium">Model</label>
               <select
-                id="fc-model"
+                id={`${instanceId}-model`}
                 aria-label="Model"
                 value={model}
                 disabled={sessionStarted}
@@ -125,9 +126,9 @@ export default function FreshclaudeSettings({
 
             {/* Permission mode */}
             <div className="space-y-1">
-              <label htmlFor="fc-permissions" className="text-xs font-medium">Permissions</label>
+              <label htmlFor={`${instanceId}-permissions`} className="text-xs font-medium">Permissions</label>
               <select
-                id="fc-permissions"
+                id={`${instanceId}-permissions`}
                 aria-label="Permissions"
                 value={permissionMode}
                 disabled={sessionStarted}
