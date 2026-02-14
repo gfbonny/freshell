@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils'
 import MessageBubble from './MessageBubble'
 import PermissionBanner from './PermissionBanner'
 import ChatComposer from './ChatComposer'
+import FreshclaudeSettings from './FreshclaudeSettings'
 
 const DEFAULT_MODEL = 'claude-opus-4-6'
 const DEFAULT_PERMISSION_MODE = 'dangerouslySkipPermissions'
@@ -147,6 +148,24 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
     isAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < threshold
   }, [])
 
+  const handleSettingsChange = useCallback((changes: Record<string, unknown>) => {
+    dispatch(updatePaneContent({
+      tabId,
+      paneId,
+      content: { ...paneContentRef.current, ...changes },
+    }))
+  }, [tabId, paneId, dispatch])
+
+  const handleSettingsDismiss = useCallback(() => {
+    dispatch(updatePaneContent({
+      tabId,
+      paneId,
+      content: { ...paneContentRef.current, settingsDismissed: true },
+    }))
+  }, [tabId, paneId, dispatch])
+
+  const sessionStarted = Boolean(session?.messages.length)
+
   const isInteractive = paneContent.status === 'idle' || paneContent.status === 'connected'
   const isRunning = paneContent.status === 'running'
   const pendingPermissions = session ? Object.values(session.pendingPermissions) : []
@@ -165,9 +184,22 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
           {pendingPermissions.length === 0 && paneContent.status === 'compacting' && 'Compacting context...'}
           {pendingPermissions.length === 0 && paneContent.status === 'exited' && 'Session ended'}
         </span>
-        {paneContent.initialCwd && (
-          <span className="truncate ml-2">{paneContent.initialCwd}</span>
-        )}
+        <div className="flex items-center gap-2">
+          {paneContent.initialCwd && (
+            <span className="truncate">{paneContent.initialCwd}</span>
+          )}
+          <FreshclaudeSettings
+            model={paneContent.model ?? DEFAULT_MODEL}
+            permissionMode={paneContent.permissionMode ?? DEFAULT_PERMISSION_MODE}
+            showThinking={paneContent.showThinking ?? true}
+            showTools={paneContent.showTools ?? true}
+            showTimecodes={paneContent.showTimecodes ?? false}
+            sessionStarted={sessionStarted}
+            defaultOpen={!paneContent.settingsDismissed}
+            onChange={handleSettingsChange}
+            onDismiss={handleSettingsDismiss}
+          />
+        </div>
       </div>
 
       {/* Message area */}
@@ -187,6 +219,9 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
             content={msg.content}
             timestamp={msg.timestamp}
             model={msg.model}
+            showThinking={paneContent.showThinking ?? true}
+            showTools={paneContent.showTools ?? true}
+            showTimecodes={paneContent.showTimecodes ?? false}
           />
         ))}
 
@@ -194,6 +229,9 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
           <MessageBubble
             role="assistant"
             content={[{ type: 'text', text: session.streamingText }]}
+            showThinking={paneContent.showThinking ?? true}
+            showTools={paneContent.showTools ?? true}
+            showTimecodes={paneContent.showTimecodes ?? false}
           />
         )}
 
