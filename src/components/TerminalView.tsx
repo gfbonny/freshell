@@ -18,10 +18,13 @@ import {
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
 import { resolveTerminalFontFamily } from '@/lib/terminal-fonts'
 import { useChunkedAttach } from '@/components/terminal/useChunkedAttach'
+import {
+  createTerminalRuntime,
+  type TerminalRuntime,
+} from '@/components/terminal/terminal-runtime'
 import { nanoid } from 'nanoid'
 import { cn } from '@/lib/utils'
 import { Terminal } from '@xterm/xterm'
-import { FitAddon } from '@xterm/addon-fit'
 import { Loader2 } from 'lucide-react'
 import { ConfirmModal } from '@/components/ui/confirm-modal'
 import type { PaneContent, TerminalPaneContent } from '@/store/paneTypes'
@@ -58,7 +61,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
 
   const containerRef = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
-  const fitRef = useRef<FitAddon | null>(null)
+  const runtimeRef = useRef<TerminalRuntime | null>(null)
   const mountedRef = useRef(false)
   const hiddenRef = useRef(hidden)
   const lastSessionActivityAtRef = useRef(0)
@@ -211,9 +214,10 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     mountedRef.current = true
 
     if (termRef.current) {
+      runtimeRef.current?.dispose()
+      runtimeRef.current = null
       termRef.current.dispose()
       termRef.current = null
-      fitRef.current = null
     }
 
     const term = new Terminal({
@@ -234,11 +238,11 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         },
       },
     })
-    const fit = new FitAddon()
-    term.loadAddon(fit)
+    const runtime = createTerminalRuntime({ terminal: term, enableWebgl: true })
+    runtime.attachAddons()
 
     termRef.current = term
-    fitRef.current = fit
+    runtimeRef.current = runtime
 
     term.open(containerRef.current)
 
@@ -262,7 +266,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
 
     requestAnimationFrame(() => {
       if (termRef.current === term) {
-        try { fit.fit() } catch { /* disposed */ }
+        try { runtime.fit() } catch { /* disposed */ }
         term.focus()
       }
     })
@@ -321,7 +325,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     const ro = new ResizeObserver(() => {
       if (hiddenRef.current || termRef.current !== term) return
       try {
-        fit.fit()
+        runtime.fit()
         const tid = terminalIdRef.current
         if (tid) {
           ws.send({ type: 'terminal.resize', terminalId: tid, cols: term.cols, rows: term.rows })
@@ -334,9 +338,10 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       ro.disconnect()
       unregisterActions()
       if (termRef.current === term) {
+        runtime.dispose()
+        runtimeRef.current = null
         term.dispose()
         termRef.current = null
-        fitRef.current = null
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -406,7 +411,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     term.options.lineHeight = settings.terminal.lineHeight
     term.options.scrollback = settings.terminal.scrollback
     term.options.theme = getTerminalTheme(settings.terminal.theme, settings.theme)
-    if (!hidden) fitRef.current?.fit()
+    if (!hidden) runtimeRef.current?.fit()
   }, [isTerminal, settings, hidden])
 
   // When becoming visible, fit and send size
@@ -414,7 +419,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   useEffect(() => {
     if (!isTerminal) return
     if (!hidden) {
-      fitRef.current?.fit()
+      runtimeRef.current?.fit()
       const term = termRef.current
       const tid = terminalIdRef.current
       if (term && tid) {
