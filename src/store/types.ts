@@ -102,6 +102,9 @@ export type TerminalTheme =
   | 'solarized-light'
   | 'github-light'
 
+export type Osc52ClipboardPolicy = 'ask' | 'always' | 'never'
+export type TerminalRendererMode = 'auto' | 'webgl' | 'canvas'
+
 export type CodexSandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access'
 
 export type ClaudePermissionMode = 'default' | 'plan' | 'acceptEdits' | 'bypassPermissions'
@@ -128,6 +131,8 @@ export interface AppSettings {
     scrollback: number
     theme: TerminalTheme
     warnExternalLinks: boolean
+    osc52Clipboard: Osc52ClipboardPolicy
+    renderer: TerminalRendererMode
   }
   defaultCwd?: string
   logging: {

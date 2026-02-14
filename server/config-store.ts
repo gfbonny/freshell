@@ -42,6 +42,8 @@ export type AppSettings = {
       | 'solarized-light'
       | 'github-light'
     warnExternalLinks: boolean
+    osc52Clipboard: 'ask' | 'always' | 'never'
+    renderer: 'auto' | 'webgl' | 'canvas'
   }
   defaultCwd?: string
   logging: {
@@ -117,6 +119,8 @@ export const defaultSettings: AppSettings = {
     scrollback: 5000,
     theme: 'auto',
     warnExternalLinks: true,
+    osc52Clipboard: 'ask',
+    renderer: 'auto',
   },
   defaultCwd: undefined,
   logging: {
@@ -302,6 +306,8 @@ function mergeSettings(base: AppSettings, patch: Partial<AppSettings>): AppSetti
     scrollback: terminalPatch.scrollback,
     theme: terminalPatch.theme,
     warnExternalLinks: terminalPatch.warnExternalLinks,
+    osc52Clipboard: terminalPatch.osc52Clipboard,
+    renderer: terminalPatch.renderer,
   }
   return {
     ...base,

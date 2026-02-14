@@ -182,6 +182,8 @@ describe('Settings API Integration', () => {
       expect(res.body.terminal).toHaveProperty('cursorBlink')
       expect(res.body.terminal).toHaveProperty('scrollback')
       expect(res.body.terminal).toHaveProperty('theme')
+      expect(res.body.terminal).toHaveProperty('osc52Clipboard')
+      expect(res.body.terminal).toHaveProperty('renderer')
       expect(res.body.safety).toHaveProperty('autoKillIdleMinutes')
       expect(res.body.safety).toHaveProperty('warnBeforeKillMinutes')
       expect(res.body.sidebar).toHaveProperty('sortMode')
@@ -270,6 +272,32 @@ describe('Settings API Integration', () => {
       expect(res.body.terminal.cursorBlink).toBe(false)
       // Other terminal settings preserved
       expect(res.body.terminal.lineHeight).toBe(defaultSettings.terminal.lineHeight)
+    })
+
+    it('persists terminal policy fields and preserves them during partial terminal patches', async () => {
+      await request(app)
+        .put('/api/settings')
+        .set('x-auth-token', TEST_AUTH_TOKEN)
+        .send({
+          terminal: {
+            osc52Clipboard: 'never',
+            renderer: 'canvas',
+          },
+        })
+
+      const res = await request(app)
+        .patch('/api/settings')
+        .set('x-auth-token', TEST_AUTH_TOKEN)
+        .send({
+          terminal: {
+            fontSize: 18,
+          },
+        })
+
+      expect(res.status).toBe(200)
+      expect(res.body.terminal.fontSize).toBe(18)
+      expect(res.body.terminal.osc52Clipboard).toBe('never')
+      expect(res.body.terminal.renderer).toBe('canvas')
     })
 
     it('handles nested safety settings', async () => {
@@ -574,6 +602,8 @@ describe('Settings API Integration', () => {
         scrollback: 3000,
         theme: 'light',
         warnExternalLinks: true,
+        osc52Clipboard: 'ask',
+        renderer: 'auto',
       })
       expect(res.body.terminal).not.toHaveProperty('fontFamily')
     })

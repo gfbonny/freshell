@@ -16,6 +16,8 @@ export const defaultSettings: AppSettings = {
     scrollback: 5000,
     theme: 'auto',
     warnExternalLinks: true,
+    osc52Clipboard: 'ask',
+    renderer: 'auto',
   },
   defaultCwd: undefined,
   logging: {

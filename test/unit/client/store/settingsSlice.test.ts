@@ -33,6 +33,8 @@ describe('settingsSlice', () => {
         scrollback: 5000,
         theme: 'auto',
         warnExternalLinks: true,
+        osc52Clipboard: 'ask',
+        renderer: 'auto',
       })
       expect(state.settings.defaultCwd).toBeUndefined()
       expect(state.settings.safety).toEqual({
@@ -100,6 +102,8 @@ describe('settingsSlice', () => {
           scrollback: 10000,
           theme: 'one-light',
           warnExternalLinks: true,
+          osc52Clipboard: 'ask',
+          renderer: 'auto',
         },
         defaultCwd: '/home/user',
         safety: {
@@ -226,6 +230,8 @@ describe('settingsSlice', () => {
       expect(state.settings.terminal.cursorBlink).toBe(defaultSettings.terminal.cursorBlink)
       expect(state.settings.terminal.scrollback).toBe(defaultSettings.terminal.scrollback)
       expect(state.settings.terminal.theme).toBe(defaultSettings.terminal.theme)
+      expect(state.settings.terminal.osc52Clipboard).toBe(defaultSettings.terminal.osc52Clipboard)
+      expect(state.settings.terminal.renderer).toBe(defaultSettings.terminal.renderer)
     })
 
     it('deep merges safety settings', () => {
@@ -307,6 +313,8 @@ describe('settingsSlice', () => {
       expect(state.settings.terminal.fontSize).toBe(16)
       expect(state.settings.terminal.cursorBlink).toBe(false)
       expect(state.settings.terminal.fontFamily).toBe(defaultSettings.terminal.fontFamily)
+      expect(state.settings.terminal.osc52Clipboard).toBe(defaultSettings.terminal.osc52Clipboard)
+      expect(state.settings.terminal.renderer).toBe(defaultSettings.terminal.renderer)
       expect(state.settings.safety.warnBeforeKillMinutes).toBe(10)
       expect(state.settings.safety.autoKillIdleMinutes).toBe(defaultSettings.safety.autoKillIdleMinutes)
       expect(state.settings.sidebar.showProjectBadges).toBe(false)
@@ -450,6 +458,24 @@ describe('settingsSlice', () => {
 
       expect(state.settings.panes.iconsOnTabs).toBe(false)
       expect(state.settings.panes.defaultNewPane).toBe('ask')
+    })
+  })
+
+  describe('terminal mergeSettings', () => {
+    it('preserves terminal policy fields when patching terminal settings', () => {
+      const base = {
+        ...defaultSettings,
+        terminal: {
+          ...defaultSettings.terminal,
+          osc52Clipboard: 'never' as const,
+          renderer: 'canvas' as const,
+        },
+      }
+
+      const result = mergeSettings(base, { terminal: { fontSize: 18 } } as any)
+      expect(result.terminal.fontSize).toBe(18)
+      expect(result.terminal.osc52Clipboard).toBe('never')
+      expect(result.terminal.renderer).toBe('canvas')
     })
   })
 })
