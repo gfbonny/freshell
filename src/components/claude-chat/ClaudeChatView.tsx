@@ -137,7 +137,7 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
   const pendingPermissions = session ? Object.values(session.pendingPermissions) : []
 
   return (
-    <div className="h-full w-full flex flex-col" role="region" aria-label="Claude Web Chat">
+    <div className="h-full w-full flex flex-col" role="region" aria-label="freshclaude Chat">
       {/* Status bar */}
       <div className="flex items-center justify-between px-3 py-1.5 border-b text-xs text-muted-foreground">
         <span>
@@ -158,7 +158,7 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {!session?.messages.length && (
           <div className="text-center text-muted-foreground text-sm py-8">
-            <p className="font-medium mb-2">Claude Web Chat</p>
+            <p className="font-medium mb-2">freshclaude</p>
             <p>Rich chat UI for Claude Code sessions.</p>
             <p className="text-xs mt-2">Session: {paneContent.sessionId ?? 'pending'}</p>
           </div>

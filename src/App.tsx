@@ -330,7 +330,7 @@ export default function App() {
           setClientPerfEnabled(!!msg.enabled, 'server')
         }
 
-        // SDK message handling (Claude Web pane)
+        // SDK message handling (freshclaude pane)
         handleSdkMessage(dispatch, msg, ws)
       })
 

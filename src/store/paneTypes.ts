@@ -59,7 +59,7 @@ export type PickerPaneContent = {
 export type SdkSessionStatus = 'creating' | 'starting' | 'connected' | 'running' | 'idle' | 'compacting' | 'exited'
 
 /**
- * Claude Web chat pane — rich chat UI powered by Claude Code SDK mode.
+ * freshclaude chat pane — rich chat UI powered by Claude Code SDK mode.
  */
 export type ClaudeChatPaneContent = {
   kind: 'claude-chat'

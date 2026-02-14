@@ -74,12 +74,12 @@ export default function PanePicker({ onSelect, onCancel, isOnlyPane, tabId, pane
     // Shell options depend on platform
     const shellOptions = isWindowsLike(platform) ? windowsShellOptions : [shellOption]
 
-    // Claude Web option: only show if claude CLI is available and enabled
+    // freshclaude option: only show if claude CLI is available and enabled
     const claudeWebOption: PickerOption[] = (availableClis['claude'] && enabledProviders.includes('claude'))
-      ? [{ type: 'claude-web' as PanePickerType, label: 'Claude Web', icon: null, iconUrl: claudeWebIconUrl, shortcut: 'A' }]
+      ? [{ type: 'claude-web' as PanePickerType, label: 'freshclaude', icon: null, iconUrl: claudeWebIconUrl, shortcut: 'A' }]
       : []
 
-    // Order: CLIs, Claude Web, Editor, Browser, Shell(s)
+    // Order: CLIs, freshclaude, Editor, Browser, Shell(s)
     return [...cliOptions, ...claudeWebOption, ...nonShellOptions, ...shellOptions]
   }, [platform, availableClis, enabledProviders])
 
