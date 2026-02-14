@@ -45,6 +45,17 @@ const RATE_LIMIT_RETRY_MAX_ATTEMPTS = 3
 const RATE_LIMIT_RETRY_BASE_MS = 250
 const RATE_LIMIT_RETRY_MAX_MS = 1000
 
+function createNoopRuntime(): TerminalRuntime {
+  return {
+    attachAddons: () => {},
+    fit: () => {},
+    findNext: () => false,
+    findPrevious: () => false,
+    dispose: () => {},
+    webglActive: () => false,
+  }
+}
+
 interface TerminalViewProps {
   tabId: string
   paneId: string
@@ -350,8 +361,16 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         },
       },
     })
-    const runtime = createTerminalRuntime({ terminal: term, enableWebgl: true })
-    runtime.attachAddons()
+    const rendererMode = settings.terminal.renderer ?? 'auto'
+    const enableWebgl = rendererMode === 'auto' || rendererMode === 'webgl'
+    let runtime = createNoopRuntime()
+    try {
+      runtime = createTerminalRuntime({ terminal: term, enableWebgl })
+      runtime.attachAddons()
+    } catch {
+      // Renderer/addon failures should not prevent terminal availability.
+      runtime = createNoopRuntime()
+    }
 
     termRef.current = term
     runtimeRef.current = runtime
