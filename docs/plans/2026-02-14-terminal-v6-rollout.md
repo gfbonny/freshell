@@ -673,13 +673,24 @@ git commit -m "docs(terminal): reflect v6 search and advanced OSC52 settings; fi
 
 ## Final Verification Checklist
 
-- [ ] `@xterm/*` v6 modules used everywhere (no legacy `xterm` package imports).
-- [ ] v6 default keyboard behavior preserved (no legacy Alt-arrow compatibility shim added).
-- [ ] v6 viewport/scroll defaults preserved.
-- [ ] Search (`Ctrl+F`) works in focused terminal and does not break tab shortcuts.
-- [ ] OSC52 Ask/Always/Never works exactly as specified.
-- [ ] `Always`/`Never` buttons in prompt update global setting immediately.
-- [ ] Clipboard write failures are silent.
-- [ ] WebGL attempted automatically with robust fallback.
-- [ ] Unit + e2e coverage added for all new behaviors.
+- [x] `@xterm/*` v6 modules used everywhere (no legacy `xterm` package imports).
+- [x] v6 default keyboard behavior preserved (no legacy Alt-arrow compatibility shim added).
+- [x] v6 viewport/scroll defaults preserved.
+- [x] Search (`Ctrl+F`) works in focused terminal and does not break tab shortcuts.
+- [x] OSC52 Ask/Always/Never works exactly as specified.
+- [x] `Always`/`Never` buttons in prompt update global setting immediately.
+- [x] Clipboard write failures are silent.
+- [x] WebGL attempted automatically with robust fallback.
+- [x] Unit + e2e coverage added for all new behaviors.
 - [ ] `npm run test` and `npm run verify` pass.
+
+## Completion Notes (2026-02-14)
+
+- Tasks 1-9 completed and committed on `feature/terminal-v6-rollout` through `c47293f`.
+- Task 10 docs updates completed:
+  - `docs/index.html` now calls out in-pane terminal search (`Ctrl+F`) and advanced OSC52 clipboard policy controls.
+  - This plan checklist has been updated with completion status.
+- Validation gate status:
+  - `npm run lint` passes (warnings only; no errors).
+  - `npm run test` executes suites but does not terminate cleanly in this environment; after suites complete, the process loops with repeated WebSocket hello-timeout logs (`code: 4002`) every ~30s.
+  - `npm run verify` build stage passes (`typecheck`, `build:client`, `build:server`), then enters the same non-terminating `vitest` behavior during its `npm test` phase.
