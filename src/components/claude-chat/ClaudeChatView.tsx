@@ -4,9 +4,13 @@ import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { updatePaneContent } from '@/store/panesSlice'
 import { addUserMessage, clearPendingCreate, removePermission } from '@/store/claudeChatSlice'
 import { getWsClient } from '@/lib/ws-client'
+import { cn } from '@/lib/utils'
 import MessageBubble from './MessageBubble'
 import PermissionBanner from './PermissionBanner'
 import ChatComposer from './ChatComposer'
+
+const DEFAULT_MODEL = 'claude-opus-4-6'
+const DEFAULT_PERMISSION_MODE = 'dangerouslySkipPermissions'
 
 interface ClaudeChatViewProps {
   tabId: string
@@ -71,6 +75,8 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
     ws.send({
       type: 'sdk.create',
       requestId: paneContent.createRequestId,
+      model: paneContent.model ?? DEFAULT_MODEL,
+      permissionMode: paneContent.permissionMode ?? DEFAULT_PERMISSION_MODE,
       ...(paneContent.initialCwd ? { cwd: paneContent.initialCwd } : {}),
       ...(paneContent.resumeSessionId ? { resumeSessionId: paneContent.resumeSessionId } : {}),
     })
