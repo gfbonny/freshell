@@ -60,6 +60,7 @@ export type MenuBuildContext = {
   sessions: ProjectGroup[]
   expandedProjects: Set<string>
   contextElement: HTMLElement | null
+  clickTarget: HTMLElement | null
   actions: MenuActions
   platform: string | null
 }
@@ -121,7 +122,7 @@ function buildCopyResumeMenuItem(id: string, candidate: ResumeCommandCandidate, 
 }
 
 export function buildMenuItems(target: ContextTarget, ctx: MenuBuildContext): MenuItem[] {
-  const { actions, tabs, paneLayouts, sessions, view, sidebarCollapsed, expandedProjects, contextElement, platform } = ctx
+  const { actions, tabs, paneLayouts, sessions, view, sidebarCollapsed, expandedProjects, contextElement, clickTarget: _clickTarget, platform } = ctx
   const isSessionOpen = (sessionId: string, provider?: string) => {
     const keyProvider = provider || 'claude'
     for (const tab of tabs) {

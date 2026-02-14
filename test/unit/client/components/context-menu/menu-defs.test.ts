@@ -73,6 +73,7 @@ function createMockContext(actions: MenuActions): MenuBuildContext {
     sessions: [],
     expandedProjects: new Set<string>(),
     contextElement: null,
+    clickTarget: null,
     actions,
     platform: null,
   }
@@ -130,5 +131,18 @@ describe('buildMenuItems — pane context menu', () => {
     const splitDownIdx = items.findIndex(i => i.type === 'item' && i.id === 'split-down')
     const separatorAfterSplit = items[splitDownIdx + 1]
     expect(separatorAfterSplit?.type).toBe('separator')
+  })
+})
+
+describe('buildMenuItems — clickTarget passthrough', () => {
+  it('receives clickTarget in context', () => {
+    // Verify the interface accepts clickTarget without error
+    const mockActions = createMockActions()
+    const mockContext = createMockContext(mockActions)
+    const el = document.createElement('span')
+    mockContext.clickTarget = el
+    const target: ContextTarget = { kind: 'global' }
+    const items = buildMenuItems(target, mockContext)
+    expect(items.length).toBeGreaterThan(0)
   })
 })

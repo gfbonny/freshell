@@ -31,6 +31,7 @@ type MenuState = {
   position: { x: number; y: number }
   target: ContextTarget
   contextElement: HTMLElement | null
+  clickTarget: HTMLElement | null
   dataset: Record<string, string | undefined>
 }
 
@@ -612,6 +613,7 @@ export function ContextMenuProvider({
         position: { x: e.clientX, y: e.clientY },
         target: targetObj,
         contextElement: contextEl,
+        clickTarget: target,
         dataset,
       })
     }
@@ -635,6 +637,7 @@ export function ContextMenuProvider({
         position: { x: rect.left + 8, y: rect.bottom + 4 },
         target: targetObj,
         contextElement: contextEl,
+        clickTarget: target,
         dataset,
       })
     }
@@ -689,6 +692,7 @@ export function ContextMenuProvider({
       sessions,
       expandedProjects,
       contextElement: menuState.contextElement,
+      clickTarget: menuState.clickTarget,
       platform,
       actions: {
         newDefaultTab,
