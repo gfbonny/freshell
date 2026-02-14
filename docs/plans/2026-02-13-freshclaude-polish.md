@@ -824,9 +824,9 @@ interface MessageBubbleProps {
   showThinking?: boolean
   showTools?: boolean
   showTimecodes?: boolean
-  /** Index offset for this message's tool blocks in the global tool sequence. */
-  toolIndexOffset?: number
-  /** Tools at globalIndex >= this value get initialExpanded=true. */
+  /** Index offset for this message's completed tool blocks in the global sequence. */
+  completedToolOffset?: number
+  /** Completed tools at globalIndex >= this value get initialExpanded=true. */
   autoExpandAbove?: number
 }
 ```
@@ -834,8 +834,8 @@ interface MessageBubbleProps {
 Then in the rendering loop for tool_use blocks:
 
 ```tsx
-// Track tool index within this message
-let toolIdx = 0
+// Track completed tool index within this message
+let completedToolIdx = 0
 // ...inside the content.map:
 if (block.type === 'tool_use' && block.name) {
   if (!showTools) return null
@@ -843,8 +843,14 @@ if (block.type === 'tool_use' && block.name) {
   const resultContent = result
     ? (typeof result.content === 'string' ? result.content : JSON.stringify(result.content))
     : undefined
-  const globalIdx = (toolIndexOffset ?? 0) + toolIdx
-  toolIdx++
+  // Only auto-expand completed tools (those with a matching result).
+  // Running tools (no result) follow default collapsed behavior.
+  let shouldExpand = false
+  if (result) {
+    const globalIdx = (completedToolOffset ?? 0) + completedToolIdx
+    completedToolIdx++
+    shouldExpand = autoExpandAbove != null && globalIdx >= autoExpandAbove
+  }
   return (
     <ToolBlock
       key={block.id || i}
@@ -853,7 +859,7 @@ if (block.type === 'tool_use' && block.name) {
       output={resultContent}
       isError={result?.is_error}
       status={result ? 'complete' : 'running'}
-      initialExpanded={autoExpandAbove != null && globalIdx >= autoExpandAbove}
+      initialExpanded={shouldExpand}
     />
   )
 }
@@ -866,15 +872,24 @@ In `src/components/claude-chat/ClaudeChatView.tsx`, compute tool counts and pass
 ```tsx
 const RECENT_TOOLS_EXPANDED = 3
 
-// Count total completed tools across all messages
+// Count only COMPLETED tools (tool_use with a matching tool_result in the same message).
+// Running tools (no result yet) are excluded — they follow default collapsed behavior
+// and don't consume "recent" slots.
 const messages = session?.messages ?? []
-let totalTools = 0
-const toolOffsets: number[] = []
+let totalCompletedTools = 0
+const completedToolOffsets: number[] = []
 for (const msg of messages) {
-  toolOffsets.push(totalTools)
-  totalTools += msg.content.filter(b => b.type === 'tool_use').length
+  completedToolOffsets.push(totalCompletedTools)
+  for (const b of msg.content) {
+    if (b.type === 'tool_use' && b.id) {
+      const hasResult = msg.content.some(
+        r => r.type === 'tool_result' && r.tool_use_id === b.id
+      )
+      if (hasResult) totalCompletedTools++
+    }
+  }
 }
-const autoExpandAbove = Math.max(0, totalTools - RECENT_TOOLS_EXPANDED)
+const autoExpandAbove = Math.max(0, totalCompletedTools - RECENT_TOOLS_EXPANDED)
 
 // In the render:
 {messages.map((msg, i) => (
@@ -887,7 +902,7 @@ const autoExpandAbove = Math.max(0, totalTools - RECENT_TOOLS_EXPANDED)
     showThinking={paneContent.showThinking ?? true}
     showTools={paneContent.showTools ?? true}
     showTimecodes={paneContent.showTimecodes ?? false}
-    toolIndexOffset={toolOffsets[i]}
+    completedToolOffset={completedToolOffsets[i]}
     autoExpandAbove={autoExpandAbove}
   />
 ))}
@@ -1037,22 +1052,54 @@ import ThinkingIndicator from './ThinkingIndicator'
 // ... in the render, after the streaming MessageBubble block:
 
 {/* Thinking indicator — shown when running but no response content yet.
-    The component self-debounces with a 200ms delay to prevent flash
-    during brief SDK message gaps (content_block_stop → sdk.assistant). */}
-{session?.status === 'running' && !session.streamingActive && (
+    Three guards prevent false positives:
+    1. status === 'running' — Claude is actively processing
+    2. !streamingActive — no text currently streaming
+    3. lastMessage.role === 'user' — no assistant content committed yet
+    The component self-debounces with a 200ms render delay to prevent
+    flash during brief SDK gaps (content_block_stop → sdk.assistant). */}
+{session?.status === 'running' &&
+  !session.streamingActive &&
+  session.messages.length > 0 &&
+  session.messages[session.messages.length - 1].role === 'user' && (
   <ThinkingIndicator />
 )}
 ```
 
-**Step 6: Run all claude-chat tests**
+**Step 6: Add ClaudeChatView integration test for indicator gating**
+
+Add to `test/unit/client/components/claude-chat/ClaudeChatView.status.test.tsx` (or a new `ClaudeChatView.indicator.test.tsx`) tests that verify the indicator condition at the view level:
+
+```tsx
+it('shows thinking indicator when status=running and last message is from user', () => {
+  // Render ClaudeChatView with session: status='running', messages=[{role:'user',...}],
+  // streamingActive=false
+  // Advance timers by 200ms for the render delay
+  // Assert: screen.getByRole('status') is in the document
+})
+
+it('hides thinking indicator when assistant message exists after user message', () => {
+  // Session: status='running', messages=[{role:'user',...},{role:'assistant',...}],
+  // streamingActive=false
+  // Assert: screen.queryByRole('status') is NOT in the document
+})
+
+it('hides thinking indicator when streaming is active', () => {
+  // Session: status='running', messages=[{role:'user',...}],
+  // streamingActive=true, streamingText='...'
+  // Assert: screen.queryByRole('status') is NOT in the document
+})
+```
+
+**Step 7: Run all claude-chat tests**
 
 Run: `npm run test:client -- --run test/unit/client/components/claude-chat/`
 Expected: All PASS
 
-**Step 7: Commit**
+**Step 8: Commit**
 
 ```bash
-git add src/components/claude-chat/ThinkingIndicator.tsx test/unit/client/components/claude-chat/ThinkingIndicator.test.tsx src/components/claude-chat/ClaudeChatView.tsx
+git add src/components/claude-chat/ThinkingIndicator.tsx test/unit/client/components/claude-chat/ThinkingIndicator.test.tsx src/components/claude-chat/ClaudeChatView.tsx test/unit/client/components/claude-chat/ClaudeChatView.indicator.test.tsx
 git commit -m "feat(freshclaude): add in-chat thinking indicator with flash prevention
 
 Show a pulsing 'Thinking...' indicator inline in the chat when Claude is
@@ -1137,6 +1184,25 @@ describe('useStreamDebounce', () => {
     rerender({ text: 'complete', active: false })
     expect(result.current).toBe('complete')
   })
+
+  it('clears stale text when a new stream starts', () => {
+    const { result, rerender } = renderHook(
+      ({ text, active }) => useStreamDebounce(text, active),
+      { initialProps: { text: '', active: true } },
+    )
+    // Simulate first stream producing text
+    rerender({ text: 'old stream content', active: true })
+    act(() => { vi.advanceTimersByTime(50) })
+    expect(result.current).toBe('old stream content')
+
+    // Stream ends
+    rerender({ text: '', active: false })
+    expect(result.current).toBe('')
+
+    // New stream starts — should not flash old content
+    rerender({ text: '', active: true })
+    expect(result.current).toBe('')
+  })
 })
 ```
 
@@ -1164,9 +1230,10 @@ export function useStreamDebounce(text: string, active: boolean): string {
   const [debouncedText, setDebouncedText] = useState(text)
   const lastFlushedLenRef = useRef(0)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const prevActiveRef = useRef(active)
 
   useEffect(() => {
-    // When streaming is inactive, always show final text
+    // When streaming is inactive, always show final text and reset
     if (!active) {
       setDebouncedText(text)
       lastFlushedLenRef.current = text.length
@@ -1174,8 +1241,20 @@ export function useStreamDebounce(text: string, active: boolean): string {
         clearTimeout(timerRef.current)
         timerRef.current = null
       }
+      prevActiveRef.current = active
       return
     }
+
+    // Reset on new stream start to prevent stale text from previous stream.
+    // Without this, React batching could leave debouncedText holding old
+    // content for a render frame when streamingActive transitions true.
+    if (!prevActiveRef.current && active) {
+      setDebouncedText(text) // text is '' at stream start
+      lastFlushedLenRef.current = text.length
+      prevActiveRef.current = active
+      return
+    }
+    prevActiveRef.current = active
 
     const delta = text.length - lastFlushedLenRef.current
 
@@ -1288,7 +1367,7 @@ Strip `<system-reminder>...</system-reminder>` tags from tool result output befo
 Add to `MessageBubble.test.tsx`:
 
 ```tsx
-it('strips system-reminder tags from tool result content', () => {
+it('strips system-reminder tags from standalone tool result content', () => {
   render(
     <MessageBubble
       role="assistant"
@@ -1300,6 +1379,23 @@ it('strips system-reminder tags from tool result content', () => {
     />
   )
   expect(screen.queryByText(/Hidden system text/)).not.toBeInTheDocument()
+})
+
+it('strips system-reminder tags from paired tool_use/tool_result content', () => {
+  render(
+    <MessageBubble
+      role="assistant"
+      content={[
+        { type: 'tool_use', id: 't1', name: 'Read', input: { file_path: 'foo.ts' } },
+        {
+          type: 'tool_result',
+          tool_use_id: 't1',
+          content: 'file content\n<system-reminder>\nSecret metadata\n</system-reminder>\nmore',
+        },
+      ]}
+    />
+  )
+  expect(screen.queryByText(/Secret metadata/)).not.toBeInTheDocument()
 })
 ```
 
@@ -1319,11 +1415,36 @@ function stripSystemReminders(text: string): string {
 }
 ```
 
-Then update the tool_result rendering:
+Then update **both** result rendering paths — the paired path (tool_use with matched result) and the standalone orphaned-result path:
 
 ```tsx
+// In the paired tool_use rendering (from Task 2):
+if (block.type === 'tool_use' && block.name) {
+  if (!showTools) return null
+  const result = block.id ? resultMap.get(block.id) : undefined
+  const rawResult = result
+    ? (typeof result.content === 'string' ? result.content : JSON.stringify(result.content))
+    : undefined
+  // Strip system reminders from paired results too
+  const resultContent = rawResult ? stripSystemReminders(rawResult) : undefined
+  return (
+    <ToolBlock
+      key={block.id || i}
+      name={block.name}
+      input={block.input}
+      output={resultContent}
+      isError={result?.is_error}
+      status={result ? 'complete' : 'running'}
+    />
+  )
+}
+
+// In the standalone tool_result rendering:
 if (block.type === 'tool_result') {
   if (!showTools) return null
+  if (block.tool_use_id && content.some(b => b.type === 'tool_use' && b.id === block.tool_use_id)) {
+    return null // already merged into paired tool_use
+  }
   const raw = typeof block.content === 'string' ? block.content : JSON.stringify(block.content)
   const resultContent = stripSystemReminders(raw)
   return (
@@ -1337,6 +1458,8 @@ if (block.type === 'tool_result') {
   )
 }
 ```
+
+> **Important:** Most tool results flow through the paired path (tool_use + matched tool_result). The stripping MUST apply there too, not just the standalone orphan path.
 
 **Step 4: Run test to verify it passes**
 
@@ -1614,15 +1737,40 @@ let turnIndex = 0
 
 This replaces the flat `messages.map()` with a turn-aware renderer that collapses old turns while preserving strict chronological ordering.
 
-**Step 6: Run all tests**
+**Step 6: Add ClaudeChatView integration test for turn collapsing**
+
+Add to a new `test/unit/client/components/claude-chat/ClaudeChatView.turns.test.tsx` tests that verify the turn pairing and collapse logic at the view level:
+
+```tsx
+it('collapses old turns and shows recent turns in full', () => {
+  // Render ClaudeChatView with session containing 5 user+assistant turn pairs
+  // Assert: first 2 turns render as CollapsedTurn (expand button visible)
+  // Assert: last 3 turns render as full MessageBubbles
+})
+
+it('preserves chronological order with consecutive user messages', () => {
+  // Session: [user1, user2, assistant1, user3, assistant2]
+  // user1 should be standalone (not paired — followed by another user)
+  // user2+assistant1 should be paired
+  // user3+assistant2 should be paired
+  // Assert: messages appear in correct chronological order (user1 before user2)
+})
+
+it('renders unpaired trailing user message at correct position', () => {
+  // Session: [user1, assistant1, user2] (user2 waiting for response)
+  // Assert: user2 renders after the turn, not at top or bottom
+})
+```
+
+**Step 7: Run all tests**
 
 Run: `npm run test:client -- --run test/unit/client/components/claude-chat/`
 Expected: All PASS
 
-**Step 7: Commit**
+**Step 8: Commit**
 
 ```bash
-git add src/components/claude-chat/CollapsedTurn.tsx test/unit/client/components/claude-chat/CollapsedTurn.test.tsx src/components/claude-chat/ClaudeChatView.tsx
+git add src/components/claude-chat/CollapsedTurn.tsx test/unit/client/components/claude-chat/CollapsedTurn.test.tsx src/components/claude-chat/ClaudeChatView.tsx test/unit/client/components/claude-chat/ClaudeChatView.turns.test.tsx
 git commit -m "feat(freshclaude): collapse old turns into summary lines
 
 Group messages into user+assistant turn pairs. Only the 3 most recent
