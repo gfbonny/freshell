@@ -66,6 +66,8 @@ vi.mock('lucide-react', () => ({
 let capturedKeyHandler: ((event: KeyboardEvent) => boolean) | null = null
 let capturedTerminal: { focus: ReturnType<typeof vi.fn> } | null = null
 
+let capturedTerminalOptions: Record<string, unknown> | null = null
+
 vi.mock('@xterm/xterm', () => {
   class MockTerminal {
     options: Record<string, unknown> = {}
@@ -85,8 +87,9 @@ vi.mock('@xterm/xterm', () => {
     getSelection = vi.fn(() => '')
     focus = vi.fn()
 
-    constructor() {
+    constructor(options?: Record<string, unknown>) {
       capturedTerminal = this
+      capturedTerminalOptions = options ?? null
     }
   }
 
@@ -173,6 +176,7 @@ describe('TerminalView search', () => {
   beforeEach(() => {
     capturedKeyHandler = null
     capturedTerminal = null
+    capturedTerminalOptions = null
     runtimeMocks.findNext.mockClear()
     runtimeMocks.findPrevious.mockClear()
     vi.stubGlobal('ResizeObserver', MockResizeObserver)
@@ -301,6 +305,24 @@ describe('TerminalView search', () => {
     await waitFor(() => {
       expect(screen.getByText('3 of 5')).toBeInTheDocument()
     })
+  })
+
+  it('creates Terminal with allowProposedApi for decoration support', async () => {
+    const { store, tabId, paneId, paneContent } = createTestStore()
+
+    render(
+      <Provider store={store}>
+        <TerminalView tabId={tabId} paneId={paneId} paneContent={paneContent} />
+      </Provider>,
+    )
+
+    await waitFor(() => {
+      expect(capturedTerminalOptions).not.toBeNull()
+    })
+
+    expect(capturedTerminalOptions).toEqual(
+      expect.objectContaining({ allowProposedApi: true }),
+    )
   })
 
   it('displays "No results" when search finds nothing', async () => {

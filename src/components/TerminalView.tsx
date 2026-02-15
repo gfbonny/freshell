@@ -362,6 +362,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     }
 
     const term = new Terminal({
+      allowProposedApi: true,
       convertEol: true,
       cursorBlink: settings.terminal.cursorBlink,
       fontSize: settings.terminal.fontSize,
