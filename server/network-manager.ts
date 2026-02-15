@@ -1,7 +1,6 @@
 import http from 'node:http'
 import os from 'node:os'
 import isPortReachable from 'is-port-reachable'
-import { Bonjour } from 'bonjour-service'
 import { detectLanIps } from './bootstrap.js'
 import { detectFirewall, firewallCommands, type FirewallInfo, type FirewallPlatform } from './firewall.js'
 import type { ConfigStore, NetworkSettings } from './config-store.js'
@@ -15,7 +14,6 @@ export interface NetworkStatus {
   port: number
   lanIps: string[]
   machineHostname: string
-  mdns: { enabled: boolean; hostname: string } | null
   firewall: {
     platform: FirewallPlatform
     active: boolean
@@ -30,7 +28,6 @@ export interface NetworkStatus {
 }
 
 export class NetworkManager {
-  private bonjour: InstanceType<typeof Bonjour> | null = null
   private firewallInfo: FirewallInfo | null = null
   private lanIps: string[] = []
   private lanIpsInitialized = false
@@ -145,7 +142,6 @@ export class NetworkManager {
       port: this.port,
       lanIps: this.lanIps,
       machineHostname: os.hostname().replace(/\.local$/, ''),
-      mdns: effectiveHost === '0.0.0.0' ? network.mdns : null,
       firewall: {
         platform: this.firewallInfo.platform,
         active: this.firewallInfo.active,
@@ -175,12 +171,6 @@ export class NetworkManager {
 
     await this.configStore.patchSettings({ network })
 
-    if (network.mdns.enabled && network.host === '0.0.0.0') {
-      this.startMdns(network.mdns.hostname)
-    } else {
-      this.stopMdns()
-    }
-
     this.firewallInfo = null
     this.refreshLanIps()
     await this.rebuildAllowedOrigins()
@@ -204,15 +194,9 @@ export class NetworkManager {
   }
 
   async initializeFromStartup(
-    effectiveHost: '127.0.0.1' | '0.0.0.0',
-    network: NetworkSettings,
+    _effectiveHost: '127.0.0.1' | '0.0.0.0',
+    _network: NetworkSettings,
   ): Promise<void> {
-    if (network.mdns.enabled && effectiveHost === '0.0.0.0') {
-      this.startMdns(network.mdns.hostname)
-    } else {
-      this.stopMdns()
-    }
-
     this.refreshLanIps()
     await this.rebuildAllowedOrigins()
   }
@@ -257,20 +241,10 @@ export class NetworkManager {
               this.server.removeListener('error', onRollbackError)
               log.warn({ oldHost, port: this.port }, 'Rolled back to previous bind address')
 
-              if (oldHost === '127.0.0.1') {
-                this.stopMdns()
-              }
-
               try {
                 await this.configStore.patchSettings({
                   network: { host: oldHost as '127.0.0.1' | '0.0.0.0' },
                 } as any)
-                if (oldHost === '0.0.0.0') {
-                  const rolledBackSettings = await this.configStore.getSettings()
-                  if (rolledBackSettings.network.mdns.enabled) {
-                    this.startMdns(rolledBackSettings.network.mdns.hostname)
-                  }
-                }
                 await this.rebuildAllowedOrigins()
                 if (this.wsHandler) {
                   const correctedSettings = await this.configStore.getSettings()
@@ -311,26 +285,6 @@ export class NetworkManager {
           })
         })
       }
-    }
-  }
-
-  private startMdns(hostname: string): void {
-    this.stopMdns()
-    try {
-      this.bonjour = new Bonjour()
-      const port = this.devMode && this.devPort ? this.devPort : this.port
-      this.bonjour.publish({ name: hostname, type: 'http', port })
-      log.info({ hostname, port }, 'mDNS service published')
-    } catch (err) {
-      log.warn({ err }, 'Failed to start mDNS')
-    }
-  }
-
-  private stopMdns(): void {
-    if (this.bonjour) {
-      this.bonjour.unpublishAll()
-      this.bonjour.destroy()
-      this.bonjour = null
     }
   }
 
@@ -390,11 +344,6 @@ export class NetworkManager {
         origins.push(`http://${ip}:${this.port}`)
         if (this.devPort) origins.push(`http://${ip}:${this.devPort}`)
       }
-      if (network.mdns.enabled) {
-        const machineHostname = os.hostname().replace(/\.local$/, '')
-        origins.push(`http://${machineHostname}.local:${this.port}`)
-        if (this.devPort) origins.push(`http://${machineHostname}.local:${this.devPort}`)
-      }
     }
     return [...new Set(origins)]
   }
@@ -410,6 +359,6 @@ export class NetworkManager {
   }
 
   async stop(): Promise<void> {
-    this.stopMdns()
+    // No-op: previously stopped mDNS; retained for interface compatibility
   }
 }

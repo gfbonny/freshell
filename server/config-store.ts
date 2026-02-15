@@ -27,10 +27,6 @@ class Mutex {
 export interface NetworkSettings {
   host: '127.0.0.1' | '0.0.0.0'
   configured: boolean
-  mdns: {
-    enabled: boolean
-    hostname: string
-  }
 }
 
 export type AppSettings = {
@@ -175,10 +171,6 @@ export const defaultSettings: AppSettings = {
   network: {
     host: '127.0.0.1',
     configured: false,
-    mdns: {
-      enabled: false,
-      hostname: os.hostname().replace(/\.local$/, '').toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/^-+|-+$/g, '').slice(0, 63) || 'freshell',
-    },
   },
 }
 
@@ -359,7 +351,6 @@ function mergeSettings(base: AppSettings, patch: Partial<AppSettings>): AppSetti
     network: {
       ...base.network,
       ...(patch.network || {}),
-      mdns: { ...base.network.mdns, ...(patch.network?.mdns || {}) },
     },
   }
 }

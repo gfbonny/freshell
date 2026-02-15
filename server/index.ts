@@ -4,7 +4,6 @@ import { setupWslPortForwarding } from './wsl-port-forward.js'
 import express from 'express'
 import fs from 'fs'
 import http from 'http'
-import os from 'os'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import rateLimit from 'express-rate-limit'
@@ -298,13 +297,6 @@ async function main() {
   const NetworkConfigureSchema = z.object({
     host: z.enum(['127.0.0.1', '0.0.0.0']),
     configured: z.boolean(),
-    mdns: z.object({
-      enabled: z.boolean(),
-      hostname: z.string()
-        .min(1).max(63)
-        .regex(/^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$/, 'Invalid mDNS hostname')
-        .transform((s) => s.toLowerCase()),
-    }),
   })
 
   app.post('/api/network/configure', async (req, res) => {
@@ -952,7 +944,7 @@ async function main() {
     }
   }
 
-  // Initialize NetworkManager (ALLOWED_ORIGINS, mDNS) before accepting connections
+  // Initialize NetworkManager (ALLOWED_ORIGINS) before accepting connections
   if (currentSettings.network.configured || bindHost === '0.0.0.0') {
     await networkManager.initializeFromStartup(
       bindHost as '127.0.0.1' | '0.0.0.0',
@@ -986,10 +978,6 @@ async function main() {
       console.log(`   Run the setup wizard to enable remote access.`)
     } else {
       console.log(`   Visit from anywhere on your network: \x1b[36m${url}\x1b[0m`)
-      if (currentSettings.network.mdns.enabled) {
-        const localHostname = os.hostname().replace(/\.local$/, '')
-        console.log(`   Or use: \x1b[36mhttp://${localHostname}.local:${visitPort}/\x1b[0m`)
-      }
       if (hideToken) {
         console.log('   Auth token is configured in .env (not printed to logs).')
       }
@@ -1026,7 +1014,7 @@ async function main() {
     // 5. Close SDK bridge sessions
     sdkBridge.close()
 
-    // 6. Stop NetworkManager (mDNS, etc.)
+    // 6. Stop NetworkManager
     await networkManager.stop()
 
     // 7. Close WebSocket connections gracefully
