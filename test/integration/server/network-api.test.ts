@@ -24,15 +24,6 @@ vi.mock('../../../server/bootstrap.js', () => ({
 vi.mock('is-port-reachable', () => ({
   default: vi.fn().mockResolvedValue(true),
 }))
-vi.mock('bonjour-service', () => {
-  const unpublishAll = vi.fn()
-  const publish = vi.fn().mockReturnValue({ name: 'freshell' })
-  const destroy = vi.fn()
-  return {
-    default: vi.fn().mockImplementation(() => ({ publish, unpublishAll, destroy })),
-    Bonjour: vi.fn().mockImplementation(() => ({ publish, unpublishAll, destroy })),
-  }
-})
 vi.mock('../../../server/wsl-port-forward.js', () => ({
   getWslIp: vi.fn().mockReturnValue('172.24.0.2'),
   buildPortForwardingScript: vi.fn().mockReturnValue('$null # mock script'),
@@ -84,12 +75,6 @@ describe('Network API integration', () => {
     const NetworkConfigureSchema = z.object({
       host: z.enum(['127.0.0.1', '0.0.0.0']),
       configured: z.boolean(),
-      mdns: z.object({
-        enabled: z.boolean(),
-        hostname: z.string().min(1).max(63)
-          .regex(/^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$/)
-          .transform((s) => s.toLowerCase()),
-      }),
     })
 
     app.post('/api/network/configure', async (req, res) => {
@@ -240,7 +225,6 @@ describe('Network API integration', () => {
         .send({
           host: '0.0.0.0',
           configured: true,
-          mdns: { enabled: false, hostname: 'freshell' },
         })
       expect(res.status).toBe(200)
     })
@@ -252,36 +236,8 @@ describe('Network API integration', () => {
         .send({
           host: '10.0.0.1',
           configured: true,
-          mdns: { enabled: false, hostname: 'freshell' },
         })
       expect(res.status).toBe(400)
-    })
-
-    it('rejects missing mdns hostname', async () => {
-      const res = await request(app)
-        .post('/api/network/configure')
-        .set('x-auth-token', token)
-        .send({
-          host: '0.0.0.0',
-          configured: true,
-          mdns: { enabled: false },
-        })
-      expect(res.status).toBe(400)
-    })
-
-    it('normalizes hostname to lowercase', async () => {
-      const res = await request(app)
-        .post('/api/network/configure')
-        .set('x-auth-token', token)
-        .send({
-          host: '127.0.0.1',
-          configured: true,
-          mdns: { enabled: false, hostname: 'MyBox' },
-        })
-      expect(res.status).toBe(200)
-      // Verify config was saved with lowercase hostname
-      const settings = await configStore.getSettings()
-      expect(settings.network.mdns.hostname).toBe('mybox')
     })
   })
 
