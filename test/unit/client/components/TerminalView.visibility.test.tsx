@@ -21,6 +21,7 @@ vi.mock('@xterm/xterm', () => ({
   Terminal: vi.fn().mockImplementation(() => ({
     loadAddon: vi.fn(),
     open: vi.fn(),
+    registerLinkProvider: vi.fn(() => ({ dispose: vi.fn() })),
     onData: vi.fn(() => ({ dispose: vi.fn() })),
     onTitleChange: vi.fn(() => ({ dispose: vi.fn() })),
     attachCustomKeyEventHandler: vi.fn(),
