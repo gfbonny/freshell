@@ -32,6 +32,7 @@ import OverviewView from '@/components/OverviewView'
 import PaneDivider from '@/components/panes/PaneDivider'
 import { AuthRequiredModal } from '@/components/AuthRequiredModal'
 import { SetupWizard } from '@/components/SetupWizard'
+import { ErrorBoundary } from '@/components/ui/error-boundary'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { fetchNetworkStatus } from '@/store/networkSlice'
 import { ContextMenuProvider } from '@/components/context-menu/ContextMenuProvider'
@@ -610,19 +611,29 @@ export default function App() {
   const content = (() => {
     if (view === 'sessions') {
       return (
-        <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading sessions…</div>}>
-          <HistoryView onOpenSession={() => setView('terminal')} />
-        </Suspense>
+        <ErrorBoundary label="Sessions" onNavigate={() => setView('overview')}>
+          <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading sessions…</div>}>
+            <HistoryView onOpenSession={() => setView('terminal')} />
+          </Suspense>
+        </ErrorBoundary>
       )
     }
     if (view === 'settings') {
       return (
-        <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading settings…</div>}>
-          <SettingsView onNavigate={setView} onFirewallTerminal={setPendingFirewallCommand} onSharePanel={() => { setCopied(false); setShowSharePanel(true) }} />
-        </Suspense>
+        <ErrorBoundary label="Settings" onNavigate={() => setView('overview')}>
+          <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading settings…</div>}>
+            <SettingsView onNavigate={setView} onFirewallTerminal={setPendingFirewallCommand} onSharePanel={() => { setCopied(false); setShowSharePanel(true) }} />
+          </Suspense>
+        </ErrorBoundary>
       )
     }
-    if (view === 'overview') return <OverviewView onOpenTab={() => setView('terminal')} />
+    if (view === 'overview') {
+      return (
+        <ErrorBoundary label="Overview">
+          <OverviewView onOpenTab={() => setView('terminal')} />
+        </ErrorBoundary>
+      )
+    }
     return (
       <div className="flex flex-col h-full">
         {(!isLandscapeTerminalView || landscapeTabBarRevealed) && <TabBar />}
@@ -681,7 +692,7 @@ export default function App() {
                   {updateAvailable && <AlertCircle className="h-3 w-3" aria-hidden="true" />}
                 </button>
               </TooltipTrigger>
-              <TooltipContent>
+              <TooltipContent side="bottom">
                 {updateAvailable ? (
                   <div>
                     <div>v{currentVersion} - {latestVersion ? `v${latestVersion} available` : 'update available'}</div>
@@ -753,10 +764,10 @@ export default function App() {
                     {updateAvailable && <AlertCircle className="h-3.5 w-3.5" aria-hidden="true" />}
                   </button>
                 </TooltipTrigger>
-                <TooltipContent>
-                  {updateAvailable ? (
-                    <div>
-                      <div>v{currentVersion} - {latestVersion ? `v${latestVersion} available` : 'update available'}</div>
+              <TooltipContent side="bottom">
+                {updateAvailable ? (
+                  <div>
+                    <div>v{currentVersion} - {latestVersion ? `v${latestVersion} available` : 'update available'}</div>
                       <div className="text-muted-foreground">Click for update instructions</div>
                     </div>
                   ) : (
