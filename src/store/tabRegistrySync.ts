@@ -44,7 +44,7 @@ function nextRevision(record: RegistryTabRecord, revisions: RevisionState): numb
   return revision
 }
 
-function buildRecords(state: RootState, now: number, revisions: RevisionState): RegistryTabRecord[] {
+function buildRecords(state: RootState, now: number, revisions: RevisionState, serverInstanceId: string): RegistryTabRecord[] {
   const records: RegistryTabRecord[] = []
   const { deviceId, deviceLabel } = state.tabRegistry
 
@@ -54,6 +54,7 @@ function buildRecords(state: RootState, now: number, revisions: RevisionState): 
     const recordBase = buildOpenTabRegistryRecord({
       tab,
       layout,
+      serverInstanceId,
       paneTitles: state.panes.paneTitles[tab.id],
       deviceId,
       deviceLabel,
@@ -132,7 +133,9 @@ export function startTabRegistrySync(store: AppStore, ws: WsClient): () => void 
   const pushNow = (force = false) => {
     if (ws.state !== 'ready') return
     const state = store.getState()
-    const records = buildRecords(state, Date.now(), revisions)
+    const serverInstanceId = state.connection?.serverInstanceId || ws.serverInstanceId
+    if (!serverInstanceId) return
+    const records = buildRecords(state, Date.now(), revisions, serverInstanceId)
     const fingerprint = JSON.stringify(records)
     if (!force && fingerprint === lastPushFingerprint) return
     lastPushFingerprint = fingerprint

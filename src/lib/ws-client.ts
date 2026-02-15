@@ -25,6 +25,7 @@ const perfConfig = getClientPerfConfig()
 export class WsClient {
   private ws: WebSocket | null = null
   private _state: ConnectionState = 'disconnected'
+  private _serverInstanceId: string | undefined
   private connectPromise: Promise<void> | null = null
   private messageHandlers = new Set<MessageHandler>()
   private reconnectHandlers = new Set<ReconnectHandler>()
@@ -59,6 +60,10 @@ export class WsClient {
 
   get isReady(): boolean {
     return this._state === 'ready'
+  }
+
+  get serverInstanceId(): string | undefined {
+    return this._serverInstanceId
   }
 
   connect(): Promise<void> {
@@ -127,6 +132,9 @@ export class WsClient {
         }
 
         if (msg.type === 'ready') {
+          this._serverInstanceId = typeof msg.serverInstanceId === 'string' && msg.serverInstanceId.trim()
+            ? msg.serverInstanceId
+            : undefined
           this.clearReadyTimeout()
           const isReconnect = this.wasConnectedOnce
           this.wasConnectedOnce = true
@@ -287,6 +295,7 @@ export class WsClient {
     this.ws = null
     this._state = 'disconnected'
     this.pendingMessages = []
+    this._serverInstanceId = undefined
     this.connectPromise = null
     this.reconnectAttempts = 0
   }

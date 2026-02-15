@@ -11,6 +11,7 @@ function makeRecord(overrides: Partial<RegistryTabRecord>): RegistryTabRecord {
   return {
     tabKey: 'device-1:tab-1',
     tabId: 'tab-1',
+    serverInstanceId: 'srv-test',
     deviceId: 'device-1',
     deviceLabel: 'device-1',
     tabName: 'freshell',

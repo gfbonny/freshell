@@ -41,6 +41,7 @@ import { collectCandidateDirectories } from './candidate-dirs.js'
 import { createTabsRegistryStore } from './tabs-registry/store.js'
 import { checkForUpdate } from './updater/version-checker.js'
 import { SessionAssociationCoordinator } from './session-association-coordinator.js'
+import { loadOrCreateServerInstanceId } from './instance-id.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -174,6 +175,7 @@ async function main() {
   const terminalMetadata = new TerminalMetadataService()
 
   const sessionRepairService = getSessionRepairService()
+  const serverInstanceId = await loadOrCreateServerInstanceId()
 
   const sdkBridge = new SdkBridge()
 
@@ -199,6 +201,7 @@ async function main() {
     },
     () => terminalMetadata.list(),
     tabsRegistryStore,
+    serverInstanceId,
   )
   const port = Number(process.env.PORT || 3001)
   const isDev = process.env.NODE_ENV !== 'production'

@@ -50,6 +50,12 @@ function createState(): RootState {
       searchRangeDays: 30,
       loading: false,
     },
+    connection: {
+      status: 'ready',
+      platform: 'linux',
+      availableClis: {},
+      serverInstanceId: 'srv-test',
+    },
   } as unknown as RootState
 }
 

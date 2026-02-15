@@ -82,7 +82,12 @@ function createStore() {
     preloadedState: {
       settings: { settings: defaultSettings, loaded: true, lastSavedAt: undefined },
       tabs: { tabs: [{ id: 'tab-1', mode: 'shell' }], activeTabId: 'tab-1' },
-      connection: { status: 'disconnected' as const, lastError: undefined, platform: null },
+      connection: {
+        status: 'disconnected' as const,
+        lastError: undefined,
+        platform: null,
+        availableClis: {},
+      },
       sessions: { projects: [], expandedProjects: new Set<string>(), isLoading: false, error: null },
       panes: { layouts: {}, activePane: {} },
       idleWarnings: { warnings: {} },
@@ -134,12 +139,17 @@ describe('App WS bootstrap recovery', () => {
     // Simulate a later successful auto-reconnect completing its handshake.
     expect(messageHandler).toBeTypeOf('function')
     act(() => {
-      messageHandler?.({ type: 'ready' })
+      messageHandler?.({
+        type: 'ready',
+        timestamp: new Date().toISOString(),
+        serverInstanceId: 'srv-test',
+      })
     })
 
     await waitFor(() => {
       expect(store.getState().connection.status).toBe('ready')
       expect(store.getState().connection.lastError).toBeUndefined()
+      expect(store.getState().connection.serverInstanceId).toBe('srv-test')
     })
   })
 

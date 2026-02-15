@@ -125,7 +125,9 @@ describe('ws tabs registry protocol', () => {
     const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`)
     await new Promise<void>((resolve) => ws.on('open', () => resolve()))
     ws.send(JSON.stringify({ type: 'hello', token: 'tabs-sync-token' }))
-    await waitForMessage(ws, (msg) => msg.type === 'ready')
+    const ready = await waitForMessage(ws, (msg) => msg.type === 'ready')
+    expect(typeof ready.serverInstanceId).toBe('string')
+    expect(ready.serverInstanceId.length).toBeGreaterThan(0)
 
     ws.send(JSON.stringify({
       type: 'tabs.sync.push',

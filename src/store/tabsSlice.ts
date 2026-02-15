@@ -243,6 +243,7 @@ export const closeTab = createAsyncThunk(
     const tab = stateBeforeClose.tabs.tabs.find((item) => item.id === tabId)
     const layout = stateBeforeClose.panes.layouts[tabId]
     const tabRegistryState = (stateBeforeClose as { tabRegistry?: RootState['tabRegistry'] }).tabRegistry
+    const serverInstanceId = stateBeforeClose.connection?.serverInstanceId || 'server-unknown'
     if (tab && layout && tabRegistryState) {
       const paneCount = countPaneLeaves(layout)
       const openDurationMs = Math.max(0, Date.now() - (tab.createdAt || Date.now()))
@@ -255,6 +256,7 @@ export const closeTab = createAsyncThunk(
         dispatch(recordClosedTabSnapshot(buildClosedTabRegistryRecord({
           tab,
           layout,
+          serverInstanceId,
           paneTitles: stateBeforeClose.panes.paneTitles[tabId],
           deviceId: tabRegistryState.deviceId,
           deviceLabel: tabRegistryState.deviceLabel,

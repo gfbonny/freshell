@@ -23,6 +23,7 @@ export type RegistryPaneSnapshot = z.infer<typeof RegistryPaneSnapshotSchema>
 export const TabRegistryRecordSchema = z.object({
   tabKey: z.string().min(1),
   tabId: z.string().min(1),
+  serverInstanceId: z.string().min(1),
   deviceId: z.string().min(1),
   deviceLabel: z.string().min(1),
   tabName: z.string().min(1),

@@ -6,6 +6,7 @@ describe('TabRegistryRecordSchema (server)', () => {
     const parsed = TabRegistryRecordSchema.parse({
       tabKey: 'device-1:tab-1',
       tabId: 'tab-1',
+      serverInstanceId: 'srv-test',
       deviceId: 'device-1',
       deviceLabel: 'danlaptop',
       tabName: 'freshell',
@@ -30,6 +31,7 @@ describe('TabRegistryRecordSchema (server)', () => {
     const result = TabRegistryRecordSchema.safeParse({
       tabKey: 'device-1:tab-1',
       tabId: 'tab-1',
+      serverInstanceId: 'srv-test',
       deviceId: 'device-1',
       deviceLabel: 'danlaptop',
       tabName: 'freshell',

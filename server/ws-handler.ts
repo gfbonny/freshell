@@ -16,7 +16,7 @@ import type { SessionScanResult, SessionRepairResult } from './session-scanner/t
 import { isValidClaudeSessionId } from './claude-session-id.js'
 import type { SdkBridge } from './sdk-bridge.js'
 import type { SdkServerMessage } from './sdk-bridge-types.js'
-import { TabRegistryRecordSchema } from './tabs-registry/types.js'
+import { TabRegistryRecordBaseSchema, TabRegistryRecordSchema } from './tabs-registry/types.js'
 import type { TabsRegistryStore } from './tabs-registry/store.js'
 import {
   SdkCreateSchema,
@@ -263,11 +263,17 @@ const TerminalMetaListSchema = z.object({
   requestId: z.string().min(1),
 })
 
+const TabsSyncPushRecordSchema = TabRegistryRecordBaseSchema.omit({
+  serverInstanceId: true,
+  deviceId: true,
+  deviceLabel: true,
+})
+
 const TabsSyncPushSchema = z.object({
   type: z.literal('tabs.sync.push'),
   deviceId: z.string().min(1),
   deviceLabel: z.string().min(1),
-  records: z.array(TabRegistryRecordSchema),
+  records: z.array(TabsSyncPushRecordSchema),
 })
 
 const TabsSyncQuerySchema = z.object({
@@ -407,6 +413,7 @@ export class WsHandler {
   private handshakeSnapshotProvider?: HandshakeSnapshotProvider
   private terminalMetaListProvider?: () => TerminalMeta[]
   private tabsRegistryStore?: TabsRegistryStore
+  private readonly serverInstanceId: string
   private sessionRepairListeners?: {
     scanned: (result: SessionScanResult) => void
     repaired: (result: SessionRepairResult) => void
@@ -422,11 +429,15 @@ export class WsHandler {
     handshakeSnapshotProvider?: HandshakeSnapshotProvider,
     terminalMetaListProvider?: () => TerminalMeta[],
     tabsRegistryStore?: TabsRegistryStore,
+    serverInstanceId?: string,
   ) {
     this.sessionRepairService = sessionRepairService
     this.handshakeSnapshotProvider = handshakeSnapshotProvider
     this.terminalMetaListProvider = terminalMetaListProvider
     this.tabsRegistryStore = tabsRegistryStore
+    this.serverInstanceId = serverInstanceId && serverInstanceId.trim().length > 0
+      ? serverInstanceId
+      : `srv-${randomUUID()}`
     this.wss = new WebSocketServer({
       server,
       path: '/ws',
@@ -1118,7 +1129,7 @@ export class WsHandler {
           this.sessionRepairService.prioritizeSessions(m.sessions)
         }
 
-        this.send(ws, { type: 'ready', timestamp: nowIso() })
+        this.send(ws, { type: 'ready', timestamp: nowIso(), serverInstanceId: this.serverInstanceId })
         this.scheduleHandshakeSnapshot(ws, state)
         return
       }
@@ -1445,6 +1456,7 @@ export class WsHandler {
         for (const record of m.records) {
           await this.tabsRegistryStore.upsert({
             ...record,
+            serverInstanceId: this.serverInstanceId,
             deviceId: m.deviceId,
             deviceLabel: m.deviceLabel,
           })

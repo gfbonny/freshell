@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type TouchEvent as ReactTouchEvent } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { setStatus, setError, setPlatform, setAvailableClis } from '@/store/connectionSlice'
+import { setStatus, setError, setServerInstanceId, setPlatform, setAvailableClis } from '@/store/connectionSlice'
 import { setSettings } from '@/store/settingsSlice'
 import {
   setProjects,
@@ -45,6 +45,7 @@ import { updateSettingsLocal, markSaved } from '@/store/settingsSlice'
 import { clearIdleWarning, recordIdleWarning } from '@/store/idleWarningsSlice'
 import { setTerminalMetaSnapshot, upsertTerminalMeta, removeTerminalMeta } from '@/store/terminalMetaSlice'
 import { handleSdkMessage } from '@/lib/sdk-message-handler'
+import { z } from 'zod'
 
 // Lazy QR code component to avoid loading lean-qr until the share panel opens
 function ShareQrCode({ url }: { url: string }) {
@@ -96,6 +97,12 @@ function parseConfigFallbackReason(value: unknown): ConfigFallbackInfo['reason']
     ? value
     : 'READ_ERROR'
 }
+
+const ReadyMessageSchema = z.object({
+  type: z.literal('ready'),
+  timestamp: z.string(),
+  serverInstanceId: z.string().min(1),
+})
 
 export default function App() {
   useThemeEffect()
@@ -374,10 +381,12 @@ export default function App() {
       const unsubscribe = ws.onMessage((msg) => {
         if (!msg?.type) return
         if (msg.type === 'ready') {
+          const ready = ReadyMessageSchema.safeParse(msg)
           // If the initial connect attempt failed before ready, WsClient may still auto-reconnect.
           // Treat 'ready' as the source of truth for connection status.
           dispatch(setError(undefined))
           dispatch(setStatus('ready'))
+          dispatch(setServerInstanceId(ready.success ? ready.data.serverInstanceId : undefined))
           dispatch(resetWsSnapshotReceived())
           terminalMetaListRequestStartedAtRef.current.clear()
           const requestId = `terminal-meta-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`

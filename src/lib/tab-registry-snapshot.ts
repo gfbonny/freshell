@@ -67,6 +67,7 @@ export function collectPaneSnapshots(
 type SnapshotRecordInput = {
   tab: Tab
   layout: PaneNode
+  serverInstanceId: string
   paneTitles?: Record<string, string>
   deviceId: string
   deviceLabel: string
@@ -79,6 +80,7 @@ export function buildOpenTabRegistryRecord(input: SnapshotRecordInput): Registry
   return {
     tabKey: `${input.deviceId}:${input.tab.id}`,
     tabId: input.tab.id,
+    serverInstanceId: input.serverInstanceId,
     deviceId: input.deviceId,
     deviceLabel: input.deviceLabel,
     tabName: input.tab.title || 'Untitled',
@@ -97,6 +99,7 @@ export function buildClosedTabRegistryRecord(input: SnapshotRecordInput): Regist
   return {
     tabKey: `${input.deviceId}:${input.tab.id}`,
     tabId: input.tab.id,
+    serverInstanceId: input.serverInstanceId,
     deviceId: input.deviceId,
     deviceLabel: input.deviceLabel,
     tabName: input.tab.title || 'Untitled',

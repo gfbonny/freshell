@@ -20,9 +20,10 @@ export const RegistryPaneSnapshotSchema = z.object({
 })
 export type RegistryPaneSnapshot = z.infer<typeof RegistryPaneSnapshotSchema>
 
-export const TabRegistryRecordSchema = z.object({
+export const TabRegistryRecordBaseSchema = z.object({
   tabKey: z.string().min(1),
   tabId: z.string().min(1),
+  serverInstanceId: z.string().min(1),
   deviceId: z.string().min(1),
   deviceLabel: z.string().min(1),
   tabName: z.string().min(1),
@@ -34,7 +35,9 @@ export const TabRegistryRecordSchema = z.object({
   paneCount: z.number().int().nonnegative(),
   titleSetByUser: z.boolean(),
   panes: z.array(RegistryPaneSnapshotSchema),
-}).superRefine((value, ctx) => {
+})
+
+export const TabRegistryRecordSchema = TabRegistryRecordBaseSchema.superRefine((value, ctx) => {
   if (value.status === 'closed' && value.closedAt == null) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
