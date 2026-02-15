@@ -124,12 +124,12 @@ export class SessionBindingAuthority {
   }
 }
 
-type BindResult =
+export type BindResult =
   | { ok: true; key: SessionCompositeKey }
   | { ok: false; reason: 'session_already_owned'; owner: string }
   | { ok: false; reason: 'terminal_already_bound'; existing: SessionCompositeKey }
 
-type UnbindResult =
+export type UnbindResult =
   | { ok: true; key: SessionCompositeKey }
   | { ok: false; reason: 'not_bound' }
 ```
@@ -151,6 +151,9 @@ type BindSessionResult =
   | { ok: true; terminalId: string; sessionId: string }
   | { ok: false; reason: 'terminal_missing' | 'mode_mismatch' }
   | BindResult
+
+// Keep `reason` values disjoint across variants for easy narrowing:
+// session_already_owned | terminal_already_bound | terminal_missing | mode_mismatch
 ```
 
 **Step 3: Add unbind on terminal shutdown/exit**
@@ -300,6 +303,7 @@ repairLegacySessionOwners(mode: TerminalMode, sessionId: string) {
   // Choose earliest-created running terminal as owner, bind it.
   // For non-canonical duplicates: set terminal.resumeSessionId = undefined,
   // remove any stale authority mapping, keep process running (no kill), and emit metadata upsert.
+  // If no running terminal exists for the legacy set, do nothing and return.
 }
 ```
 
@@ -381,6 +385,14 @@ serverInstanceId: z.string().min(1)
 ```
 
 ```ts
+// Tab registry schema update (server + client mirrored types)
+const TabRegistryRecordSchema = z.object({
+  // existing fields...
+  serverInstanceId: z.string().min(1),
+})
+```
+
+```ts
 const ReadyMessageSchema = z.object({
   type: z.literal('ready'),
   timestamp: z.string(),
@@ -393,6 +405,17 @@ if (msg.type === 'ready') {
   if (parsed.success) dispatch(setServerInstanceId(parsed.data.serverInstanceId))
 }
 ```
+
+```ts
+// connectionSlice.ts
+type ConnectionState = { /* existing fields */; serverInstanceId?: string }
+const setServerInstanceId = (state, action: PayloadAction<string | undefined>) => {
+  state.serverInstanceId = action.payload
+}
+```
+
+Note:
+- Outbound `ready` is currently an untyped server send; `ReadyMessageSchema` is a new client-side validation guard.
 
 **Step 3: Ensure `tabs.sync.push` enforces server instance id**
 
@@ -457,6 +480,9 @@ type SessionLocator = {
   serverInstanceId?: string
 }
 ```
+
+Placement:
+- Define/export `SessionLocator` in `src/store/paneTypes.ts` so both pane payload typing and `src/lib/session-utils.ts` can share it.
 
 ```ts
 // snapshot payload
