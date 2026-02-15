@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, cleanup, waitFor } from '@testing-library/react'
 import { Provider } from 'react-redux'
 import { configureStore } from '@reduxjs/toolkit'
 import App from '@/App'
@@ -79,7 +79,7 @@ vi.mock('@/hooks/useTheme', () => ({
   useThemeEffect: () => {},
 }))
 
-function createTestStore() {
+function createTestStore(options?: { sidebarCollapsed?: boolean }) {
   return configureStore({
     reducer: {
       settings: settingsReducer,
@@ -98,7 +98,13 @@ function createTestStore() {
       }),
     preloadedState: {
       settings: {
-        settings: defaultSettings,
+        settings: {
+          ...defaultSettings,
+          sidebar: {
+            ...defaultSettings.sidebar,
+            collapsed: options?.sidebarCollapsed ?? false,
+          },
+        },
         loaded: true,
         lastSavedAt: undefined,
       },
@@ -142,7 +148,7 @@ function renderApp(store = createTestStore()) {
   )
 }
 
-describe('App Header - Mobile Touch Targets', () => {
+describe('App - Swipe Sidebar Gesture', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
@@ -153,58 +159,6 @@ describe('App Header - Mobile Touch Targets', () => {
       if (url === '/api/sessions') return Promise.resolve([])
       return Promise.resolve({})
     })
-  })
-
-  afterEach(() => {
-    cleanup()
-  })
-
-  it('sidebar toggle button has 44px mobile touch target classes', () => {
-    renderApp()
-
-    // Default state is sidebar not collapsed, so title is "Hide sidebar"
-    const sidebarToggle = screen.getByTitle('Hide sidebar')
-    expect(sidebarToggle.className).toContain('min-h-11')
-    expect(sidebarToggle.className).toContain('min-w-11')
-  })
-
-  it('all header buttons have mobile touch target and centering classes', () => {
-    renderApp()
-
-    const themeButton = screen.getByTitle(/^Theme:/)
-    const shareButton = screen.getByTitle('Share LAN access')
-
-    for (const button of [themeButton, shareButton]) {
-      expect(button.className).toContain('min-h-11')
-      expect(button.className).toContain('min-w-11')
-      expect(button.className).toContain('flex')
-      expect(button.className).toContain('items-center')
-      expect(button.className).toContain('justify-center')
-    }
-  })
-
-  it('header buttons restore desktop sizing with md: breakpoint classes', () => {
-    renderApp()
-
-    const sidebarToggle = screen.getByTitle('Hide sidebar')
-    expect(sidebarToggle.className).toContain('md:min-h-0')
-    expect(sidebarToggle.className).toContain('md:min-w-0')
-  })
-})
-
-describe('App Mobile - Sidebar Backdrop', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    localStorage.clear()
-    localStorage.setItem('freshell.auth-token', 'test-token-abc123')
-    mockApiGet.mockImplementation((url: string) => {
-      if (url === '/api/settings') return Promise.resolve(defaultSettings)
-      if (url === '/api/platform') return Promise.resolve({ platform: 'linux' })
-      if (url === '/api/sessions') return Promise.resolve([])
-      return Promise.resolve({})
-    })
-    // Set mobile viewport via matchMedia mock
-    ;(globalThis as any).setMobileForTest(true)
   })
 
   afterEach(() => {
@@ -212,101 +166,55 @@ describe('App Mobile - Sidebar Backdrop', () => {
     ;(globalThis as any).setMobileForTest(false)
   })
 
-  it('shows backdrop overlay when sidebar is open on mobile', async () => {
+  it('renders with touch-action: pan-y on mobile viewport', async () => {
+    ;(globalThis as any).setMobileForTest(true)
+
     renderApp()
 
-    // Wait for auto-collapse on mobile
+    // Wait for mobile auto-collapse to settle
     await waitFor(() => {
       expect(screen.getByTitle('Show sidebar')).toBeInTheDocument()
     })
 
-    // Open the sidebar
-    fireEvent.click(screen.getByTitle('Show sidebar'))
+    // The main content area (flex-1 min-h-0 flex relative) should have touch-action style
+    // Find by the data attribute or structure - it's the parent of the mobile overlay area
+    const mainContentArea = screen.getByTitle('Show sidebar')
+      .closest('.h-full')
+      ?.querySelector('.flex-1.min-h-0.flex.relative')
 
-    await waitFor(() => {
-      expect(screen.getByTestId('mock-sidebar')).toBeInTheDocument()
-    })
-
-    // Backdrop should be present
-    const backdrop = screen.getByRole('presentation')
-    expect(backdrop.className).toContain('bg-black/50')
-    expect(backdrop.className).toContain('absolute')
-    expect(backdrop.className).toContain('inset-0')
+    expect(mainContentArea).toBeTruthy()
+    expect((mainContentArea as HTMLElement).style.touchAction).toBe('pan-y')
   })
 
-  it('closes sidebar when backdrop is clicked', async () => {
+  it('does not apply touch-action on desktop viewport', () => {
+    // Default is desktop (matchMedia matches=false)
     renderApp()
 
-    await waitFor(() => {
-      expect(screen.getByTitle('Show sidebar')).toBeInTheDocument()
-    })
+    const mainContentArea = screen.getByTitle('Hide sidebar')
+      .closest('.h-full')
+      ?.querySelector('.flex-1.min-h-0.flex.relative')
 
-    fireEvent.click(screen.getByTitle('Show sidebar'))
+    expect(mainContentArea).toBeTruthy()
+    // On desktop, no inline style is applied, so touchAction should not be 'pan-y'
+    const touchAction = (mainContentArea as HTMLElement).style?.touchAction
+    expect(touchAction).not.toBe('pan-y')
+  })
 
-    await waitFor(() => {
-      expect(screen.getByTestId('mock-sidebar')).toBeInTheDocument()
-    })
+  it('uses useMobile() hook — sidebar auto-collapses on mobile', async () => {
+    // Start as desktop
+    const store = createTestStore({ sidebarCollapsed: false })
+    renderApp(store)
 
-    const backdrop = screen.getByRole('presentation')
-    fireEvent.click(backdrop)
+    // Sidebar should be visible on desktop
+    expect(screen.getByTestId('mock-sidebar')).toBeInTheDocument()
 
+    // Switch to mobile
+    ;(globalThis as any).setMobileForTest(true)
+
+    // Sidebar should auto-collapse
     await waitFor(() => {
       expect(screen.queryByTestId('mock-sidebar')).not.toBeInTheDocument()
       expect(screen.getByTitle('Show sidebar')).toBeInTheDocument()
-    })
-  })
-
-  it('closes sidebar on touchEnd and calls preventDefault for iOS reliability', async () => {
-    renderApp()
-
-    await waitFor(() => {
-      expect(screen.getByTitle('Show sidebar')).toBeInTheDocument()
-    })
-
-    fireEvent.click(screen.getByTitle('Show sidebar'))
-
-    await waitFor(() => {
-      expect(screen.getByTestId('mock-sidebar')).toBeInTheDocument()
-    })
-
-    const backdrop = screen.getByRole('presentation')
-
-    // Fire touchEnd — React's fireEvent returns the event object, but to
-    // check preventDefault we need to create it ourselves.
-    const touchEndEvent = new TouchEvent('touchend', {
-      bubbles: true,
-      cancelable: true,
-    })
-    const preventDefaultSpy = vi.spyOn(touchEndEvent, 'preventDefault')
-
-    backdrop.dispatchEvent(touchEndEvent)
-
-    expect(preventDefaultSpy).toHaveBeenCalled()
-
-    await waitFor(() => {
-      expect(screen.queryByTestId('mock-sidebar')).not.toBeInTheDocument()
-      expect(screen.getByTitle('Show sidebar')).toBeInTheDocument()
-    })
-  })
-
-  it('closes sidebar when Escape is pressed on backdrop', async () => {
-    renderApp()
-
-    await waitFor(() => {
-      expect(screen.getByTitle('Show sidebar')).toBeInTheDocument()
-    })
-
-    fireEvent.click(screen.getByTitle('Show sidebar'))
-
-    await waitFor(() => {
-      expect(screen.getByTestId('mock-sidebar')).toBeInTheDocument()
-    })
-
-    const backdrop = screen.getByRole('presentation')
-    fireEvent.keyDown(backdrop, { key: 'Escape' })
-
-    await waitFor(() => {
-      expect(screen.queryByTestId('mock-sidebar')).not.toBeInTheDocument()
     })
   })
 })

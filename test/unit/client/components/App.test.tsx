@@ -421,8 +421,6 @@ describe('App Component - Idle Warnings', () => {
 })
 
 describe('App Component - Mobile Sidebar', () => {
-  const originalInnerWidth = window.innerWidth
-
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
@@ -435,14 +433,11 @@ describe('App Component - Mobile Sidebar', () => {
   })
 
   afterEach(() => {
-    Object.defineProperty(window, 'innerWidth', {
-      value: originalInnerWidth,
-      writable: true,
-    })
+    ;(globalThis as any).setMobileForTest(false)
   })
 
   it('auto-collapses on mobile but does not re-collapse after user opens it', async () => {
-    Object.defineProperty(window, 'innerWidth', { value: 500, writable: true })
+    ;(globalThis as any).setMobileForTest(true)
 
     renderApp()
 

@@ -143,8 +143,7 @@ describe('App Component - Sidebar Resize', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
-    // Mock window.innerWidth for desktop
-    Object.defineProperty(window, 'innerWidth', { value: 1024, writable: true })
+    // Default: desktop viewport (matchMedia matches=false is the default)
 
     mockApiGet.mockImplementation((url: string) => {
       if (url === '/api/settings') return Promise.resolve(defaultSettings)
@@ -156,6 +155,7 @@ describe('App Component - Sidebar Resize', () => {
 
   afterEach(() => {
     cleanup()
+    ;(globalThis as any).setMobileForTest(false)
   })
 
   describe('sidebar toggle button', () => {
@@ -240,21 +240,19 @@ describe('App Component - Sidebar Resize', () => {
   })
 
   describe('mobile responsive behavior', () => {
-    beforeEach(() => {
-      // Mock window.innerWidth for mobile
-      Object.defineProperty(window, 'innerWidth', { value: 600, writable: true })
+    afterEach(() => {
+      ;(globalThis as any).setMobileForTest(false)
     })
 
     it('auto-collapses sidebar on mobile viewport', async () => {
       const store = createTestStore({ sidebarCollapsed: false })
 
-      // Trigger the resize event after render
-      renderApp(store)
-
-      // Dispatch resize event to trigger mobile detection
+      // Simulate mobile viewport via matchMedia mock
       act(() => {
-        window.dispatchEvent(new Event('resize'))
+        ;(globalThis as any).setMobileForTest(true)
       })
+
+      renderApp(store)
 
       // Sidebar should auto-collapse on mobile
       await waitFor(() => {

@@ -19,7 +19,9 @@ import { setClientPerfEnabled } from '@/lib/perf-logger'
 import { applyLocalTerminalFontFamily } from '@/lib/terminal-fonts'
 import { store } from '@/store/store'
 import { useThemeEffect } from '@/hooks/useTheme'
+import { useMobile } from '@/hooks/useMobile'
 import { useTurnCompletionNotifications } from '@/hooks/useTurnCompletionNotifications'
+import { useDrag } from '@use-gesture/react'
 import { installCrossTabSync } from '@/store/crossTabSync'
 import Sidebar, { AppView } from '@/components/Sidebar'
 import TabBar from '@/components/TabBar'
@@ -63,7 +65,6 @@ function ShareQrCode({ url }: { url: string }) {
 
 const SIDEBAR_MIN_WIDTH = 200
 const SIDEBAR_MAX_WIDTH = 500
-const MOBILE_BREAKPOINT = 768
 const EMPTY_IDLE_WARNINGS: Record<string, unknown> = {}
 
 export default function App() {
@@ -88,7 +89,7 @@ export default function App() {
   const [wizardInitialStep, setWizardInitialStep] = useState<1 | 2>(1)
   const [copied, setCopied] = useState(false)
   const [pendingFirewallCommand, setPendingFirewallCommand] = useState<{ tabId: string; command: string } | null>(null)
-  const [isMobile, setIsMobile] = useState(false)
+  const isMobile = useMobile()
   const paneLayouts = useAppSelector((s) => s.panes.layouts)
   const mainContentRef = useRef<HTMLDivElement>(null)
   const userOpenedSidebarOnMobileRef = useRef(false)
@@ -102,16 +103,6 @@ export default function App() {
   // Sidebar width from settings (or local state during drag)
   const sidebarWidth = settings.sidebar?.width ?? 288
   const sidebarCollapsed = settings.sidebar?.collapsed ?? false
-
-  // Check for mobile viewport
-  useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
-    }
-    checkMobile()
-    window.addEventListener('resize', checkMobile)
-    return () => window.removeEventListener('resize', checkMobile)
-  }, [])
 
   // Auto-collapse sidebar on mobile
   useEffect(() => {
@@ -151,6 +142,35 @@ export default function App() {
       console.warn('Failed to save sidebar settings', err)
     }
   }, [isMobile, sidebarCollapsed, settings.sidebar, dispatch])
+
+  // Swipe gesture: right-swipe from left edge opens sidebar, left-swipe closes it
+  const swipeStartXRef = useRef(0)
+
+  const bindSidebarSwipe = useDrag(
+    ({ movement: [mx], velocity: [vx], direction: [dx], first, last, xy: [x] }) => {
+      if (!isMobile) return
+      if (first) {
+        swipeStartXRef.current = x
+        return
+      }
+      if (!last) return
+
+      const startX = swipeStartXRef.current
+      const swipedRight = dx > 0 && (mx > 50 || vx > 0.5)
+      const swipedLeft = dx < 0 && (Math.abs(mx) > 50 || vx > 0.5)
+
+      if (swipedRight && sidebarCollapsed && startX < 30) {
+        toggleSidebarCollapse()
+      } else if (swipedLeft && !sidebarCollapsed) {
+        toggleSidebarCollapse()
+      }
+    },
+    {
+      axis: 'x',
+      filterTaps: true,
+      pointer: { touch: true },
+    }
+  )
 
   const toggleTheme = async () => {
     const newTheme = settings.theme === 'dark' ? 'light' : settings.theme === 'light' ? 'system' : 'dark'
@@ -531,7 +551,7 @@ export default function App() {
         </div>
       </div>
       {/* Main content area with sidebar */}
-      <div className="flex-1 min-h-0 flex relative" ref={mainContentRef}>
+      <div className="flex-1 min-h-0 flex relative" ref={mainContentRef} {...(isMobile ? bindSidebarSwipe() : {})} style={isMobile ? { touchAction: 'pan-y' } : undefined}>
         {/* Mobile overlay when sidebar is open */}
         {isMobile && !sidebarCollapsed && (
           <div
