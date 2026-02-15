@@ -1233,12 +1233,6 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     markSnapshotChunkedCreated,
   ])
 
-  // NOW we can do the conditional return - after all hooks
-  if (!isTerminal || !terminalContent) {
-    return null
-  }
-
-  const showSpinner = terminalContent.status === 'creating' || isAttaching
   const mobileBottomInsetPx = isMobile ? keyboardInsetPx + MOBILE_TOOLBAR_HEIGHT_PX : 0
   const terminalContainerStyle = useMemo(() => {
     if (!isMobile) return undefined
@@ -1248,6 +1242,13 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       ...(mobileBottomInsetPx > 0 ? { height: `calc(100% - ${mobileBottomInsetPx}px)` } : {}),
     }
   }, [isMobile, mobileBottomInsetPx])
+
+  // NOW we can do the conditional return - after all hooks
+  if (!isTerminal || !terminalContent) {
+    return null
+  }
+
+  const showSpinner = terminalContent.status === 'creating' || isAttaching
 
   return (
     <div
