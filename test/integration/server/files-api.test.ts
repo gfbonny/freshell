@@ -283,6 +283,41 @@ describe('Files API Integration', () => {
         await fsp.rm(homeTempDir, { recursive: true, force: true }).catch(() => {})
       }
     })
+
+    it('supports Windows drive prefixes when running in WSL', async () => {
+      const originalWslDistro = process.env.WSL_DISTRO_NAME
+      const originalWslSys32 = process.env.WSL_WINDOWS_SYS32
+      const fakeSys32 = path.join(tempDir, 'wsl-mount', 'c', 'Windows', 'System32')
+      const mappedDir = path.join(tempDir, 'wsl-mount', 'd', 'users', 'words with spaces')
+      const mappedMatch = path.join(mappedDir, 'alpha')
+
+      try {
+        process.env.WSL_DISTRO_NAME = 'Ubuntu'
+        process.env.WSL_WINDOWS_SYS32 = fakeSys32
+        await fsp.mkdir(fakeSys32, { recursive: true })
+        await fsp.mkdir(mappedMatch, { recursive: true })
+
+        const res = await request(app)
+          .get('/api/files/complete')
+          .query({ prefix: String.raw`D:\users\words with spaces\a`, dirs: 'true' })
+          .set('x-auth-token', TEST_AUTH_TOKEN)
+
+        expect(res.status).toBe(200)
+        const paths = res.body.suggestions.map((s: any) => s.path)
+        expect(paths).toContain(String.raw`D:\users\words with spaces\alpha`)
+      } finally {
+        if (originalWslDistro === undefined) {
+          delete process.env.WSL_DISTRO_NAME
+        } else {
+          process.env.WSL_DISTRO_NAME = originalWslDistro
+        }
+        if (originalWslSys32 === undefined) {
+          delete process.env.WSL_WINDOWS_SYS32
+        } else {
+          process.env.WSL_WINDOWS_SYS32 = originalWslSys32
+        }
+      }
+    })
   })
 
   describe('POST /api/files/validate-dir', () => {
@@ -333,6 +368,40 @@ describe('Files API Integration', () => {
 
       expect(res.status).toBe(400)
       expect(res.body.error).toContain('path')
+    })
+
+    it('validates Windows drive paths when running in WSL', async () => {
+      const originalWslDistro = process.env.WSL_DISTRO_NAME
+      const originalWslSys32 = process.env.WSL_WINDOWS_SYS32
+      const fakeSys32 = path.join(tempDir, 'wsl-mount', 'c', 'Windows', 'System32')
+      const mappedDir = path.join(tempDir, 'wsl-mount', 'd', 'users', 'words with spaces')
+
+      process.env.WSL_DISTRO_NAME = 'Ubuntu'
+      process.env.WSL_WINDOWS_SYS32 = fakeSys32
+      await fsp.mkdir(fakeSys32, { recursive: true })
+      await fsp.mkdir(mappedDir, { recursive: true })
+
+      try {
+        const res = await request(app)
+          .post('/api/files/validate-dir')
+          .set('x-auth-token', TEST_AUTH_TOKEN)
+          .send({ path: String.raw`D:\users\words with spaces` })
+
+        expect(res.status).toBe(200)
+        expect(res.body.valid).toBe(true)
+        expect(res.body.resolvedPath).toBe(String.raw`D:\users\words with spaces`)
+      } finally {
+        if (originalWslDistro === undefined) {
+          delete process.env.WSL_DISTRO_NAME
+        } else {
+          process.env.WSL_DISTRO_NAME = originalWslDistro
+        }
+        if (originalWslSys32 === undefined) {
+          delete process.env.WSL_WINDOWS_SYS32
+        } else {
+          process.env.WSL_WINDOWS_SYS32 = originalWslSys32
+        }
+      }
     })
   })
 })

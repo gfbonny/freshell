@@ -2,10 +2,15 @@ import express, { type Request, type Response, type NextFunction } from 'express
 import fsp from 'fs/promises'
 import path from 'path'
 import { spawn } from 'child_process'
-import { isPathAllowed, isReachableDirectory, resolveUserPath } from './path-utils.js'
+import { getPathModuleForFlavor, isReachableDirectory, normalizeUserPath, toFilesystemPath } from './path-utils.js'
 import { configStore } from './config-store.js'
 
 export const filesRouter = express.Router()
+
+async function resolveUserFilesystemPath(input: string): Promise<string> {
+  const { normalizedPath, flavor } = normalizeUserPath(input)
+  return toFilesystemPath(normalizedPath, flavor)
+}
 
 /**
  * Middleware that validates file paths against the configured allowedFilePaths sandbox.
@@ -18,7 +23,7 @@ async function validatePath(req: Request, res: Response, next: NextFunction) {
     return next()
   }
 
-  const resolved = path.resolve(resolveUserPath(filePath))
+  const resolved = await resolveUserFilesystemPath(filePath)
   const settings = await configStore.getSettings()
 
   if (!isPathAllowed(resolved, settings.allowedFilePaths)) {
@@ -34,7 +39,7 @@ filesRouter.get('/read', validatePath, async (req, res) => {
     return res.status(400).json({ error: 'path query parameter required' })
   }
 
-  const resolved = path.resolve(resolveUserPath(filePath))
+  const resolved = await resolveUserFilesystemPath(filePath)
 
   try {
     const stat = await fsp.stat(resolved)
@@ -66,7 +71,7 @@ filesRouter.post('/write', validatePath, async (req, res) => {
     return res.status(400).json({ error: 'content is required' })
   }
 
-  const resolved = path.resolve(resolveUserPath(filePath))
+  const resolved = await resolveUserFilesystemPath(filePath)
 
   try {
     // Create parent directories if needed
@@ -91,35 +96,41 @@ filesRouter.get('/complete', validatePath, async (req, res) => {
     return res.status(400).json({ error: 'prefix query parameter required' })
   }
 
-  const resolved = resolveUserPath(prefix)
+  const { normalizedPath, flavor } = normalizeUserPath(prefix)
+  const pathModule = getPathModuleForFlavor(flavor)
+  const resolvedFsPath = await toFilesystemPath(normalizedPath, flavor)
 
   try {
     // Check if prefix is a directory - if so, list all files in it
-    let dir: string
+    let dirDisplayPath: string
+    let dirFsPath: string
     let basename: string
 
     try {
-      const stat = await fsp.stat(resolved)
+      const stat = await fsp.stat(resolvedFsPath)
       if (stat.isDirectory()) {
-        dir = resolved
+        dirDisplayPath = normalizedPath
+        dirFsPath = resolvedFsPath
         basename = ''
       } else {
-        dir = path.dirname(resolved)
-        basename = path.basename(resolved)
+        dirDisplayPath = pathModule.dirname(normalizedPath)
+        dirFsPath = await toFilesystemPath(dirDisplayPath, flavor)
+        basename = pathModule.basename(normalizedPath)
       }
     } catch {
       // Path doesn't exist, treat as partial path
-      dir = path.dirname(resolved)
-      basename = path.basename(resolved)
+      dirDisplayPath = pathModule.dirname(normalizedPath)
+      dirFsPath = await toFilesystemPath(dirDisplayPath, flavor)
+      basename = pathModule.basename(normalizedPath)
     }
 
-    const entries = await fsp.readdir(dir, { withFileTypes: true })
+    const entries = await fsp.readdir(dirFsPath, { withFileTypes: true })
 
     const matches = entries
       .filter((entry) => entry.name.startsWith(basename))
       .filter((entry) => !dirsOnly || entry.isDirectory())
       .map((entry) => ({
-        path: path.join(dir, entry.name),
+        path: pathModule.join(dirDisplayPath, entry.name),
         isDirectory: entry.isDirectory(),
       }))
       // Sort: directories first, then alphabetically
@@ -161,7 +172,7 @@ filesRouter.post('/open', validatePath, async (req, res) => {
     return res.status(400).json({ error: 'path is required' })
   }
 
-  const resolved = path.resolve(resolveUserPath(filePath))
+  const resolved = await resolveUserFilesystemPath(filePath)
 
   try {
     await fsp.stat(resolved)

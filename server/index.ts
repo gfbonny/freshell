@@ -38,6 +38,7 @@ import cookieParser from 'cookie-parser'
 import { PortForwardManager } from './port-forward.js'
 import { getRequesterIdentity, parseTrustProxyEnv } from './request-ip.js'
 import { collectCandidateDirectories } from './candidate-dirs.js'
+import { createTabsRegistryStore } from './tabs-registry/store.js'
 import { checkForUpdate } from './updater/version-checker.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -148,6 +149,7 @@ async function main() {
   const codingCliProviders = [claudeProvider, codexProvider]
   const codingCliIndexer = new CodingCliSessionIndexer(codingCliProviders)
   const codingCliSessionManager = new CodingCliSessionManager(codingCliProviders)
+  const tabsRegistryStore = createTabsRegistryStore()
 
   app.get('/api/debug', async (_req, res) => {
     const cfg = await configStore.snapshot()
@@ -157,6 +159,10 @@ async function main() {
       wsConnections: wsHandler.connectionCount(),
       settings: cfg.settings,
       sessionsProjects: codingCliIndexer.getProjects(),
+      tabsRegistry: {
+        recordCount: tabsRegistryStore.count(),
+        deviceCount: tabsRegistryStore.listDevices().length,
+      },
       terminals: registry.list(),
       time: new Date().toISOString(),
     })
@@ -191,6 +197,7 @@ async function main() {
       }
     },
     () => terminalMetadata.list(),
+    tabsRegistryStore,
   )
   const port = Number(process.env.PORT || 3001)
   const isDev = process.env.NODE_ENV !== 'production'

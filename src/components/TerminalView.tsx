@@ -620,37 +620,39 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     term.open(containerRef.current)
 
     // Register custom link provider for clickable local file paths
-    const filePathLinkDisposable = term.registerLinkProvider?.({
-      provideLinks(bufferLineNumber: number, callback: (links: import('@xterm/xterm').ILink[] | undefined) => void) {
-        const bufferLine = term.buffer.active.getLine(bufferLineNumber - 1)
-        if (!bufferLine) { callback(undefined); return }
-        const text = bufferLine.translateToString()
-        const matches = findLocalFilePaths(text)
-        if (matches.length === 0) { callback(undefined); return }
-        callback(matches.map((m) => ({
-          range: {
-            start: { x: m.startIndex + 1, y: bufferLineNumber },
-            end: { x: m.endIndex, y: bufferLineNumber },
-          },
-          text: m.path,
-          activate: () => {
-            const id = nanoid()
-            dispatch(addTab({ id, mode: 'shell' }))
-            dispatch(initLayout({
-              tabId: id,
-              content: {
-                kind: 'editor',
-                filePath: m.path,
-                language: null,
-                readOnly: false,
-                content: '',
-                viewMode: 'source',
-              },
-            }))
-          },
-        })))
-      },
-    }) ?? { dispose: () => {} }
+    const filePathLinkDisposable = typeof term.registerLinkProvider === 'function'
+      ? term.registerLinkProvider({
+        provideLinks(bufferLineNumber: number, callback: (links: import('@xterm/xterm').ILink[] | undefined) => void) {
+          const bufferLine = term.buffer.active.getLine(bufferLineNumber - 1)
+          if (!bufferLine) { callback(undefined); return }
+          const text = bufferLine.translateToString()
+          const matches = findLocalFilePaths(text)
+          if (matches.length === 0) { callback(undefined); return }
+          callback(matches.map((m) => ({
+            range: {
+              start: { x: m.startIndex + 1, y: bufferLineNumber },
+              end: { x: m.endIndex, y: bufferLineNumber },
+            },
+            text: m.path,
+            activate: () => {
+              const id = nanoid()
+              dispatch(addTab({ id, mode: 'shell' }))
+              dispatch(initLayout({
+                tabId: id,
+                content: {
+                  kind: 'editor',
+                  filePath: m.path,
+                  language: null,
+                  readOnly: false,
+                  content: '',
+                  viewMode: 'source',
+                },
+              }))
+            },
+          })))
+        },
+      })
+      : { dispose: () => {} }
 
     const unregisterActions = registerTerminalActions(paneId, {
       copySelection: async () => {
@@ -765,7 +767,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     ro.observe(containerRef.current)
 
     return () => {
-      filePathLinkDisposable.dispose()
+      filePathLinkDisposable?.dispose()
       ro.disconnect()
       unregisterActions()
       searchResultsDisposable.dispose()

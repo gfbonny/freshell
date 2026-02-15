@@ -222,6 +222,37 @@ describe('directory picker flow (e2e)', () => {
     })
   })
 
+  it('enters path mode for quoted Windows drive input and requests directory completions', async () => {
+    mockApiGet.mockImplementation(async (requestPath: string) => {
+      if (requestPath.startsWith('/api/files/complete')) {
+        return {
+          suggestions: [{ path: String.raw`D:\users\words with spaces\alpha`, isDirectory: true }],
+        }
+      }
+      return { directories: [] }
+    })
+
+    renderPickerFlow()
+
+    const picker = document.querySelector('[data-context="pane-picker"]')
+    if (!picker) throw new Error('Pane picker not found')
+    fireEvent.keyDown(picker, { key: 'l' })
+    fireEvent.transitionEnd(picker)
+
+    const input = screen.getByLabelText('Starting directory for Claude')
+    fireEvent.change(input, { target: { value: String.raw`"D:\users\words with spaces\a"` } })
+
+    await waitFor(() => {
+      expect(mockApiGet).toHaveBeenCalledWith(
+        `/api/files/complete?prefix=${encodeURIComponent(String.raw`"D:\users\words with spaces\a"`)}&dirs=true`
+      )
+    })
+
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: String.raw`D:\users\words with spaces\alpha` })).toBeInTheDocument()
+    })
+  })
+
   describe('tab-aware directory preference (e2e)', () => {
     it('pre-fills picker with tab-preferred directory instead of global default', async () => {
       mockApiGet.mockResolvedValue({

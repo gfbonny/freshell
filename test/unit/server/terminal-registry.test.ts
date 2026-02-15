@@ -1349,6 +1349,15 @@ describe('buildSpawnSpec resume validation on Windows shells', () => {
     expect(spec.args).not.toContain('--resume')
   })
 
+  it('converts Windows cwd to WSL mount path when launching with wsl shell on Windows', () => {
+    Object.defineProperty(process, 'platform', { value: 'win32' })
+    const spec = buildSpawnSpec('claude', String.raw`D:\users\words with spaces`, 'wsl')
+    expect(spec.file).toBe('wsl.exe')
+    const cdIndex = spec.args.indexOf('--cd')
+    expect(cdIndex).toBeGreaterThan(-1)
+    expect(spec.args[cdIndex + 1]).toBe('/mnt/d/users/words with spaces')
+  })
+
   it('quotes coding-cli args for cmd.exe to preserve JSON and whitespace', () => {
     Object.defineProperty(process, 'platform', { value: 'win32' })
     process.env.CLAUDE_CMD = 'C:\\Program Files\\Claude\\claude.cmd'

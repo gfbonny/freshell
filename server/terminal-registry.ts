@@ -8,7 +8,7 @@ import { EventEmitter } from 'events'
 import { logger } from './logger.js'
 import { getPerfConfig, logPerfEvent, shouldLog, startPerfTimer } from './perf-logger.js'
 import type { AppSettings } from './config-store.js'
-import { isReachableDirectorySync } from './path-utils.js'
+import { convertWindowsPathToWslPath, isReachableDirectorySync } from './path-utils.js'
 import { isValidClaudeSessionId } from './claude-session-id.js'
 
 const MAX_WS_BUFFERED_AMOUNT = Number(process.env.MAX_WS_BUFFERED_AMOUNT || 2 * 1024 * 1024)
@@ -494,7 +494,8 @@ export function buildSpawnSpec(mode: TerminalMode, cwd: string | undefined, shel
 
       if (cwd) {
         // cwd must be a Linux path inside WSL.
-        args.push('--cd', cwd)
+        const wslCwd = isLinuxPath(cwd) ? cwd : (convertWindowsPathToWslPath(cwd) || cwd)
+        args.push('--cd', wslCwd)
       }
 
       if (mode === 'shell') {

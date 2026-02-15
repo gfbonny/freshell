@@ -20,7 +20,7 @@ type CompletionSuggestion = {
   isDirectory: boolean
 }
 
-const PATH_INPUT_PATTERN = /^([/~]|[a-zA-Z]:)/
+const PATH_INPUT_PATTERN = /^(['"])?([/~]|[a-zA-Z]:|\\\\|\\(?!\\))/
 
 function dedupeDirectories(values: string[]): string[] {
   const next: string[] = []
