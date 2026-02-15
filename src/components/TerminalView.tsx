@@ -620,8 +620,8 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     term.open(containerRef.current)
 
     // Register custom link provider for clickable local file paths
-    const filePathLinkDisposable = term.registerLinkProvider({
-      provideLinks(bufferLineNumber: number, callback: (links: import('xterm').ILink[] | undefined) => void) {
+    const filePathLinkDisposable = term.registerLinkProvider?.({
+      provideLinks(bufferLineNumber: number, callback: (links: import('@xterm/xterm').ILink[] | undefined) => void) {
         const bufferLine = term.buffer.active.getLine(bufferLineNumber - 1)
         if (!bufferLine) { callback(undefined); return }
         const text = bufferLine.translateToString()
@@ -650,7 +650,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           },
         })))
       },
-    })
+    }) ?? { dispose: () => {} }
 
     const unregisterActions = registerTerminalActions(paneId, {
       copySelection: async () => {

@@ -664,6 +664,7 @@ export class WsHandler {
   }
 
   private send(ws: LiveWebSocket, msg: unknown) {
+    let messageType: string | undefined
     try {
       // Backpressure guard.
       // @ts-ignore
@@ -671,7 +672,6 @@ export class WsHandler {
       if (this.closeForBackpressureIfNeeded(ws, buffered)) return
       let serialized = ''
       let payloadBytes: number | undefined
-      let messageType: string | undefined
       let serializeMs: number | undefined
       let shouldLogSend = false
 

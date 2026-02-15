@@ -5,7 +5,16 @@ import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { terminalThemes, darkThemes, lightThemes, getTerminalTheme } from '@/lib/terminal-themes'
 import { resolveTerminalFontFamily, saveLocalTerminalFontFamily } from '@/lib/terminal-fonts'
-import type { AppSettings, SidebarSortMode, TerminalTheme, CodexSandboxMode, ClaudePermissionMode, CodingCliProviderName } from '@/store/types'
+import type {
+  AppSettings,
+  SidebarSortMode,
+  TerminalTheme,
+  CodexSandboxMode,
+  ClaudePermissionMode,
+  CodingCliProviderName,
+  TabAttentionStyle,
+  AttentionDismiss,
+} from '@/store/types'
 import type { DeepPartial } from '@/lib/type-utils'
 import { configureNetwork, fetchNetworkStatus } from '@/store/networkSlice'
 import { addTab } from '@/store/tabsSlice'
@@ -631,8 +640,9 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
                   { value: 'none', label: 'None' },
                 ]}
                 onChange={(v: string) => {
-                  dispatch(updateSettingsLocal({ panes: { tabAttentionStyle: v } }))
-                  scheduleSave({ panes: { tabAttentionStyle: v } })
+                  const tabAttentionStyle = v as TabAttentionStyle
+                  dispatch(updateSettingsLocal({ panes: { tabAttentionStyle } }))
+                  scheduleSave({ panes: { tabAttentionStyle } })
                 }}
               />
             </SettingsRow>
@@ -645,8 +655,9 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
                   { value: 'type', label: 'Typing' },
                 ]}
                 onChange={(v: string) => {
-                  dispatch(updateSettingsLocal({ panes: { attentionDismiss: v } }))
-                  scheduleSave({ panes: { attentionDismiss: v } })
+                  const attentionDismiss = v as AttentionDismiss
+                  dispatch(updateSettingsLocal({ panes: { attentionDismiss } }))
+                  scheduleSave({ panes: { attentionDismiss } })
                 }}
               />
             </SettingsRow>
