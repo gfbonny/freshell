@@ -105,9 +105,18 @@ export class NetworkManager {
 
     const ports = this.getRelevantPorts()
 
-    const effectiveHost = (!network.configured && (process.env.HOST === '0.0.0.0' || process.env.HOST === '127.0.0.1'))
-      ? process.env.HOST as '127.0.0.1' | '0.0.0.0'
-      : network.host
+    // Use the actual server bind address, not the config value. On WSL2
+    // the server binds to 0.0.0.0 regardless of config (for Windows host
+    // access), so the config value may not reflect the real bind state.
+    const addr = this.server.address()
+    const actualHost = (addr && typeof addr === 'object') ? addr.address : null
+    const effectiveHost: '127.0.0.1' | '0.0.0.0' =
+      actualHost === '0.0.0.0' || actualHost === '::' ? '0.0.0.0'
+      : actualHost === '127.0.0.1' || actualHost === '::1' ? '127.0.0.1'
+      // Server not yet listening — fall back to config-based logic
+      : (!network.configured && (process.env.HOST === '0.0.0.0' || process.env.HOST === '127.0.0.1'))
+        ? process.env.HOST as '127.0.0.1' | '0.0.0.0'
+        : network.host
 
     const probePort = this.devMode && this.devPort ? this.devPort : this.port
     let portOpen: boolean | null = null
@@ -152,12 +161,17 @@ export class NetworkManager {
   }
 
   async configure(network: NetworkSettings): Promise<{ rebindScheduled: boolean }> {
-    const currentSettings = await this.configStore.getSettings()
-    const currentNetwork = currentSettings.network
-    const effectiveCurrentHost = (!currentNetwork.configured && (process.env.HOST === '0.0.0.0' || process.env.HOST === '127.0.0.1'))
-      ? process.env.HOST
-      : currentNetwork.host
-    const hostChanged = effectiveCurrentHost !== network.host
+    // Use the actual server bind address to detect host changes. On WSL2
+    // the server starts on 0.0.0.0 regardless of config, so comparing
+    // against the config value would cause spurious rebinds.
+    const addr = this.server.address()
+    const actualHost = (addr && typeof addr === 'object') ? addr.address : null
+    const effectiveCurrentHost =
+      actualHost === '0.0.0.0' || actualHost === '::' ? '0.0.0.0'
+      : actualHost === '127.0.0.1' || actualHost === '::1' ? '127.0.0.1'
+      : null
+    // Only rebind if we can determine the current host AND it differs
+    const hostChanged = effectiveCurrentHost !== null && effectiveCurrentHost !== network.host
 
     await this.configStore.patchSettings({ network })
 
