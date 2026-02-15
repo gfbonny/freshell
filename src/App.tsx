@@ -630,8 +630,8 @@ export default function App() {
           </div>
         </div>
       ) : (
-        <div className="h-8 px-3 md:px-4 flex items-center justify-between border-b border-border/30 bg-background flex-shrink-0">
-          <div className="flex items-center gap-2">
+        <div className="h-8 px-3 md:px-4 flex items-center justify-between gap-2 border-b border-border/30 bg-background flex-shrink-0">
+          <div className="flex min-w-0 flex-1 items-center gap-1.5 md:gap-2">
             <button
               onClick={toggleSidebarCollapse}
               className="p-1.5 rounded-md hover:bg-muted transition-colors min-h-11 min-w-11 md:min-h-0 md:min-w-0 flex items-center justify-center"
@@ -643,9 +643,9 @@ export default function App() {
                 <PanelLeftClose className="h-3.5 w-3.5 text-muted-foreground" />
               )}
             </button>
-            <span className="font-mono text-base font-semibold tracking-tight">🐚🔥freshell</span>
+            <span className="font-mono text-sm md:text-base font-semibold tracking-tight whitespace-nowrap truncate">🐚🔥freshell</span>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex shrink-0 items-center gap-0 md:gap-1">
             {idleWarningCount > 0 && (
               <button
                 onClick={() => setView('overview')}
