@@ -102,6 +102,18 @@ export class SessionBindingAuthority {
     this.byTerminal.set(input.terminalId, key)
     return { ok: true as const, key }
   }
+
+  ownerForSession(provider: CodingCliProviderName, sessionId: string): string | undefined {
+    return this.bySession.get(`${provider}:${sessionId}` as SessionBindingKey)
+  }
+
+  unbindTerminal(terminalId: string): { ok: boolean; key?: SessionBindingKey } {
+    const key = this.byTerminal.get(terminalId)
+    if (!key) return { ok: false }
+    this.byTerminal.delete(terminalId)
+    if (this.bySession.get(key) === terminalId) this.bySession.delete(key)
+    return { ok: true, key }
+  }
 }
 ```
 
@@ -109,7 +121,7 @@ export class SessionBindingAuthority {
 
 ```ts
 bindSession(terminalId: string, mode: TerminalMode, sessionId: string): BindResult {
-  if (!isProviderMode(mode)) return { ok: false, reason: 'mode_not_bindable' }
+  if (!modeSupportsResume(mode)) return { ok: false, reason: 'mode_not_bindable' }
   const auth = this.bindingAuthority.bind({ provider: mode, sessionId, terminalId })
   if (!auth.ok) return auth
   const term = this.terminals.get(terminalId)
@@ -154,6 +166,7 @@ git commit -m "feat: add authoritative provider-session terminal binding with on
 - Create: `server/session-association-coordinator.ts`
 - Modify: `server/index.ts`
 - Modify: `test/server/session-association.test.ts`
+- Modify: `test/integration/server/claude-session-flow.test.ts`
 
 **Step 1: Add failing coordinator tests (edge-triggered association)**
 
@@ -191,18 +204,32 @@ for (const session of candidates) {
 }
 ```
 
+```ts
+// Keep Claude onNewSession path, but route through the same coordinator + authority
+claudeIndexer.onNewSession((session) => {
+  const result = coordinator.associateClaudeSession(session)
+  if (!result?.associated) return
+  wsHandler.broadcast({
+    type: 'terminal.session.associated',
+    terminalId: result.terminalId,
+    sessionId: session.sessionId,
+  })
+})
+```
+
 **Step 4: Run association tests**
 
 Run:
 ```bash
 npx vitest run --config vitest.server.config.ts test/server/session-association.test.ts
+npx vitest run --config vitest.server.config.ts test/integration/server/claude-session-flow.test.ts
 ```
 Expected: PASS with no multi-terminal duplicate associations under repeated updates.
 
 **Step 5: Commit**
 
 ```bash
-git add server/session-association-coordinator.ts server/index.ts test/server/session-association.test.ts
+git add server/session-association-coordinator.ts server/index.ts test/server/session-association.test.ts test/integration/server/claude-session-flow.test.ts
 git commit -m "refactor: move coding-cli session association to delta-driven coordinator with guarded binding"
 ```
 
@@ -233,7 +260,10 @@ it('emits conflict log + unbinds duplicate records during lookup repair', async 
 
 ```ts
 findCanonicalRunningTerminalBySession(mode: TerminalMode, sessionId: string) {
-  // authority owner first; fallback scan only for legacy records then repair
+  // 1) authoritative owner lookup
+  // 2) legacy fallback scan (records with resumeSessionId set but no authority entry)
+  // 3) repair: choose earliest created running terminal as canonical owner
+  // 4) quarantine duplicates: clear duplicate resumeSessionId and unbind terminal mapping
 }
 ```
 
@@ -272,8 +302,11 @@ git commit -m "fix: enforce canonical session owner reuse in terminal.create and
 - Modify: `server/tabs-registry/store.ts`
 - Modify: `src/store/tabRegistryTypes.ts`
 - Modify: `src/lib/ws-client.ts`
+- Modify: `src/store/connectionSlice.ts`
+- Modify: `src/App.tsx`
 - Modify: `test/server/ws-tabs-registry.test.ts`
 - Modify: `test/unit/server/tabs-registry/types.test.ts`
+- Modify: `test/unit/client/components/App.ws-bootstrap.test.tsx`
 
 **Step 1: Write failing schema/protocol tests for `serverInstanceId`**
 
@@ -299,6 +332,13 @@ this.send(ws, { type: 'ready', timestamp: nowIso(), serverInstanceId: this.serve
 serverInstanceId: z.string().min(1)
 ```
 
+```ts
+// App bootstrap ready handler
+if (msg.type === 'ready' && typeof msg.serverInstanceId === 'string') {
+  dispatch(setServerInstanceId(msg.serverInstanceId))
+}
+```
+
 **Step 3: Ensure `tabs.sync.push` enforces server instance id**
 
 ```ts
@@ -316,13 +356,14 @@ Run:
 ```bash
 npx vitest run --config vitest.server.config.ts test/unit/server/tabs-registry/types.test.ts
 npx vitest run --config vitest.server.config.ts test/server/ws-tabs-registry.test.ts
+npx vitest run test/unit/client/components/App.ws-bootstrap.test.tsx
 ```
 Expected: PASS.
 
 **Step 5: Commit**
 
 ```bash
-git add server/ws-handler.ts server/tabs-registry/types.ts server/tabs-registry/store.ts src/store/tabRegistryTypes.ts src/lib/ws-client.ts test/server/ws-tabs-registry.test.ts test/unit/server/tabs-registry/types.test.ts
+git add server/ws-handler.ts server/tabs-registry/types.ts server/tabs-registry/store.ts src/store/tabRegistryTypes.ts src/lib/ws-client.ts src/store/connectionSlice.ts src/App.tsx test/server/ws-tabs-registry.test.ts test/unit/server/tabs-registry/types.test.ts test/unit/client/components/App.ws-bootstrap.test.tsx
 git commit -m "feat: include server instance identity in tabs sync contract and handshake metadata"
 ```
 
@@ -333,11 +374,13 @@ git commit -m "feat: include server instance identity in tabs sync contract and 
 **Files:**
 - Modify: `src/store/paneTypes.ts`
 - Modify: `src/lib/tab-registry-snapshot.ts`
+- Modify: `src/lib/session-utils.ts`
 - Modify: `src/components/TabsView.tsx`
 - Modify: `src/components/TerminalView.tsx`
 - Modify: `src/store/tabRegistrySlice.ts`
 - Modify: `src/store/tabRegistrySync.ts`
 - Modify: `test/unit/client/lib/tab-registry-snapshot.test.ts`
+- Modify: `test/unit/client/lib/session-utils.test.ts`
 - Modify: `test/unit/client/components/TabsView.test.tsx`
 - Modify: `test/unit/client/components/TerminalView.lifecycle.test.tsx`
 
@@ -377,6 +420,17 @@ const safeResumeId = sameServer ? payload.resumeSessionId : undefined
 return { kind: 'terminal', mode, shell, resumeSessionId: safeResumeId, sessionRef: payload.sessionRef, initialCwd }
 ```
 
+```ts
+// session-utils integration (avoid split-brain semantics):
+// prefer explicit sessionRef when present; fallback to resumeSessionId for legacy panes
+function extractSessionRef(content: PaneContent): SessionRef | undefined {
+  if ('sessionRef' in content && content.sessionRef?.provider && content.sessionRef?.sessionId) {
+    return content.sessionRef
+  }
+  // legacy fallback continues to read resumeSessionId
+}
+```
+
 **Step 4: Update `TerminalView` association mirroring to preserve sessionRef**
 
 ```ts
@@ -391,6 +445,7 @@ updateContent({
 Run:
 ```bash
 npx vitest run test/unit/client/lib/tab-registry-snapshot.test.ts
+npx vitest run test/unit/client/lib/session-utils.test.ts
 npx vitest run test/unit/client/components/TabsView.test.tsx
 npx vitest run test/unit/client/components/TerminalView.lifecycle.test.tsx
 ```
@@ -399,7 +454,7 @@ Expected: PASS.
 **Step 6: Commit**
 
 ```bash
-git add src/store/paneTypes.ts src/lib/tab-registry-snapshot.ts src/components/TabsView.tsx src/components/TerminalView.tsx src/store/tabRegistrySlice.ts src/store/tabRegistrySync.ts test/unit/client/lib/tab-registry-snapshot.test.ts test/unit/client/components/TabsView.test.tsx test/unit/client/components/TerminalView.lifecycle.test.tsx
+git add src/store/paneTypes.ts src/lib/tab-registry-snapshot.ts src/lib/session-utils.ts src/components/TabsView.tsx src/components/TerminalView.tsx src/store/tabRegistrySlice.ts src/store/tabRegistrySync.ts test/unit/client/lib/tab-registry-snapshot.test.ts test/unit/client/lib/session-utils.test.ts test/unit/client/components/TabsView.test.tsx test/unit/client/components/TerminalView.lifecycle.test.tsx
 git commit -m "refactor: separate portable session references from local resume bindings for tab rehydration"
 ```
 
@@ -465,7 +520,7 @@ git commit -m "test: add codex misassignment regressions and tabs cross-machine 
 
 ```html
 <p class="text-sm">
-  Remote tab copies preserve layout and cwd, but session resume is only automatic on the same Freshell server instance.
+  Remote tab copies preserve layout, mode, and working directory, but auto-resume only occurs when the tab snapshot originated from this same Freshell server instance.
 </p>
 ```
 
@@ -502,4 +557,3 @@ git status --short
 git log --oneline --decorate -n 10
 ```
 Expected: clean branch with task-by-task commits ready for review/merge.
-
