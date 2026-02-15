@@ -7,11 +7,50 @@ import { addTab, setActiveTab } from '@/store/tabsSlice'
 import { addPane, initLayout } from '@/store/panesSlice'
 import { setTabRegistryLoading, setTabRegistrySearchRangeDays } from '@/store/tabRegistrySlice'
 import { selectTabsRegistryGroups } from '@/store/selectors/tabsRegistrySelectors'
+import type { SessionLocator } from '@/store/paneTypes'
 import type { PaneContentInput } from '@/store/paneTypes'
-import type { TabMode } from '@/store/types'
+import type { CodingCliProviderName, TabMode } from '@/store/types'
 
 type FilterMode = 'all' | 'open' | 'closed'
 type ScopeMode = 'all' | 'local' | 'remote'
+
+const CODING_CLI_PROVIDERS: ReadonlySet<CodingCliProviderName> = new Set([
+  'claude',
+  'codex',
+  'opencode',
+  'gemini',
+  'kimi',
+])
+
+function parseSessionLocator(value: unknown): SessionLocator | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const candidate = value as { provider?: unknown; sessionId?: unknown; serverInstanceId?: unknown }
+  if (typeof candidate.provider !== 'string' || !CODING_CLI_PROVIDERS.has(candidate.provider as CodingCliProviderName)) {
+    return undefined
+  }
+  if (typeof candidate.sessionId !== 'string') return undefined
+  return {
+    provider: candidate.provider as CodingCliProviderName,
+    sessionId: candidate.sessionId,
+    ...(typeof candidate.serverInstanceId === 'string' ? { serverInstanceId: candidate.serverInstanceId } : {}),
+  }
+}
+
+function resolveSessionRef(options: {
+  payload: Record<string, unknown>
+  fallbackProvider?: CodingCliProviderName
+  fallbackSessionId?: string
+  fallbackServerInstanceId?: string
+}): SessionLocator | undefined {
+  const explicit = parseSessionLocator(options.payload.sessionRef)
+  if (explicit) return explicit
+  if (!options.fallbackProvider || !options.fallbackSessionId) return undefined
+  return {
+    provider: options.fallbackProvider,
+    sessionId: options.fallbackSessionId,
+    ...(options.fallbackServerInstanceId ? { serverInstanceId: options.fallbackServerInstanceId } : {}),
+  }
+}
 
 function sanitizePaneSnapshot(
   record: RegistryTabRecord,
@@ -23,30 +62,12 @@ function sanitizePaneSnapshot(
   if (snapshot.kind === 'terminal') {
     const mode = (payload.mode as TabMode) || 'shell'
     const resumeSessionId = payload.resumeSessionId as string | undefined
-    const payloadSessionRef = payload.sessionRef as {
-      provider?: unknown
-      sessionId?: unknown
-      serverInstanceId?: unknown
-    } | undefined
-    const sessionRef = (
-      payloadSessionRef
-      && typeof payloadSessionRef.provider === 'string'
-      && typeof payloadSessionRef.sessionId === 'string'
-    )
-      ? {
-        provider: payloadSessionRef.provider as any,
-        sessionId: payloadSessionRef.sessionId,
-        ...(typeof payloadSessionRef.serverInstanceId === 'string'
-          ? { serverInstanceId: payloadSessionRef.serverInstanceId }
-          : {}),
-      }
-      : (resumeSessionId && mode !== 'shell'
-        ? {
-          provider: mode,
-          sessionId: resumeSessionId,
-          serverInstanceId: record.serverInstanceId,
-        }
-        : undefined)
+    const sessionRef = resolveSessionRef({
+      payload,
+      fallbackProvider: mode !== 'shell' ? mode : undefined,
+      fallbackSessionId: resumeSessionId,
+      fallbackServerInstanceId: record.serverInstanceId,
+    })
     return {
       kind: 'terminal',
       mode,
@@ -75,30 +96,12 @@ function sanitizePaneSnapshot(
   }
   if (snapshot.kind === 'claude-chat') {
     const resumeSessionId = payload.resumeSessionId as string | undefined
-    const payloadSessionRef = payload.sessionRef as {
-      provider?: unknown
-      sessionId?: unknown
-      serverInstanceId?: unknown
-    } | undefined
-    const sessionRef = (
-      payloadSessionRef
-      && typeof payloadSessionRef.provider === 'string'
-      && typeof payloadSessionRef.sessionId === 'string'
-    )
-      ? {
-        provider: payloadSessionRef.provider as any,
-        sessionId: payloadSessionRef.sessionId,
-        ...(typeof payloadSessionRef.serverInstanceId === 'string'
-          ? { serverInstanceId: payloadSessionRef.serverInstanceId }
-          : {}),
-      }
-      : (resumeSessionId
-        ? {
-          provider: 'claude',
-          sessionId: resumeSessionId,
-          serverInstanceId: record.serverInstanceId,
-        }
-        : undefined)
+    const sessionRef = resolveSessionRef({
+      payload,
+      fallbackProvider: 'claude',
+      fallbackSessionId: resumeSessionId,
+      fallbackServerInstanceId: record.serverInstanceId,
+    })
     return {
       kind: 'claude-chat',
       resumeSessionId: sameServer ? resumeSessionId : undefined,

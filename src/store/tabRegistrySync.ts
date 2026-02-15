@@ -133,7 +133,7 @@ export function startTabRegistrySync(store: AppStore, ws: WsClient): () => void 
   const pushNow = (force = false) => {
     if (ws.state !== 'ready') return
     const state = store.getState()
-    const serverInstanceId = state.connection?.serverInstanceId || ws.serverInstanceId
+    const serverInstanceId = state.connection.serverInstanceId || ws.serverInstanceId
     if (!serverInstanceId) return
     const records = buildRecords(state, Date.now(), revisions, serverInstanceId)
     const fingerprint = JSON.stringify(records)

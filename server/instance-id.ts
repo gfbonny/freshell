@@ -15,7 +15,9 @@ export async function loadOrCreateServerInstanceId(baseDir?: string): Promise<st
   try {
     const existing = (await fs.readFile(filePath, 'utf8')).trim()
     if (existing) return existing
-  } catch {
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException | undefined)?.code
+    if (code !== 'ENOENT') throw error
     // Create below.
   }
 

@@ -1209,34 +1209,19 @@ export class WsHandler {
           }
 
           if (modeSupportsResume(m.mode as TerminalMode) && effectiveResumeSessionId) {
-            const canonicalLookup = (this.registry as any).getCanonicalRunningTerminalBySession as
-              | ((mode: TerminalMode, sessionId: string) => any)
-              | undefined
-            const repairLegacy = (this.registry as any).repairLegacySessionOwners as
-              | ((mode: TerminalMode, sessionId: string) => {
-                repaired: boolean
-                canonicalTerminalId?: string
-                clearedTerminalIds: string[]
-              })
-              | undefined
-            let existing = typeof canonicalLookup === 'function'
-              ? canonicalLookup.call(this.registry, m.mode as TerminalMode, effectiveResumeSessionId)
-              : this.registry.findRunningTerminalBySession(m.mode as TerminalMode, effectiveResumeSessionId)
+            let existing = this.registry.getCanonicalRunningTerminalBySession(
+              m.mode as TerminalMode,
+              effectiveResumeSessionId,
+            )
             if (!existing) {
-              if (typeof repairLegacy === 'function') {
-                const repair = repairLegacy.call(this.registry, m.mode as TerminalMode, effectiveResumeSessionId)
-                if (repair?.repaired) {
-                  log.warn({
-                    mode: m.mode,
-                    sessionId: effectiveResumeSessionId,
-                    canonicalTerminalId: repair.canonicalTerminalId,
-                    clearedTerminalIds: repair.clearedTerminalIds,
-                  }, 'session_bind_repair_applied')
-                }
-                existing = typeof canonicalLookup === 'function'
-                  ? canonicalLookup.call(this.registry, m.mode as TerminalMode, effectiveResumeSessionId)
-                  : this.registry.findRunningTerminalBySession(m.mode as TerminalMode, effectiveResumeSessionId)
-              }
+              this.registry.repairLegacySessionOwners(
+                m.mode as TerminalMode,
+                effectiveResumeSessionId,
+              )
+              existing = this.registry.getCanonicalRunningTerminalBySession(
+                m.mode as TerminalMode,
+                effectiveResumeSessionId,
+              )
             }
             if (existing) {
               this.registry.attach(existing.terminalId, ws, { pendingSnapshot: true })
