@@ -38,6 +38,7 @@ import cookieParser from 'cookie-parser'
 import { PortForwardManager } from './port-forward.js'
 import { getRequesterIdentity, parseTrustProxyEnv } from './request-ip.js'
 import { collectCandidateDirectories } from './candidate-dirs.js'
+import { createTabsRegistryStore } from './tabs-registry/store.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -143,6 +144,7 @@ async function main() {
   const codingCliProviders = [claudeProvider, codexProvider]
   const codingCliIndexer = new CodingCliSessionIndexer(codingCliProviders)
   const codingCliSessionManager = new CodingCliSessionManager(codingCliProviders)
+  const tabsRegistryStore = createTabsRegistryStore()
 
   app.get('/api/debug', async (_req, res) => {
     const cfg = await configStore.snapshot()
@@ -152,6 +154,10 @@ async function main() {
       wsConnections: wsHandler.connectionCount(),
       settings: cfg.settings,
       sessionsProjects: codingCliIndexer.getProjects(),
+      tabsRegistry: {
+        recordCount: tabsRegistryStore.count(),
+        deviceCount: tabsRegistryStore.listDevices().length,
+      },
       terminals: registry.list(),
       time: new Date().toISOString(),
     })
