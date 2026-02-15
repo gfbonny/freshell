@@ -311,7 +311,7 @@ export default function Sidebar({
             <button
               aria-label="Clear search"
               onClick={() => setFilter('')}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 min-h-11 min-w-11 md:min-h-0 md:min-w-0 flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground"
             >
               <X className="h-3.5 w-3.5" />
             </button>
@@ -344,7 +344,7 @@ export default function Sidebar({
                 key={item.id}
                 onClick={() => onNavigate(item.id)}
                 className={cn(
-                  'flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs transition-colors',
+                  'flex-1 flex items-center justify-center gap-1.5 py-2.5 md:py-1.5 min-h-11 md:min-h-0 rounded-md text-xs transition-colors',
                   active
                     ? 'bg-foreground text-background font-medium'
                     : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
@@ -408,7 +408,7 @@ function SidebarItem({
         <button
           onClick={onClick}
           className={cn(
-            'w-full flex items-center gap-2 px-2 py-2 rounded-md text-left transition-colors group',
+            'w-full flex items-center gap-2 px-2 py-3 md:py-2 rounded-md text-left transition-colors group',
             isActiveTab
               ? 'bg-muted'
               : 'hover:bg-muted/50'
