@@ -173,8 +173,8 @@ describe('terminal search flow (e2e)', () => {
     fireEvent.change(input, { target: { value: 'needle' } })
     expect(runtimeMocks.findNext).toHaveBeenCalledWith('needle', { caseSensitive: false, incremental: true })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Prev' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Next match' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Previous match' }))
     expect(runtimeMocks.findPrevious).toHaveBeenCalledWith('needle', { caseSensitive: false, incremental: true })
   })
 })

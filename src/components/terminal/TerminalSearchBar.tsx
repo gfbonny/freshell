@@ -47,21 +47,24 @@ export function TerminalSearchBar({
       />
       <button
         type="button"
-        className="h-8 rounded-md px-2 text-xs"
+        aria-label="Previous match"
+        className="h-8 min-h-11 min-w-11 md:min-h-0 md:min-w-0 flex items-center justify-center rounded-md px-2 text-xs"
         onClick={onFindPrevious}
       >
         Prev
       </button>
       <button
         type="button"
-        className="h-8 rounded-md px-2 text-xs"
+        aria-label="Next match"
+        className="h-8 min-h-11 min-w-11 md:min-h-0 md:min-w-0 flex items-center justify-center rounded-md px-2 text-xs"
         onClick={onFindNext}
       >
         Next
       </button>
       <button
         type="button"
-        className="h-8 rounded-md px-2 text-xs"
+        aria-label="Close search"
+        className="h-8 min-h-11 min-w-11 md:min-h-0 md:min-w-0 flex items-center justify-center rounded-md px-2 text-xs"
         onClick={onClose}
       >
         Close
