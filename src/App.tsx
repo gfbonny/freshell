@@ -37,6 +37,7 @@ import { updateSettingsLocal, markSaved } from '@/store/settingsSlice'
 import { clearIdleWarning, recordIdleWarning } from '@/store/idleWarningsSlice'
 import { setTerminalMetaSnapshot, upsertTerminalMeta, removeTerminalMeta } from '@/store/terminalMetaSlice'
 import { handleSdkMessage } from '@/lib/sdk-message-handler'
+import type { ProjectGroup, AppSettings } from '@/store/types'
 
 const SIDEBAR_MIN_WIDTH = 200
 const SIDEBAR_MAX_WIDTH = 500
@@ -252,27 +253,28 @@ export default function App() {
         }
         if (msg.type === 'sessions.updated') {
           // Support chunked sessions for mobile browsers with limited WebSocket buffers
+          const projects = (msg.projects || []) as ProjectGroup[]
           if (msg.clear) {
             // First chunk: clear existing, then merge
             dispatch(clearProjects())
-            dispatch(mergeProjects(msg.projects || []))
+            dispatch(mergeProjects(projects))
           } else if (msg.append) {
             // Subsequent chunks: merge with existing
-            dispatch(mergeProjects(msg.projects || []))
+            dispatch(mergeProjects(projects))
           } else {
             // Full update (broadcasts, legacy): replace all
-            dispatch(setProjects(msg.projects || []))
+            dispatch(setProjects(projects))
           }
           dispatch(markWsSnapshotReceived())
         }
         if (msg.type === 'sessions.patch') {
           dispatch(applySessionsPatch({
-            upsertProjects: msg.upsertProjects || [],
+            upsertProjects: (msg.upsertProjects || []) as ProjectGroup[],
             removeProjectPaths: msg.removeProjectPaths || [],
           }))
         }
         if (msg.type === 'settings.updated') {
-          dispatch(setSettings(applyLocalTerminalFontFamily(msg.settings)))
+          dispatch(setSettings(applyLocalTerminalFontFamily(msg.settings as AppSettings)))
         }
         if (msg.type === 'terminal.meta.list.response') {
           const requestId = typeof msg.requestId === 'string' ? msg.requestId : ''
@@ -331,7 +333,7 @@ export default function App() {
         }
 
         // SDK message handling (Claude Web pane)
-        handleSdkMessage(dispatch, msg, ws)
+        handleSdkMessage(dispatch, msg as Record<string, unknown>, ws)
       })
 
       cleanup = () => {
