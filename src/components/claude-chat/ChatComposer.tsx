@@ -1,6 +1,10 @@
-import { useCallback, useRef, useState, type KeyboardEvent } from 'react'
+import { forwardRef, useCallback, useImperativeHandle, useRef, useState, type KeyboardEvent } from 'react'
 import { Send, Square } from 'lucide-react'
 import { cn } from '@/lib/utils'
+
+export interface ChatComposerHandle {
+  focus: () => void
+}
 
 interface ChatComposerProps {
   onSend: (text: string) => void
@@ -10,9 +14,13 @@ interface ChatComposerProps {
   placeholder?: string
 }
 
-export default function ChatComposer({ onSend, onInterrupt, disabled, isRunning, placeholder }: ChatComposerProps) {
+const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(function ChatComposer({ onSend, onInterrupt, disabled, isRunning, placeholder }, ref) {
   const [text, setText] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  useImperativeHandle(ref, () => ({
+    focus: () => textareaRef.current?.focus(),
+  }), [])
 
   const handleSend = useCallback(() => {
     const trimmed = text.trim()
@@ -86,4 +94,6 @@ export default function ChatComposer({ onSend, onInterrupt, disabled, isRunning,
       </div>
     </div>
   )
-}
+})
+
+export default ChatComposer

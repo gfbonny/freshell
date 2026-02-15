@@ -7,7 +7,7 @@ import { getWsClient } from '@/lib/ws-client'
 import { cn } from '@/lib/utils'
 import MessageBubble from './MessageBubble'
 import PermissionBanner from './PermissionBanner'
-import ChatComposer from './ChatComposer'
+import ChatComposer, { type ChatComposerHandle } from './ChatComposer'
 import FreshclaudeSettings from './FreshclaudeSettings'
 import ThinkingIndicator from './ThinkingIndicator'
 import { useStreamDebounce } from './useStreamDebounce'
@@ -30,6 +30,7 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
   const dispatch = useAppDispatch()
   const ws = getWsClient()
   const createSentRef = useRef(false)
+  const composerRef = useRef<ChatComposerHandle>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const isAtBottomRef = useRef(true)
@@ -148,6 +149,16 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
     dispatch(removePermission({ sessionId: paneContent.sessionId, requestId }))
     ws.send({ type: 'sdk.permission.respond', sessionId: paneContent.sessionId, requestId, behavior: 'deny' })
   }, [paneContent.sessionId, dispatch, ws])
+
+  const handleContainerClick = useCallback((e: React.MouseEvent) => {
+    // Don't steal focus from interactive elements or text selections
+    const target = e.target as HTMLElement
+    if (
+      target.closest('button, a, input, textarea, select, details, [role="button"], pre')
+    ) return
+    if (window.getSelection()?.toString()) return
+    composerRef.current?.focus()
+  }, [])
 
   const handleScroll = useCallback(() => {
     const el = scrollContainerRef.current
@@ -269,7 +280,7 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
   const collapseThreshold = Math.max(0, turnItems.length - RECENT_TURNS_FULL)
 
   return (
-    <div className={cn('h-full w-full flex flex-col', hidden ? 'tab-hidden' : 'tab-visible')} role="region" aria-label="freshclaude Chat">
+    <div className={cn('h-full w-full flex flex-col', hidden ? 'tab-hidden' : 'tab-visible')} role="region" aria-label="freshclaude Chat" onClick={handleContainerClick}>
       {/* Status bar */}
       <div className="flex items-center justify-between px-3 py-1.5 border-b text-xs text-muted-foreground">
         <span>
@@ -418,6 +429,7 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
 
       {/* Composer */}
       <ChatComposer
+        ref={composerRef}
         onSend={handleSend}
         onInterrupt={handleInterrupt}
         disabled={!isInteractive && !isRunning}
