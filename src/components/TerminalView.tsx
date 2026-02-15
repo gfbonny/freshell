@@ -30,7 +30,6 @@ import { resolveTerminalFontFamily } from '@/lib/terminal-fonts'
 import { useChunkedAttach } from '@/components/terminal/useChunkedAttach'
 import { Osc52PromptModal } from '@/components/terminal/Osc52PromptModal'
 import { TerminalSearchBar } from '@/components/terminal/TerminalSearchBar'
-import { MobileTerminalToolbar } from '@/components/terminal/MobileTerminalToolbar'
 import {
   createTerminalRuntime,
   type TerminalRuntime,
@@ -48,7 +47,6 @@ const RATE_LIMIT_RETRY_MAX_ATTEMPTS = 3
 const RATE_LIMIT_RETRY_BASE_MS = 250
 const RATE_LIMIT_RETRY_MAX_MS = 1000
 const KEYBOARD_INSET_ACTIVATION_PX = 80
-const MOBILE_TOOLBAR_HEIGHT_PX = 56
 const TAP_MULTI_INTERVAL_MS = 350
 const TAP_MAX_DISTANCE_PX = 24
 const TOUCH_SCROLL_PIXELS_PER_LINE = 18
@@ -529,17 +527,6 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     }
     ws.send({ type: 'terminal.input', terminalId: tid, data })
   }, [dispatch, tabId, paneId, ws])
-
-  const handleMobileToolbarKey = useCallback((input: string, _keyId: string) => {
-    sendInput(input)
-    requestAnimationFrame(() => {
-      termRef.current?.focus()
-    })
-  }, [sendInput])
-
-  const handleMobileToolbarNewTab = useCallback(() => {
-    dispatch(addTab({ mode: 'shell' }))
-  }, [dispatch])
 
   const searchOpts = useMemo(() => ({
     caseSensitive: false,
@@ -1209,7 +1196,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   }
 
   const showSpinner = terminalContent.status === 'creating' || isAttaching
-  const mobileBottomInsetPx = isMobile ? keyboardInsetPx + MOBILE_TOOLBAR_HEIGHT_PX : 0
+  const mobileBottomInsetPx = isMobile ? keyboardInsetPx : 0
   const terminalContainerStyle = useMemo(() => {
     if (!isMobile) return undefined
 
@@ -1236,13 +1223,6 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         onTouchEnd={isMobile ? handleMobileTouchEnd : undefined}
         onTouchCancel={isMobile ? handleMobileTouchEnd : undefined}
       />
-      {isMobile && (
-        <MobileTerminalToolbar
-          keyboardInsetPx={keyboardInsetPx}
-          onNewTab={handleMobileToolbarNewTab}
-          onSendKey={handleMobileToolbarKey}
-        />
-      )}
       {showSpinner && (
         <div className="absolute inset-0 flex items-center justify-center bg-background/80">
           <div className="flex flex-col items-center gap-3">
