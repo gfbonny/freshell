@@ -13,14 +13,46 @@ import type { TabMode } from '@/store/types'
 type FilterMode = 'all' | 'open' | 'closed'
 type ScopeMode = 'all' | 'local' | 'remote'
 
-function sanitizePaneSnapshot(snapshot: RegistryPaneSnapshot): PaneContentInput {
+function sanitizePaneSnapshot(
+  record: RegistryTabRecord,
+  snapshot: RegistryPaneSnapshot,
+  localServerInstanceId?: string,
+): PaneContentInput {
   const payload = snapshot.payload || {}
+  const sameServer = !!localServerInstanceId && record.serverInstanceId === localServerInstanceId
   if (snapshot.kind === 'terminal') {
+    const mode = (payload.mode as TabMode) || 'shell'
+    const resumeSessionId = payload.resumeSessionId as string | undefined
+    const payloadSessionRef = payload.sessionRef as {
+      provider?: unknown
+      sessionId?: unknown
+      serverInstanceId?: unknown
+    } | undefined
+    const sessionRef = (
+      payloadSessionRef
+      && typeof payloadSessionRef.provider === 'string'
+      && typeof payloadSessionRef.sessionId === 'string'
+    )
+      ? {
+        provider: payloadSessionRef.provider as any,
+        sessionId: payloadSessionRef.sessionId,
+        ...(typeof payloadSessionRef.serverInstanceId === 'string'
+          ? { serverInstanceId: payloadSessionRef.serverInstanceId }
+          : {}),
+      }
+      : (resumeSessionId && mode !== 'shell'
+        ? {
+          provider: mode,
+          sessionId: resumeSessionId,
+          serverInstanceId: record.serverInstanceId,
+        }
+        : undefined)
     return {
       kind: 'terminal',
-      mode: (payload.mode as TabMode) || 'shell',
+      mode,
       shell: (payload.shell as 'system' | 'cmd' | 'powershell' | 'wsl') || 'system',
-      resumeSessionId: payload.resumeSessionId as string | undefined,
+      resumeSessionId: sameServer ? resumeSessionId : undefined,
+      sessionRef,
       initialCwd: payload.initialCwd as string | undefined,
     }
   }
@@ -42,9 +74,35 @@ function sanitizePaneSnapshot(snapshot: RegistryPaneSnapshot): PaneContentInput 
     }
   }
   if (snapshot.kind === 'claude-chat') {
+    const resumeSessionId = payload.resumeSessionId as string | undefined
+    const payloadSessionRef = payload.sessionRef as {
+      provider?: unknown
+      sessionId?: unknown
+      serverInstanceId?: unknown
+    } | undefined
+    const sessionRef = (
+      payloadSessionRef
+      && typeof payloadSessionRef.provider === 'string'
+      && typeof payloadSessionRef.sessionId === 'string'
+    )
+      ? {
+        provider: payloadSessionRef.provider as any,
+        sessionId: payloadSessionRef.sessionId,
+        ...(typeof payloadSessionRef.serverInstanceId === 'string'
+          ? { serverInstanceId: payloadSessionRef.serverInstanceId }
+          : {}),
+      }
+      : (resumeSessionId
+        ? {
+          provider: 'claude',
+          sessionId: resumeSessionId,
+          serverInstanceId: record.serverInstanceId,
+        }
+        : undefined)
     return {
       kind: 'claude-chat',
-      resumeSessionId: payload.resumeSessionId as string | undefined,
+      resumeSessionId: sameServer ? resumeSessionId : undefined,
+      sessionRef,
       initialCwd: payload.initialCwd as string | undefined,
       model: payload.model as string | undefined,
       permissionMode: payload.permissionMode as string | undefined,
@@ -160,6 +218,7 @@ export default function TabsView({ onOpenTab }: { onOpenTab?: () => void }) {
   const groups = useAppSelector(selectTabsRegistryGroups)
   const { deviceId, searchRangeDays, syncError } = useAppSelector((state) => state.tabRegistry)
   const activeTabId = useAppSelector((state) => state.tabs.activeTabId)
+  const localServerInstanceId = useAppSelector((state) => state.connection.serverInstanceId)
   const connectionStatus = useAppSelector((state) => state.connection.status)
   const connectionError = useAppSelector((state) => state.connection.lastError)
   const [query, setQuery] = useState('')
@@ -198,7 +257,9 @@ export default function TabsView({ onOpenTab }: { onOpenTab?: () => void }) {
     const tabId = nanoid()
     const paneSnapshots = record.panes || []
     const firstPane = paneSnapshots[0]
-    const firstContent = firstPane ? sanitizePaneSnapshot(firstPane) : { kind: 'terminal', mode: 'shell' } as const
+    const firstContent = firstPane
+      ? sanitizePaneSnapshot(record, firstPane, localServerInstanceId)
+      : { kind: 'terminal', mode: 'shell' } as const
     dispatch(addTab({
       id: tabId,
       title: record.tabName,
@@ -212,20 +273,20 @@ export default function TabsView({ onOpenTab }: { onOpenTab?: () => void }) {
     for (const pane of paneSnapshots.slice(1)) {
       dispatch(addPane({
         tabId,
-        newContent: sanitizePaneSnapshot(pane),
+        newContent: sanitizePaneSnapshot(record, pane, localServerInstanceId),
       }))
     }
     onOpenTab?.()
   }
 
-  const openPaneInCurrent = (_record: RegistryTabRecord, pane: RegistryPaneSnapshot) => {
+  const openPaneInCurrent = (record: RegistryTabRecord, pane: RegistryPaneSnapshot) => {
     if (!activeTabId) {
-      openPaneInNewTab(_record, pane)
+      openPaneInNewTab(record, pane)
       return
     }
     dispatch(addPane({
       tabId: activeTabId,
-      newContent: sanitizePaneSnapshot(pane),
+      newContent: sanitizePaneSnapshot(record, pane, localServerInstanceId),
     }))
     onOpenTab?.()
   }
@@ -240,7 +301,7 @@ export default function TabsView({ onOpenTab }: { onOpenTab?: () => void }) {
     }))
     dispatch(initLayout({
       tabId,
-      content: sanitizePaneSnapshot(pane),
+      content: sanitizePaneSnapshot(record, pane, localServerInstanceId),
     }))
     onOpenTab?.()
   }

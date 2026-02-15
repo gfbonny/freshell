@@ -91,6 +91,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   const hasAttentionRef = useRef(hasAttention)
   const hasPaneAttention = useAppSelector((s) => !!s.turnCompletion?.attentionByPane?.[paneId])
   const hasPaneAttentionRef = useRef(hasPaneAttention)
+  const localServerInstanceId = useAppSelector((s) => s.connection.serverInstanceId)
 
   // All hooks MUST be called before any conditional returns
   const ws = useMemo(() => getWsClient(), [])
@@ -1009,7 +1010,14 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
             dispatch(updateTab({ id: currentTab.id, updates: { terminalId: newId, status: 'running' } }))
           }
           if (msg.effectiveResumeSessionId && msg.effectiveResumeSessionId !== contentRef.current?.resumeSessionId) {
-            updateContent({ resumeSessionId: msg.effectiveResumeSessionId })
+            const mode = contentRef.current?.mode
+            const sessionRef = mode && mode !== 'shell'
+              ? { provider: mode, sessionId: msg.effectiveResumeSessionId, serverInstanceId: localServerInstanceId }
+              : undefined
+            updateContent({
+              resumeSessionId: msg.effectiveResumeSessionId,
+              ...(sessionRef ? { sessionRef } : {}),
+            })
           }
           const isSnapshotChunked = msg.snapshotChunked === true
           if (isSnapshotChunked) {
@@ -1073,7 +1081,14 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
             oldResumeSessionId: contentRef.current?.resumeSessionId,
             newResumeSessionId: sessionId,
           })
-          updateContent({ resumeSessionId: sessionId })
+          const mode = contentRef.current?.mode
+          const sessionRef = mode && mode !== 'shell'
+            ? { provider: mode, sessionId, serverInstanceId: localServerInstanceId }
+            : undefined
+          updateContent({
+            resumeSessionId: sessionId,
+            ...(sessionRef ? { sessionRef } : {}),
+          })
           // Mirror to tab so TabContent can reconstruct correct default
           // content if pane layout is lost (e.g., localStorage quota error)
           const currentTab = tabRef.current

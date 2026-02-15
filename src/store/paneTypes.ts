@@ -1,4 +1,10 @@
-import type { TerminalStatus, TabMode, ShellType } from './types'
+import type { TerminalStatus, TabMode, ShellType, CodingCliProviderName } from './types'
+
+export type SessionLocator = {
+  provider: CodingCliProviderName
+  sessionId: string
+  serverInstanceId?: string
+}
 
 /**
  * Terminal pane content with full lifecycle management.
@@ -18,6 +24,8 @@ export type TerminalPaneContent = {
   shell?: ShellType
   /** Claude session to resume */
   resumeSessionId?: string
+  /** Portable session reference for cross-device tab snapshots */
+  sessionRef?: SessionLocator
   /** Initial working directory */
   initialCwd?: string
 }
@@ -71,6 +79,8 @@ export type ClaudeChatPaneContent = {
   status: SdkSessionStatus
   /** Claude session to resume */
   resumeSessionId?: string
+  /** Portable session reference for cross-device tab snapshots */
+  sessionRef?: SessionLocator
   /** Working directory */
   initialCwd?: string
   /** Model to use (default: claude-opus-4-6) */

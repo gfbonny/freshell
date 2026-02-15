@@ -12,6 +12,15 @@ import { isValidClaudeSessionId } from '@/lib/claude-session-id'
  * Handles both terminal panes (claude/codex mode) and claude-chat (freshclaude) panes.
  */
 function extractSessionRef(content: PaneContent): { provider: CodingCliProviderName; sessionId: string } | undefined {
+  const explicit = (content as { sessionRef?: { provider?: unknown; sessionId?: unknown } }).sessionRef
+  if (explicit && typeof explicit.provider === 'string' && typeof explicit.sessionId === 'string') {
+    if (explicit.provider === 'claude' && !isValidClaudeSessionId(explicit.sessionId)) return undefined
+    return {
+      provider: explicit.provider as CodingCliProviderName,
+      sessionId: explicit.sessionId,
+    }
+  }
+
   if (content.kind === 'claude-chat') {
     const sessionId = content.resumeSessionId
     if (!sessionId || !isValidClaudeSessionId(sessionId)) return undefined

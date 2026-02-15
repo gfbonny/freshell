@@ -287,6 +287,23 @@ describe('findPaneForSession', () => {
 // === claude-chat (freshclaude) pane support ===
 
 describe('collectSessionRefsFromNode — claude-chat panes', () => {
+  it('prefers explicit sessionRef over legacy resumeSessionId', () => {
+    const node = leaf('p1', {
+      kind: 'terminal',
+      mode: 'shell',
+      status: 'running',
+      createRequestId: 'req-explicit',
+      resumeSessionId: 'legacy-shell-resume',
+      sessionRef: {
+        provider: 'codex',
+        sessionId: 'codex-explicit-session',
+      },
+    })
+    expect(collectSessionRefsFromNode(node)).toEqual([
+      { provider: 'codex', sessionId: 'codex-explicit-session' },
+    ])
+  })
+
   it('extracts session ref from a claude-chat pane', () => {
     const node = leaf('p1', claudeChatContent(VALID_SESSION_ID))
     expect(collectSessionRefsFromNode(node)).toEqual([

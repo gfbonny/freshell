@@ -164,7 +164,7 @@ describe('TerminalView lifecycle updates', () => {
           paneTitles: {},
         },
         settings: { settings: defaultSettings, status: 'loaded' },
-        connection: { status: 'connected', error: null },
+        connection: { status: 'connected', error: null, serverInstanceId: 'srv-local' },
       },
     })
 
@@ -248,7 +248,7 @@ describe('TerminalView lifecycle updates', () => {
           paneTitles: {},
         },
         settings: { settings: defaultSettings, status: 'loaded' },
-        connection: { status: 'connected', error: null },
+        connection: { status: 'connected', error: null, serverInstanceId: 'srv-local' },
       },
     })
 
@@ -476,7 +476,7 @@ describe('TerminalView lifecycle updates', () => {
           paneTitles: {},
         },
         settings: { settings: defaultSettings, status: 'loaded' },
-        connection: { status: 'connected', error: null },
+        connection: { status: 'connected', error: null, serverInstanceId: 'srv-local' },
       },
     })
 
@@ -540,7 +540,7 @@ describe('TerminalView lifecycle updates', () => {
           paneTitles: {},
         },
         settings: { settings: defaultSettings, status: 'loaded' },
-        connection: { status: 'connected', error: null },
+        connection: { status: 'connected', error: null, serverInstanceId: 'srv-local' },
       },
     })
 
@@ -1177,7 +1177,7 @@ describe('TerminalView lifecycle updates', () => {
           paneTitles: {},
         },
         settings: { settings: defaultSettings, status: 'loaded' },
-        connection: { status: 'connected', error: null },
+        connection: { status: 'connected', error: null, serverInstanceId: 'srv-local' },
       },
     })
 
@@ -1207,9 +1207,14 @@ describe('TerminalView lifecycle updates', () => {
       sessionId: 'session-abc-123',
     })
 
-    // Verify pane content has resumeSessionId
+    // Verify pane content has resumeSessionId + sessionRef
     const layout = store.getState().panes.layouts[tabId] as { type: 'leaf'; content: any }
     expect(layout.content.resumeSessionId).toBe('session-abc-123')
+    expect(layout.content.sessionRef).toEqual({
+      provider: 'claude',
+      sessionId: 'session-abc-123',
+      serverInstanceId: 'srv-local',
+    })
 
     // Verify tab also has resumeSessionId mirrored
     const tab = store.getState().tabs.tabs.find(t => t.id === tabId)

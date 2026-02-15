@@ -10,14 +10,25 @@ export function countPaneLeaves(node: PaneNode | undefined): number {
   return countPaneLeaves(node.children[0]) + countPaneLeaves(node.children[1])
 }
 
-function stripPanePayload(content: PaneContent): Record<string, unknown> {
+function stripPanePayload(content: PaneContent, serverInstanceId: string): Record<string, unknown> {
   switch (content.kind) {
     case 'terminal':
+      {
+        const sessionRef = content.sessionRef
+          || (content.resumeSessionId && content.mode !== 'shell'
+            ? {
+              provider: content.mode,
+              sessionId: content.resumeSessionId,
+              serverInstanceId,
+            }
+            : undefined)
       return {
         mode: content.mode,
         shell: content.shell,
         resumeSessionId: content.resumeSessionId,
+        sessionRef,
         initialCwd: content.initialCwd,
+      }
       }
     case 'browser':
       return {
@@ -32,12 +43,23 @@ function stripPanePayload(content: PaneContent): Record<string, unknown> {
         viewMode: content.viewMode,
       }
     case 'claude-chat':
+      {
+        const sessionRef = content.sessionRef
+          || (content.resumeSessionId
+            ? {
+              provider: 'claude',
+              sessionId: content.resumeSessionId,
+              serverInstanceId,
+            }
+            : undefined)
       return {
         resumeSessionId: content.resumeSessionId,
+        sessionRef,
         initialCwd: content.initialCwd,
         model: content.model,
         permissionMode: content.permissionMode,
         effort: content.effort,
+      }
       }
     case 'picker':
     default:
@@ -47,6 +69,7 @@ function stripPanePayload(content: PaneContent): Record<string, unknown> {
 
 export function collectPaneSnapshots(
   node: PaneNode | undefined,
+  serverInstanceId: string,
   paneTitles?: Record<string, string>,
 ): RegistryPaneSnapshot[] {
   if (!node) return []
@@ -55,12 +78,12 @@ export function collectPaneSnapshots(
       paneId: node.id,
       kind: node.content.kind,
       title: paneTitles?.[node.id],
-      payload: stripPanePayload(node.content),
+      payload: stripPanePayload(node.content, serverInstanceId),
     }]
   }
   return [
-    ...collectPaneSnapshots(node.children[0], paneTitles),
-    ...collectPaneSnapshots(node.children[1], paneTitles),
+    ...collectPaneSnapshots(node.children[0], serverInstanceId, paneTitles),
+    ...collectPaneSnapshots(node.children[1], serverInstanceId, paneTitles),
   ]
 }
 
@@ -76,7 +99,7 @@ type SnapshotRecordInput = {
 }
 
 export function buildOpenTabRegistryRecord(input: SnapshotRecordInput): RegistryTabRecord {
-  const paneSnapshots = collectPaneSnapshots(input.layout, input.paneTitles)
+  const paneSnapshots = collectPaneSnapshots(input.layout, input.serverInstanceId, input.paneTitles)
   return {
     tabKey: `${input.deviceId}:${input.tab.id}`,
     tabId: input.tab.id,
@@ -95,7 +118,7 @@ export function buildOpenTabRegistryRecord(input: SnapshotRecordInput): Registry
 }
 
 export function buildClosedTabRegistryRecord(input: SnapshotRecordInput): RegistryTabRecord {
-  const paneSnapshots = collectPaneSnapshots(input.layout, input.paneTitles)
+  const paneSnapshots = collectPaneSnapshots(input.layout, input.serverInstanceId, input.paneTitles)
   return {
     tabKey: `${input.deviceId}:${input.tab.id}`,
     tabId: input.tab.id,
