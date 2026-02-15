@@ -650,11 +650,75 @@ export function ContextMenuProvider({
       })
     }
 
+    // --- Long-press (touch hold) detection for mobile ---
+    let longPressTimer: ReturnType<typeof setTimeout> | null = null
+    let touchStartPos: { x: number; y: number } | null = null
+
+    const handleTouchStart = (e: TouchEvent) => {
+      const touch = e.touches[0]
+      if (!touch) return
+      touchStartPos = { x: touch.clientX, y: touch.clientY }
+
+      longPressTimer = setTimeout(() => {
+        if (!touchStartPos) return
+        const target = document.elementFromPoint(touchStartPos.x, touchStartPos.y) as HTMLElement | null
+        if (!target) return
+
+        const contextEl = findContextElement(target)
+        const contextId = resolveContextId(contextEl?.dataset.context)
+        if (!contextId) return
+
+        const dataset = contextEl?.dataset ? copyDataset(contextEl.dataset) : {}
+        const parsed = parseContextTarget(contextId as any, dataset)
+        const targetObj = parsed || { kind: 'global' as const }
+
+        openMenu({
+          position: { x: touchStartPos.x, y: touchStartPos.y },
+          target: targetObj,
+          contextElement: contextEl,
+          clickTarget: target,
+          dataset,
+        })
+        touchStartPos = null
+      }, 500)
+    }
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (!touchStartPos || !longPressTimer) return
+      const touch = e.touches[0]
+      if (!touch) return
+      const dx = Math.abs(touch.clientX - touchStartPos.x)
+      const dy = Math.abs(touch.clientY - touchStartPos.y)
+      if (dx > 10 || dy > 10) {
+        clearTimeout(longPressTimer)
+        longPressTimer = null
+        touchStartPos = null
+      }
+    }
+
+    const handleTouchEnd = () => {
+      if (longPressTimer) {
+        clearTimeout(longPressTimer)
+        longPressTimer = null
+      }
+      touchStartPos = null
+    }
+
     document.addEventListener('contextmenu', handleContextMenu, true)
     document.addEventListener('keydown', handleKeyDown, true)
+    document.addEventListener('touchstart', handleTouchStart, { passive: true })
+    document.addEventListener('touchmove', handleTouchMove, { passive: true })
+    document.addEventListener('touchend', handleTouchEnd)
+    document.addEventListener('touchcancel', handleTouchEnd)
+
     return () => {
       document.removeEventListener('contextmenu', handleContextMenu, true)
       document.removeEventListener('keydown', handleKeyDown, true)
+      document.removeEventListener('touchstart', handleTouchStart)
+      document.removeEventListener('touchmove', handleTouchMove)
+      document.removeEventListener('touchend', handleTouchEnd)
+      document.removeEventListener('touchcancel', handleTouchEnd)
+      if (longPressTimer) clearTimeout(longPressTimer)
     }
   }, [openMenu, shouldUseNativeMenu])
 
