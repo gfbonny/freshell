@@ -72,6 +72,17 @@ describe('getNetworkHost', () => {
     const { getNetworkHost } = await import('../../server/get-network-host.js')
     expect(getNetworkHost()).toBe('0.0.0.0')
   })
+
+  it('always returns 0.0.0.0 on WSL2 regardless of config', async () => {
+    vi.mocked(readFileSync).mockImplementation((path: any) => {
+      if (String(path) === '/proc/version') return 'Linux version 5.15.167.4-microsoft-standard-WSL2'
+      return JSON.stringify({
+        settings: { network: { host: '127.0.0.1', configured: true } },
+      })
+    })
+    const { getNetworkHost } = await import('../../server/get-network-host.js')
+    expect(getNetworkHost()).toBe('0.0.0.0')
+  })
 })
 
 describe('vite config', () => {

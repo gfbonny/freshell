@@ -7,6 +7,9 @@ import dotenv from 'dotenv'
  * Read the effective network bind host from ~/.freshell/config.json.
  *
  * Logic mirrors server/index.ts bind-host resolution:
+ * - On WSL2, always returns '0.0.0.0' — binding to localhost makes the
+ *   server unreachable from the Windows host, which is the normal access
+ *   path. This is not "remote access", it's basic WSL2 functionality.
  * - If user hasn't configured (configured === false) and HOST env var
  *   is set to a valid bind address, use HOST (backward compat for
  *   existing deployments like systemd/Docker).
@@ -25,6 +28,10 @@ export function getNetworkHost(): string {
   // vars already in process.env. This ensures vite.config.ts (which doesn't
   // import 'dotenv/config') can still see HOST from .env.
   dotenv.config()
+
+  // On WSL2, binding to 127.0.0.1 makes the server unreachable from the
+  // Windows host browser. Always bind to 0.0.0.0 so Windows can connect.
+  if (isWSL2()) return '0.0.0.0'
 
   try {
     const configPath = join(homedir(), '.freshell', 'config.json')
@@ -45,5 +52,14 @@ export function getNetworkHost(): string {
     const envHost = process.env.HOST
     if (envHost === '0.0.0.0' || envHost === '127.0.0.1') return envHost
     return '127.0.0.1'
+  }
+}
+
+function isWSL2(): boolean {
+  try {
+    const version = readFileSync('/proc/version', 'utf-8')
+    return version.toLowerCase().includes('microsoft')
+  } catch {
+    return false
   }
 }
