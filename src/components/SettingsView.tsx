@@ -13,9 +13,6 @@ import { fetchFirewallConfig } from '@/lib/firewall-configure'
 import { nanoid } from '@reduxjs/toolkit'
 import type { AppView } from '@/components/Sidebar'
 import { CODING_CLI_PROVIDER_CONFIGS } from '@/lib/coding-cli-utils'
-import { Copy, Check } from 'lucide-react'
-import { generate } from 'lean-qr'
-import { toSvgDataURL } from 'lean-qr/extras/svg'
 
 /** Monospace fonts with good Unicode block element support for terminal use */
 const terminalFonts = [
@@ -142,7 +139,7 @@ function normalizePreviewLine(tokens: PreviewToken[], width: number): PreviewTok
   return normalized
 }
 
-export default function SettingsView({ onNavigate, onFirewallTerminal }: { onNavigate?: (view: AppView) => void; onFirewallTerminal?: (cmd: { tabId: string; command: string }) => void } = {}) {
+export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePanel }: { onNavigate?: (view: AppView) => void; onFirewallTerminal?: (cmd: { tabId: string; command: string }) => void; onSharePanel?: () => void } = {}) {
   const dispatch = useAppDispatch()
   const rawSettings = useAppSelector((s) => s.settings.settings)
   const settings = useMemo(
@@ -163,10 +160,6 @@ export default function SettingsView({ onNavigate, onFirewallTerminal }: { onNav
   const [defaultCwdInput, setDefaultCwdInput] = useState(settings.defaultCwd ?? '')
   const [defaultCwdError, setDefaultCwdError] = useState<string | null>(null)
   const terminalAdvancedId = useId()
-  const [mdnsHostname, setMdnsHostname] = useState(settings.network?.mdns?.hostname || networkStatus?.machineHostname || 'freshell')
-  const [urlCopied, setUrlCopied] = useState(false)
-  const [showQrCode, setShowQrCode] = useState(false)
-
   const pendingRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const defaultCwdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const defaultCwdValidationRef = useRef(0)
@@ -998,11 +991,9 @@ export default function SettingsView({ onNavigate, onFirewallTerminal }: { onNav
                 disabled={configuring || networkStatus?.rebinding}
                 aria-label="Remote access"
                 onChange={async (checked) => {
-                  const mdns = settings.network?.mdns ?? { enabled: false, hostname: 'freshell' }
                   await dispatch(configureNetwork({
                     host: checked ? '0.0.0.0' : '127.0.0.1',
                     configured: true,
-                    mdns,
                   })).unwrap()
                 }}
               />
@@ -1010,25 +1001,6 @@ export default function SettingsView({ onNavigate, onFirewallTerminal }: { onNav
 
             {networkStatus?.host === '0.0.0.0' && (
               <>
-                <SettingsRow label="mDNS service name" description="Name for network discovery">
-                  <input
-                    aria-label="mDNS hostname"
-                    type="text"
-                    value={mdnsHostname}
-                    onChange={(e) => setMdnsHostname(e.target.value)}
-                    onBlur={async () => {
-                      const trimmed = mdnsHostname.trim().toLowerCase()
-                      if (!trimmed || trimmed === (networkStatus.mdns?.hostname ?? 'freshell')) return
-                      await dispatch(configureNetwork({
-                        host: '0.0.0.0',
-                        configured: true,
-                        mdns: { enabled: true, hostname: trimmed },
-                      })).unwrap()
-                    }}
-                    className="w-40 rounded border bg-background px-2 py-1 text-sm"
-                  />
-                </SettingsRow>
-
                 {networkStatus.firewall && (
                   <SettingsRow
                     label="Firewall"
@@ -1071,43 +1043,15 @@ export default function SettingsView({ onNavigate, onFirewallTerminal }: { onNav
                 )}
 
                 {networkStatus.accessUrl && (
-                  <div className="space-y-3">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex flex-col gap-0.5">
-                        <span className="text-sm text-muted-foreground">Access URL</span>
-                        <span className="text-xs text-muted-foreground/60">Share this URL with your devices</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => setShowQrCode((v) => !v)}
-                          className="rounded border px-2 py-0.5 text-xs font-medium transition-colors hover:bg-muted"
-                          aria-label={showQrCode ? 'Hide QR code' : 'Show QR code'}
-                          aria-pressed={showQrCode}
-                        >
-                          QR
-                        </button>
-                        <button
-                          onClick={async () => {
-                            try {
-                              await navigator.clipboard.writeText(networkStatus.accessUrl)
-                              setUrlCopied(true)
-                              setTimeout(() => setUrlCopied(false), 2000)
-                            } catch {
-                              // Clipboard may not be available
-                            }
-                          }}
-                          className="rounded border p-1 transition-colors hover:bg-muted"
-                          aria-label={urlCopied ? 'Copied' : 'Copy URL'}
-                        >
-                          {urlCopied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
-                        </button>
-                      </div>
-                    </div>
-                    <code className="block break-all rounded bg-muted px-2 py-1 text-xs">{networkStatus.accessUrl}</code>
-                    {showQrCode && (
-                      <QrCode url={networkStatus.accessUrl} />
-                    )}
-                  </div>
+                  <SettingsRow label="Device access" description="Get a link to use from your phone or other computers">
+                    <button
+                      onClick={() => onSharePanel?.()}
+                      className="rounded border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted"
+                      aria-label="Get link for your devices"
+                    >
+                      Get link
+                    </button>
+                  </SettingsRow>
                 )}
 
                 {networkStatus.devMode && networkStatus.firewall?.platform !== 'wsl2' && (
@@ -1123,20 +1067,6 @@ export default function SettingsView({ onNavigate, onFirewallTerminal }: { onNav
       </div>
     </div>
   )
-}
-
-function QrCode({ url }: { url: string }) {
-  const dataUrl = useMemo(() => {
-    try {
-      const code = generate(url)
-      return toSvgDataURL(code, { on: 'currentColor', off: 'transparent' })
-    } catch {
-      return null
-    }
-  }, [url])
-
-  if (!dataUrl) return null
-  return <img src={dataUrl} alt="QR code for access URL" className="h-32 w-32" />
 }
 
 function SettingsSection({

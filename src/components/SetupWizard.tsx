@@ -53,13 +53,11 @@ function QrCode({ url }: { url: string }) {
 export function SetupWizard({ onComplete, initialStep = 1, onNavigate, onFirewallTerminal }: SetupWizardProps) {
   const dispatch = useAppDispatch()
   const networkStatus = useAppSelector((s) => s.network.status)
-  const settings = useAppSelector((s) => s.settings.settings)
   const configuring = useAppSelector((s) => s.network.configuring)
 
   const [step, setStep] = useState<1 | 2 | 3>(initialStep)
   const [bindStatus, setBindStatus] = useState<ChecklistItemStatus>('pending')
   const [bindDetail, setBindDetail] = useState<string | undefined>()
-  const mdnsHostname = settings?.network?.mdns?.hostname || networkStatus?.machineHostname || 'freshell'
   const [firewallStatus, setFirewallStatus] = useState<ChecklistItemStatus>('pending')
   const [firewallDetail, setFirewallDetail] = useState<string | undefined>()
   const [copied, setCopied] = useState(false)
@@ -115,13 +113,12 @@ export function SetupWizard({ onComplete, initialStep = 1, onNavigate, onFirewal
       await dispatch(configureNetwork({
         host: '0.0.0.0',
         configured: true,
-        mdns: { enabled: true, hostname: mdnsHostname },
       })).unwrap()
     } catch (err: any) {
       setBindStatus('error')
       setBindDetail(err?.message || 'Failed to configure network')
     }
-  }, [dispatch, mdnsHostname])
+  }, [dispatch])
 
   // Auto-trigger bind when entering at step 2 directly (initialStep=2).
   // Without this, step 2 shows a pending checklist with no way to progress.
@@ -142,7 +139,6 @@ export function SetupWizard({ onComplete, initialStep = 1, onNavigate, onFirewal
       await dispatch(configureNetwork({
         host: '127.0.0.1',
         configured: true,
-        mdns: { enabled: false, hostname: 'freshell' },
       })).unwrap()
       onComplete()
     } catch (err: any) {
@@ -269,11 +265,6 @@ export function SetupWizard({ onComplete, initialStep = 1, onNavigate, onFirewal
 
             <div className="space-y-1">
               <ChecklistItem label="Binding to network..." status={bindStatus} detail={bindDetail} />
-              <ChecklistItem
-                label="Setting up local discovery..."
-                status={bindStatus === 'done' ? 'done' : 'pending'}
-                detail={bindStatus === 'done' ? `mDNS name: ${mdnsHostname}.local` : undefined}
-              />
               <ChecklistItem label="Checking firewall..." status={firewallStatus} detail={firewallDetail} />
               {firewallStatus === 'error' && networkStatus?.firewall && (
                 <button
@@ -340,12 +331,6 @@ export function SetupWizard({ onComplete, initialStep = 1, onNavigate, onFirewal
                     {copied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
                   </button>
                 </div>
-                {networkStatus.mdns && (
-                  <p className="text-xs text-muted-foreground">
-                    Also available at{' '}
-                    <span className="font-mono">{networkStatus.mdns.hostname}.local:{networkStatus.port}</span>
-                  </p>
-                )}
               </div>
             )}
 

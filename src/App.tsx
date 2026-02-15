@@ -435,7 +435,7 @@ export default function App() {
 
   const content = (() => {
     if (view === 'sessions') return <HistoryView onOpenSession={() => setView('terminal')} />
-    if (view === 'settings') return <SettingsView onNavigate={setView} onFirewallTerminal={setPendingFirewallCommand} />
+    if (view === 'settings') return <SettingsView onNavigate={setView} onFirewallTerminal={setPendingFirewallCommand} onSharePanel={() => { setCopied(false); setShowSharePanel(true) }} />
     if (view === 'overview') return <OverviewView onOpenTab={() => setView('terminal')} />
     return (
       <div className="flex flex-col h-full">
@@ -604,11 +604,6 @@ export default function App() {
               <div className="flex justify-center mb-4">
                 <ShareQrCode url={networkStatus.accessUrl} />
               </div>
-            )}
-            {networkStatus.mdns?.enabled && networkStatus.mdns.hostname && (
-              <p className="text-xs text-muted-foreground text-center mb-2">
-                Also available at <code className="text-xs">{networkStatus.mdns.hostname}.local</code>
-              </p>
             )}
             <div className="bg-muted rounded-md p-3 mb-4">
               <code className="text-sm break-all select-all">{networkStatus.accessUrl}</code>
