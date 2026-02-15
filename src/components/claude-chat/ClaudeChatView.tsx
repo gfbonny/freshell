@@ -326,6 +326,7 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
         {(() => {
           let turnIndex = 0
           return renderItems.map((item, i) => {
+            const isLast = i === renderItems.length - 1
             if (item.kind === 'turn') {
               const isOld = turnIndex < collapseThreshold
               turnIndex++
@@ -356,6 +357,7 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
                     content={item.assistant.content}
                     timestamp={item.assistant.timestamp}
                     model={item.assistant.model}
+                    isLastMessage={isLast}
                     showThinking={paneContent.showThinking ?? true}
                     showTools={paneContent.showTools ?? true}
                     showTimecodes={paneContent.showTimecodes ?? false}
@@ -373,6 +375,7 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
                 content={item.message.content}
                 timestamp={item.message.timestamp}
                 model={item.message.model}
+                isLastMessage={isLast}
                 showThinking={paneContent.showThinking ?? true}
                 showTools={paneContent.showTools ?? true}
                 showTimecodes={paneContent.showTimecodes ?? false}

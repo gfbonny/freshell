@@ -18,6 +18,10 @@ interface MessageBubbleProps {
   showThinking?: boolean
   showTools?: boolean
   showTimecodes?: boolean
+  /** When true, unpaired tool_use blocks show a spinner (they may still be running).
+   *  When false (default), unpaired tool_use blocks show as complete — their results
+   *  arrived in a later message. */
+  isLastMessage?: boolean
   /** Index offset for this message's completed tool blocks in the global sequence. */
   completedToolOffset?: number
   /** Completed tools at globalIndex >= this value get initialExpanded=true. */
@@ -32,6 +36,7 @@ function MessageBubble({
   showThinking = true,
   showTools = true,
   showTimecodes = false,
+  isLastMessage = false,
   completedToolOffset,
   autoExpandAbove,
 }: MessageBubbleProps) {
@@ -113,7 +118,7 @@ function MessageBubble({
               input={block.input}
               output={resultContent}
               isError={result?.is_error}
-              status={result ? 'complete' : 'running'}
+              status={result ? 'complete' : isLastMessage ? 'running' : 'complete'}
               initialExpanded={block.id ? expandSet.has(block.id) : false}
             />
           )
