@@ -175,7 +175,7 @@ export default function App() {
   // Swipe gesture: left/right on terminal content area switches tabs
   const bindTabSwipe = useDrag(
     ({ movement: [mx], velocity: [vx], direction: [dx], last }) => {
-      if (!isMobile || !last) return
+      if (!isMobile || !last || view !== 'terminal') return
 
       const swipedLeft = dx < 0 && (Math.abs(mx) > 50 || vx > 0.5)
       const swipedRight = dx > 0 && (mx > 50 || vx > 0.5)
