@@ -694,6 +694,37 @@ describe('Codex Session-Terminal Association via onUpdate', () => {
     registry.shutdown()
   })
 
+  it('does not associate one codex session to multiple terminals across repeated updates', () => {
+    const registry = new TerminalRegistry()
+    const broadcasts: any[] = []
+
+    const term1 = registry.create({ mode: 'codex', cwd: '/home/user/project' })
+    const term2 = registry.create({ mode: 'codex', cwd: '/home/user/project' })
+    const term3 = registry.create({ mode: 'codex', cwd: '/home/user/project' })
+
+    const projects = [{
+      projectPath: '/home/user/project',
+      sessions: [{
+        provider: 'codex' as const,
+        sessionId: 'codex-session-abc-123',
+        projectPath: '/home/user/project',
+        updatedAt: Date.now(),
+        cwd: '/home/user/project',
+      }],
+    }]
+
+    associateOnUpdate(registry, projects, broadcasts)
+    associateOnUpdate(registry, projects, broadcasts)
+    associateOnUpdate(registry, projects, broadcasts)
+
+    expect(registry.get(term1.terminalId)?.resumeSessionId).toBe('codex-session-abc-123')
+    expect(registry.get(term2.terminalId)?.resumeSessionId).toBeUndefined()
+    expect(registry.get(term3.terminalId)?.resumeSessionId).toBeUndefined()
+    expect(broadcasts).toHaveLength(1)
+
+    registry.shutdown()
+  })
+
   it('does not cross-associate: codex session does not match claude terminal', () => {
     const registry = new TerminalRegistry()
     const broadcasts: any[] = []
