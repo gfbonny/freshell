@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { Settings } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Switch } from '@/components/ui/switch'
+import { useMobile } from '@/hooks/useMobile'
 import type { ClaudeChatPaneContent } from '@/store/paneTypes'
 
 type SettingsFields = Pick<ClaudeChatPaneContent, 'model' | 'permissionMode' | 'effort' | 'showThinking' | 'showTools' | 'showTimecodes'>
@@ -52,6 +53,7 @@ export default function FreshclaudeSettings({
   onDismiss,
 }: FreshclaudeSettingsProps) {
   const instanceId = useId()
+  const isMobile = useMobile()
   const [open, setOpen] = useState(defaultOpen)
   const popoverRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
@@ -120,13 +122,27 @@ export default function FreshclaudeSettings({
       </button>
 
       {open && (
-        <div
-          ref={popoverRef}
-          className="absolute right-0 top-full mt-1 z-50 w-64 rounded-lg border bg-card p-3 shadow-lg"
-          role="dialog"
-          aria-label="freshclaude settings"
-        >
-          <div className="space-y-3">
+        <>
+          {isMobile && (
+            <button
+              type="button"
+              className="fixed inset-0 z-40 bg-black/40"
+              aria-label="Close settings"
+              onClick={handleClose}
+            />
+          )}
+          <div
+            ref={popoverRef}
+            className={cn(
+              'z-50 rounded-lg border bg-card p-3 shadow-lg',
+              isMobile
+                ? 'fixed inset-x-0 bottom-0 max-h-[80dvh] overflow-y-auto rounded-b-none border-x-0'
+                : 'absolute right-0 top-full mt-1 w-64',
+            )}
+            role="dialog"
+            aria-label="freshclaude settings"
+          >
+            <div className="space-y-3">
             {/* Model */}
             <div className="space-y-1">
               <label htmlFor={`${instanceId}-model`} className="text-xs font-medium">Model</label>
@@ -194,8 +210,18 @@ export default function FreshclaudeSettings({
               checked={showTimecodes}
               onChange={(v) => onChange({ showTimecodes: v })}
             />
+            {isMobile && (
+              <button
+                type="button"
+                className="mt-2 min-h-11 w-full rounded-md border border-border px-3 text-sm font-medium"
+                onClick={handleClose}
+              >
+                Done
+              </button>
+            )}
           </div>
-        </div>
+          </div>
+        </>
       )}
     </div>
   )

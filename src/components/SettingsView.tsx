@@ -5,7 +5,8 @@ import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { terminalThemes, darkThemes, lightThemes, getTerminalTheme } from '@/lib/terminal-themes'
 import { resolveTerminalFontFamily, saveLocalTerminalFontFamily } from '@/lib/terminal-fonts'
-import type { SidebarSortMode, TerminalTheme, CodexSandboxMode, ClaudePermissionMode, CodingCliProviderName } from '@/store/types'
+import type { AppSettings, SidebarSortMode, TerminalTheme, CodexSandboxMode, ClaudePermissionMode, CodingCliProviderName } from '@/store/types'
+import type { DeepPartial } from '@/lib/type-utils'
 import { configureNetwork, fetchNetworkStatus } from '@/store/networkSlice'
 import { addTab } from '@/store/tabsSlice'
 import { initLayout } from '@/store/panesSlice'
@@ -187,7 +188,7 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
   )
 
   const patch = useMemo(
-    () => async (updates: any) => {
+    () => async (updates: DeepPartial<AppSettings>) => {
       await api.patch('/api/settings', updates)
       dispatch(markSaved())
     },
@@ -222,8 +223,9 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
 
   const commitDefaultCwd = useCallback((nextValue: string | undefined) => {
     if (nextValue === settings.defaultCwd) return
-    dispatch(updateSettingsLocal({ defaultCwd: nextValue } as any))
-    patch({ defaultCwd: nextValue ?? null } as any).catch((err) => console.warn('Failed to save settings', err))
+    dispatch(updateSettingsLocal({ defaultCwd: nextValue }))
+    // Send '' to API when clearing — JSON.stringify strips undefined, but server normalizes '' → undefined
+    patch({ defaultCwd: nextValue ?? '' }).catch((err) => console.warn('Failed to save settings', err))
   }, [dispatch, patch, settings.defaultCwd])
 
   const scheduleDefaultCwdValidation = useCallback((value: string) => {
@@ -308,7 +310,7 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
         setProviderCwdErrors((prev) => ({ ...prev, [key]: null }))
         dispatch(updateSettingsLocal({
           codingCli: { providers: { [providerName]: { cwd: undefined } } },
-        } as any))
+        }))
         scheduleSave({ codingCli: { providers: { [providerName]: { cwd: undefined } } } })
         return
       }
@@ -320,7 +322,7 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
             setProviderCwdErrors((prev) => ({ ...prev, [key]: null }))
             dispatch(updateSettingsLocal({
               codingCli: { providers: { [providerName]: { cwd: trimmed } } },
-            } as any))
+            }))
             scheduleSave({ codingCli: { providers: { [providerName]: { cwd: trimmed } } } })
           } else {
             setProviderCwdErrors((prev) => ({ ...prev, [key]: 'directory not found' }))
@@ -337,7 +339,7 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
     const next = enabled
       ? Array.from(new Set([...enabledProviders, provider]))
       : enabledProviders.filter((p) => p !== provider)
-    dispatch(updateSettingsLocal({ codingCli: { enabledProviders: next } } as any))
+    dispatch(updateSettingsLocal({ codingCli: { enabledProviders: next } }))
     scheduleSave({ codingCli: { enabledProviders: next } })
   }, [dispatch, enabledProviders, scheduleSave])
 
@@ -425,7 +427,7 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
     if (isSelectedFontAvailable) return
     if (fallbackFontFamily === settings.terminal.fontFamily) return
 
-    dispatch(updateSettingsLocal({ terminal: { fontFamily: fallbackFontFamily } } as any))
+    dispatch(updateSettingsLocal({ terminal: { fontFamily: fallbackFontFamily } }))
     saveLocalTerminalFontFamily(fallbackFontFamily)
   }, [
     dispatch,
@@ -438,7 +440,7 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="px-6 py-5 border-b border-border/30">
+      <div className="border-b border-border/30 px-3 py-4 md:px-6 md:py-5">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
@@ -451,7 +453,7 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-2xl mx-auto px-6 py-6 space-y-8">
+        <div className="mx-auto w-full max-w-2xl space-y-8 px-3 py-4 md:px-6 md:py-6">
 
           {/* Terminal preview */}
           <div className="space-y-2" data-testid="terminal-preview">
@@ -463,7 +465,7 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
               aria-label="Terminal preview"
               className="rounded-md border border-border/40 shadow-sm overflow-hidden font-mono"
               style={{
-                width: '40ch',
+                width: 'min(100%, 40ch)',
                 height: `${terminalPreviewHeight * settings.terminal.lineHeight}em`,
                 fontFamily: resolveTerminalFontFamily(settings.terminal.fontFamily),
                 fontSize: `${settings.terminal.fontSize}px`,
@@ -501,7 +503,7 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
                   { value: 'dark', label: 'Dark' },
                 ]}
                 onChange={(v) => {
-                  dispatch(updateSettingsLocal({ theme: v as any }))
+                  dispatch(updateSettingsLocal({ theme: v as AppSettings['theme'] }))
                   scheduleSave({ theme: v })
                 }}
               />
@@ -531,10 +533,10 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
                 value={settings.sidebar?.sortMode || 'recency-pinned'}
                 onChange={(e) => {
                   const v = e.target.value as SidebarSortMode
-                  dispatch(updateSettingsLocal({ sidebar: { sortMode: v } } as any))
+                  dispatch(updateSettingsLocal({ sidebar: { sortMode: v } }))
                   scheduleSave({ sidebar: { sortMode: v } })
                 }}
-                className="h-8 px-3 text-sm bg-muted border-0 rounded-md focus:outline-none focus:ring-1 focus:ring-border"
+                className="h-10 w-full px-3 text-sm bg-muted border-0 rounded-md focus:outline-none focus:ring-1 focus:ring-border md:h-8 md:w-auto"
               >
                 <option value="recency">Recency</option>
                 <option value="recency-pinned">Recency (pinned)</option>
@@ -547,7 +549,7 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
               <Toggle
                 checked={settings.sidebar?.showProjectBadges ?? true}
                 onChange={(checked) => {
-                  dispatch(updateSettingsLocal({ sidebar: { showProjectBadges: checked } } as any))
+                  dispatch(updateSettingsLocal({ sidebar: { showProjectBadges: checked } }))
                   scheduleSave({ sidebar: { showProjectBadges: checked } })
                 }}
               />
@@ -557,7 +559,7 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
               <Toggle
                 checked={settings.sidebar?.showSubagents ?? false}
                 onChange={(checked) => {
-                  dispatch(updateSettingsLocal({ sidebar: { showSubagents: checked } } as any))
+                  dispatch(updateSettingsLocal({ sidebar: { showSubagents: checked } }))
                   scheduleSave({ sidebar: { showSubagents: checked } })
                 }}
               />
@@ -567,7 +569,7 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
               <Toggle
                 checked={settings.sidebar?.showNoninteractiveSessions ?? false}
                 onChange={(checked) => {
-                  dispatch(updateSettingsLocal({ sidebar: { showNoninteractiveSessions: checked } } as any))
+                  dispatch(updateSettingsLocal({ sidebar: { showNoninteractiveSessions: checked } }))
                   scheduleSave({ sidebar: { showNoninteractiveSessions: checked } })
                 }}
               />
@@ -582,10 +584,10 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
                 value={settings.panes?.defaultNewPane || 'ask'}
                 onChange={(e) => {
                   const v = e.target.value as 'ask' | 'shell' | 'browser' | 'editor'
-                  dispatch(updateSettingsLocal({ panes: { defaultNewPane: v } } as any))
+                  dispatch(updateSettingsLocal({ panes: { defaultNewPane: v } }))
                   scheduleSave({ panes: { defaultNewPane: v } })
                 }}
-                className="h-8 px-3 text-sm bg-muted border-0 rounded-md focus:outline-none focus:ring-1 focus:ring-border"
+                className="h-10 w-full px-3 text-sm bg-muted border-0 rounded-md focus:outline-none focus:ring-1 focus:ring-border md:h-8 md:w-auto"
               >
                 <option value="ask">Ask</option>
                 <option value="shell">Shell</option>
@@ -603,7 +605,7 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
                 labelWidth="w-10"
                 format={(v) => v === 0 ? 'Off' : `${v}%`}
                 onChange={(v) => {
-                  dispatch(updateSettingsLocal({ panes: { snapThreshold: v } } as any))
+                  dispatch(updateSettingsLocal({ panes: { snapThreshold: v } }))
                   scheduleSave({ panes: { snapThreshold: v } })
                 }}
               />
@@ -613,7 +615,7 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
               <Toggle
                 checked={settings.panes?.iconsOnTabs ?? true}
                 onChange={(checked) => {
-                  dispatch(updateSettingsLocal({ panes: { iconsOnTabs: checked } } as any))
+                  dispatch(updateSettingsLocal({ panes: { iconsOnTabs: checked } }))
                   scheduleSave({ panes: { iconsOnTabs: checked } })
                 }}
               />
@@ -629,7 +631,7 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
                   { value: 'none', label: 'None' },
                 ]}
                 onChange={(v: string) => {
-                  dispatch(updateSettingsLocal({ panes: { tabAttentionStyle: v } } as any))
+                  dispatch(updateSettingsLocal({ panes: { tabAttentionStyle: v } }))
                   scheduleSave({ panes: { tabAttentionStyle: v } })
                 }}
               />
@@ -643,7 +645,7 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
                   { value: 'type', label: 'Typing' },
                 ]}
                 onChange={(v: string) => {
-                  dispatch(updateSettingsLocal({ panes: { attentionDismiss: v } } as any))
+                  dispatch(updateSettingsLocal({ panes: { attentionDismiss: v } }))
                   scheduleSave({ panes: { attentionDismiss: v } })
                 }}
               />
@@ -656,7 +658,7 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
               <Toggle
                 checked={settings.notifications?.soundEnabled ?? true}
                 onChange={(checked) => {
-                  dispatch(updateSettingsLocal({ notifications: { soundEnabled: checked } } as any))
+                  dispatch(updateSettingsLocal({ notifications: { soundEnabled: checked } }))
                   scheduleSave({ notifications: { soundEnabled: checked } })
                 }}
               />
@@ -670,10 +672,10 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
                 value={settings.terminal.theme}
                 onChange={(e) => {
                   const v = e.target.value as TerminalTheme
-                  dispatch(updateSettingsLocal({ terminal: { theme: v } } as any))
+                  dispatch(updateSettingsLocal({ terminal: { theme: v } }))
                   scheduleSave({ terminal: { theme: v } })
                 }}
-                className="h-8 px-3 text-sm bg-muted border-0 rounded-md focus:outline-none focus:ring-1 focus:ring-border"
+                className="h-10 w-full px-3 text-sm bg-muted border-0 rounded-md focus:outline-none focus:ring-1 focus:ring-border md:h-8 md:w-auto"
               >
                 <option value="auto">Auto (follow app theme)</option>
                 <optgroup label="Dark themes">
@@ -698,7 +700,7 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
                 labelWidth="w-20"
                 format={(v) => `${v}px (${Math.round(v / 16 * 100)}%)`}
                 onChange={(v) => {
-                  dispatch(updateSettingsLocal({ terminal: { fontSize: v } } as any))
+                  dispatch(updateSettingsLocal({ terminal: { fontSize: v } }))
                   scheduleSave({ terminal: { fontSize: v } })
                 }}
               />
@@ -713,7 +715,7 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
                 labelWidth="w-10"
                 format={(v) => v.toFixed(2)}
                 onChange={(v) => {
-                  dispatch(updateSettingsLocal({ terminal: { lineHeight: v } } as any))
+                  dispatch(updateSettingsLocal({ terminal: { lineHeight: v } }))
                   scheduleSave({ terminal: { lineHeight: v } })
                 }}
               />
@@ -727,7 +729,7 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
                 step={500}
                 format={(v) => v.toLocaleString()}
                 onChange={(v) => {
-                  dispatch(updateSettingsLocal({ terminal: { scrollback: v } } as any))
+                  dispatch(updateSettingsLocal({ terminal: { scrollback: v } }))
                   scheduleSave({ terminal: { scrollback: v } })
                 }}
               />
@@ -737,7 +739,7 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
               <Toggle
                 checked={settings.terminal.cursorBlink}
                 onChange={(checked) => {
-                  dispatch(updateSettingsLocal({ terminal: { cursorBlink: checked } } as any))
+                  dispatch(updateSettingsLocal({ terminal: { cursorBlink: checked } }))
                   scheduleSave({ terminal: { cursorBlink: checked } })
                 }}
               />
@@ -747,7 +749,7 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
               <Toggle
                 checked={settings.terminal.warnExternalLinks}
                 onChange={(checked) => {
-                  dispatch(updateSettingsLocal({ terminal: { warnExternalLinks: checked } } as any))
+                  dispatch(updateSettingsLocal({ terminal: { warnExternalLinks: checked } }))
                   scheduleSave({ terminal: { warnExternalLinks: checked } })
                 }}
               />
@@ -757,10 +759,10 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
               <select
                 value={isSelectedFontAvailable ? settings.terminal.fontFamily : fallbackFontFamily}
                 onChange={(e) => {
-                  dispatch(updateSettingsLocal({ terminal: { fontFamily: e.target.value } } as any))
+                  dispatch(updateSettingsLocal({ terminal: { fontFamily: e.target.value } }))
                   saveLocalTerminalFontFamily(e.target.value)
                 }}
-                className="h-8 px-3 text-sm bg-muted border-0 rounded-md focus:outline-none focus:ring-1 focus:ring-border"
+                className="h-10 w-full px-3 text-sm bg-muted border-0 rounded-md focus:outline-none focus:ring-1 focus:ring-border md:h-8 md:w-auto"
               >
                 {availableTerminalFonts.map((font) => (
                   <option key={font.value} value={font.value}>{font.label}</option>
@@ -773,7 +775,7 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
                 type="button"
                 aria-expanded={terminalAdvancedOpen}
                 aria-controls={terminalAdvancedId}
-                className="h-8 px-3 text-sm bg-muted rounded-md hover:bg-muted/80 focus:outline-none focus:ring-1 focus:ring-border"
+                className="h-10 w-full px-3 text-sm bg-muted rounded-md hover:bg-muted/80 focus:outline-none focus:ring-1 focus:ring-border md:h-8 md:w-auto"
                 onClick={() => setTerminalAdvancedOpen((open) => !open)}
               >
                 Advanced
@@ -811,7 +813,7 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
                 step={10}
                 format={(v) => String(v)}
                 onChange={(v) => {
-                  dispatch(updateSettingsLocal({ safety: { autoKillIdleMinutes: v } } as any))
+                  dispatch(updateSettingsLocal({ safety: { autoKillIdleMinutes: v } }))
                   scheduleSave({ safety: { autoKillIdleMinutes: v } })
                 }}
               />
@@ -825,14 +827,14 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
                 step={1}
                 format={(v) => String(v)}
                 onChange={(v) => {
-                  dispatch(updateSettingsLocal({ safety: { warnBeforeKillMinutes: v } } as any))
+                  dispatch(updateSettingsLocal({ safety: { warnBeforeKillMinutes: v } }))
                   scheduleSave({ safety: { warnBeforeKillMinutes: v } })
                 }}
               />
             </SettingsRow>
 
             <SettingsRow label="Default working directory">
-              <div className="relative w-full max-w-xs">
+              <div className="relative w-full md:max-w-xs">
                 <input
                   type="text"
                   value={defaultCwdInput}
@@ -844,7 +846,7 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
                     setDefaultCwdError(null)
                     scheduleDefaultCwdValidation(nextValue)
                   }}
-                  className="w-full h-8 px-3 text-sm bg-muted border-0 rounded-md placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-border"
+                  className="h-10 w-full px-3 text-sm bg-muted border-0 rounded-md placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-border md:h-8"
                 />
                 {defaultCwdError && (
                   <span
@@ -863,7 +865,7 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
               <Toggle
                 checked={settings.logging?.debug ?? false}
                 onChange={(checked) => {
-                  dispatch(updateSettingsLocal({ logging: { debug: checked } } as any))
+                  dispatch(updateSettingsLocal({ logging: { debug: checked } }))
                   scheduleSave({ logging: { debug: checked } })
                 }}
               />
@@ -894,10 +896,10 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
                           const v = e.target.value as ClaudePermissionMode
                           dispatch(updateSettingsLocal({
                             codingCli: { providers: { [provider.name]: { permissionMode: v } } },
-                          } as any))
+                          }))
                           scheduleSave({ codingCli: { providers: { [provider.name]: { permissionMode: v } } } })
                         }}
-                        className="h-8 px-3 text-sm bg-muted border-0 rounded-md focus:outline-none focus:ring-1 focus:ring-border"
+                        className="h-10 w-full px-3 text-sm bg-muted border-0 rounded-md focus:outline-none focus:ring-1 focus:ring-border md:h-8 md:w-auto"
                       >
                         <option value="default">Default</option>
                         <option value="plan">Plan</option>
@@ -917,10 +919,10 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
                           const model = e.target.value.trim()
                           dispatch(updateSettingsLocal({
                             codingCli: { providers: { [provider.name]: { model: model || undefined } } },
-                          } as any))
+                          }))
                           scheduleSave({ codingCli: { providers: { [provider.name]: { model: model || undefined } } } })
                         }}
-                        className="w-full max-w-xs h-8 px-3 text-sm bg-muted border-0 rounded-md placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-border"
+                        className="h-10 w-full px-3 text-sm bg-muted border-0 rounded-md placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-border md:h-8 md:max-w-xs"
                       />
                     </SettingsRow>
                   )}
@@ -934,10 +936,10 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
                           const sandbox = v || undefined
                           dispatch(updateSettingsLocal({
                             codingCli: { providers: { [provider.name]: { sandbox } } },
-                          } as any))
+                          }))
                           scheduleSave({ codingCli: { providers: { [provider.name]: { sandbox } } } })
                         }}
-                        className="h-8 px-3 text-sm bg-muted border-0 rounded-md focus:outline-none focus:ring-1 focus:ring-border"
+                        className="h-10 w-full px-3 text-sm bg-muted border-0 rounded-md focus:outline-none focus:ring-1 focus:ring-border md:h-8 md:w-auto"
                       >
                         <option value="">Default</option>
                         <option value="read-only">Read-only</option>
@@ -948,7 +950,7 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
                   )}
 
                   <SettingsRow label={`${provider.label} starting directory`}>
-                    <div className="relative w-full max-w-xs">
+                    <div className="relative w-full md:max-w-xs">
                       <input
                         type="text"
                         aria-label={`${provider.label} starting directory`}
@@ -961,7 +963,7 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
                           setProviderCwdErrors((prev) => ({ ...prev, [provider.name]: null }))
                           scheduleProviderCwdValidation(provider.name, nextValue)
                         }}
-                        className="w-full h-8 px-3 text-sm bg-muted border-0 rounded-md placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-border"
+                        className="h-10 w-full px-3 text-sm bg-muted border-0 rounded-md placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-border md:h-8"
                       />
                       {providerCwdErrors[provider.name] && (
                         <span className="pointer-events-none absolute right-2 -bottom-4 text-[10px] text-destructive">
@@ -1105,7 +1107,7 @@ function SettingsRow({
   children: React.ReactNode
 }) {
   return (
-    <div className="flex items-center justify-between gap-4">
+    <div className="flex w-full flex-col items-start gap-2 md:flex-row md:items-center md:justify-between md:gap-4">
       {description ? (
         <div className="flex flex-col gap-0.5">
           <span className="text-sm text-muted-foreground">{label}</span>
@@ -1114,7 +1116,7 @@ function SettingsRow({
       ) : (
         <span className="text-sm text-muted-foreground">{label}</span>
       )}
-      {children}
+      <div className="w-full md:w-auto">{children}</div>
     </div>
   )
 }
@@ -1129,13 +1131,13 @@ function SegmentedControl({
   onChange: (value: string) => void
 }) {
   return (
-    <div className="flex bg-muted rounded-md p-0.5">
+    <div className="flex w-full flex-wrap bg-muted rounded-md p-0.5 md:w-auto">
       {options.map((opt) => (
         <button
           key={opt.value}
           onClick={() => onChange(opt.value)}
           className={cn(
-            'px-3 py-1 text-xs rounded-md transition-colors',
+            'min-h-10 flex-1 px-3 py-1 text-xs rounded-md transition-colors md:min-h-0 md:flex-none',
             value === opt.value
               ? 'bg-background text-foreground shadow-sm'
               : 'text-muted-foreground hover:text-foreground'
@@ -1214,7 +1216,7 @@ function RangeSlider({
   step,
   onChange,
   format,
-  width = 'w-32',
+  width = 'w-full md:w-32',
   labelWidth = 'w-14',
 }: {
   value: number
@@ -1230,7 +1232,7 @@ function RangeSlider({
   const displayValue = dragging ?? value
 
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex w-full items-center gap-3 md:w-auto">
       <input
         type="range"
         min={min}

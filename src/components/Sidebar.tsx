@@ -46,10 +46,12 @@ export default function Sidebar({
   view,
   onNavigate,
   width = 288,
+  fullWidth = false,
 }: {
   view: AppView
   onNavigate: (v: AppView) => void
   width?: number
+  fullWidth?: boolean
 }) {
   const dispatch = useAppDispatch()
   const store = useAppStore()
@@ -288,8 +290,11 @@ export default function Sidebar({
 
   return (
     <div
-      className="h-full flex flex-col bg-card flex-shrink-0 transition-[width] duration-150"
-      style={{ width: `${width}px` }}
+      className={cn(
+        'h-full flex flex-col bg-card flex-shrink-0 transition-[width] duration-150',
+        fullWidth && 'w-full'
+      )}
+      style={fullWidth ? undefined : { width: `${width}px` }}
     >
       {/* Header */}
       <div className="px-4 py-4">

@@ -39,6 +39,7 @@ vi.mock('@xterm/xterm', () => {
       element.addEventListener('paste', this.pasteListener)
     })
     loadAddon = vi.fn()
+    registerLinkProvider = vi.fn(() => ({ dispose: vi.fn() }))
     write = vi.fn()
     writeln = vi.fn()
     clear = vi.fn()

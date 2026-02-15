@@ -8,6 +8,7 @@ import { api } from '@/lib/api'
 import { getAuthToken } from '@/lib/auth'
 import { buildShareUrl } from '@/lib/utils'
 import { copyText } from '@/lib/clipboard'
+import { triggerHapticFeedback } from '@/lib/mobile-haptics'
 import { collectTerminalIds, findPaneContent } from '@/lib/pane-utils'
 import { collectSessionRefsFromNode } from '@/lib/session-utils'
 import { getTabDisplayTitle } from '@/lib/tab-title'
@@ -679,6 +680,7 @@ export function ContextMenuProvider({
         const parsed = parseContextTarget(contextId as any, dataset)
         const targetObj = parsed || { kind: 'global' as const }
 
+        triggerHapticFeedback()
         openMenu({
           position: { x: touchStartPos.x, y: touchStartPos.y },
           target: targetObj,

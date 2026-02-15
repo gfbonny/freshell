@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type TouchEvent as ReactTouchEvent } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { setStatus, setError, setPlatform, setAvailableClis } from '@/store/connectionSlice'
 import { setSettings } from '@/store/settingsSlice'
@@ -20,14 +20,14 @@ import { applyLocalTerminalFontFamily } from '@/lib/terminal-fonts'
 import { store } from '@/store/store'
 import { useThemeEffect } from '@/hooks/useTheme'
 import { useMobile } from '@/hooks/useMobile'
+import { useOrientation } from '@/hooks/useOrientation'
+import { useFullscreen } from '@/hooks/useFullscreen'
 import { useTurnCompletionNotifications } from '@/hooks/useTurnCompletionNotifications'
 import { useDrag } from '@use-gesture/react'
 import { installCrossTabSync } from '@/store/crossTabSync'
 import Sidebar, { AppView } from '@/components/Sidebar'
 import TabBar from '@/components/TabBar'
 import TabContent from '@/components/TabContent'
-import HistoryView from '@/components/HistoryView'
-import SettingsView from '@/components/SettingsView'
 import OverviewView from '@/components/OverviewView'
 import PaneDivider from '@/components/panes/PaneDivider'
 import { AuthRequiredModal } from '@/components/AuthRequiredModal'
@@ -35,7 +35,8 @@ import { SetupWizard } from '@/components/SetupWizard'
 import { fetchNetworkStatus } from '@/store/networkSlice'
 import { ContextMenuProvider } from '@/components/context-menu/ContextMenuProvider'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
-import { Wifi, WifiOff, Moon, Sun, Share2, X, Copy, Check, PanelLeftClose, PanelLeft, Loader2 } from 'lucide-react'
+import { triggerHapticFeedback } from '@/lib/mobile-haptics'
+import { Wifi, WifiOff, Moon, Sun, Share2, X, Copy, Check, PanelLeftClose, PanelLeft, Loader2, Minimize2, Maximize2 } from 'lucide-react'
 import { updateSettingsLocal, markSaved } from '@/store/settingsSlice'
 import { clearIdleWarning, recordIdleWarning } from '@/store/idleWarningsSlice'
 import { setTerminalMetaSnapshot, upsertTerminalMeta, removeTerminalMeta } from '@/store/terminalMetaSlice'
@@ -62,6 +63,9 @@ function ShareQrCode({ url }: { url: string }) {
   if (!svgUrl) return null
   return <img src={svgUrl} alt="QR code for access URL" className="w-48 h-48" />
 }
+
+const HistoryView = lazy(() => import('@/components/HistoryView'))
+const SettingsView = lazy(() => import('@/components/SettingsView'))
 
 const SIDEBAR_MIN_WIDTH = 200
 const SIDEBAR_MAX_WIDTH = 500
@@ -92,15 +96,24 @@ export default function App() {
   const [copied, setCopied] = useState(false)
   const [pendingFirewallCommand, setPendingFirewallCommand] = useState<{ tabId: string; command: string } | null>(null)
   const isMobile = useMobile()
+  const isMobileRef = useRef(isMobile)
+  const { isLandscape } = useOrientation()
+  const { isFullscreen, toggleFullscreen, exitFullscreen } = useFullscreen()
   const paneLayouts = useAppSelector((s) => s.panes.layouts)
   const mainContentRef = useRef<HTMLDivElement>(null)
   const userOpenedSidebarOnMobileRef = useRef(false)
   const terminalMetaListRequestStartedAtRef = useRef(new Map<string, number>())
+  const fullscreenTouchStartYRef = useRef<number | null>(null)
+  const isLandscapeTerminalView = isMobile && isLandscape && view === 'terminal'
 
   // Keep this tab's Redux state in sync with persisted writes from other browser tabs.
   useEffect(() => {
     return installCrossTabSync(store)
   }, [])
+
+  useEffect(() => {
+    isMobileRef.current = isMobile
+  }, [isMobile])
 
   // Sidebar width from settings (or local state during drag)
   const sidebarWidth = settings.sidebar?.width ?? 288
@@ -116,6 +129,18 @@ export default function App() {
       dispatch(updateSettingsLocal({ sidebar: { ...settings.sidebar, collapsed: true } }))
     }
   }, [isMobile, sidebarCollapsed, settings.sidebar, dispatch])
+
+  useEffect(() => {
+    if (isLandscapeTerminalView && !sidebarCollapsed) {
+      dispatch(updateSettingsLocal({ sidebar: { ...settings.sidebar, collapsed: true } }))
+    }
+  }, [dispatch, isLandscapeTerminalView, settings.sidebar, sidebarCollapsed])
+
+  useEffect(() => {
+    if (view !== 'terminal' && isFullscreen) {
+      void exitFullscreen()
+    }
+  }, [exitFullscreen, isFullscreen, view])
 
   const handleSidebarResize = useCallback((delta: number) => {
     const newWidth = Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, sidebarWidth + delta))
@@ -135,6 +160,9 @@ export default function App() {
     const newCollapsed = !sidebarCollapsed
     if (isMobile && !newCollapsed) {
       userOpenedSidebarOnMobileRef.current = true
+      triggerHapticFeedback()
+    } else if (isMobile && newCollapsed) {
+      triggerHapticFeedback()
     }
     dispatch(updateSettingsLocal({ sidebar: { ...settings.sidebar, collapsed: newCollapsed } }))
     try {
@@ -150,7 +178,7 @@ export default function App() {
 
   const bindSidebarSwipe = useDrag(
     ({ movement: [mx], velocity: [vx], direction: [dx], first, last, xy: [x] }) => {
-      if (!isMobile) return
+      if (!isMobile || isLandscapeTerminalView) return
       if (first) {
         swipeStartXRef.current = x
         return
@@ -192,8 +220,10 @@ export default function App() {
       const swipedRight = dx > 0 && (mx > 50 || vx > 0.5)
 
       if (swipedLeft) {
+        triggerHapticFeedback()
         dispatch(switchToNextTab())
       } else if (swipedRight) {
+        triggerHapticFeedback()
         dispatch(switchToPrevTab())
       }
     },
@@ -286,6 +316,7 @@ export default function App() {
       // Set up hello extension to include session IDs for prioritized repair
       ws.setHelloExtensionProvider(() => ({
         sessions: getSessionsForHello(store.getState()),
+        client: { mobile: isMobileRef.current },
       }))
 
       const unsubscribe = ws.onMessage((msg) => {
@@ -483,16 +514,55 @@ export default function App() {
     }
   }, [tabs.length, dispatch])
 
+  const handleTerminalChromeRevealTouchStart = useCallback((event: ReactTouchEvent<HTMLDivElement>) => {
+    if (!isMobile || !isFullscreen || view !== 'terminal') return
+    const touch = event.touches[0]
+    if (!touch) return
+    if (touch.clientY <= 48) {
+      fullscreenTouchStartYRef.current = touch.clientY
+    } else {
+      fullscreenTouchStartYRef.current = null
+    }
+  }, [isFullscreen, isMobile, view])
+
+  const handleTerminalChromeRevealTouchEnd = useCallback((event: ReactTouchEvent<HTMLDivElement>) => {
+    const startY = fullscreenTouchStartYRef.current
+    fullscreenTouchStartYRef.current = null
+    if (!isMobile || !isFullscreen || view !== 'terminal') return
+    if (startY === null) return
+    const touch = event.changedTouches[0]
+    if (!touch) return
+    const deltaY = touch.clientY - startY
+    if (deltaY > 60) {
+      triggerHapticFeedback()
+      void exitFullscreen()
+    }
+  }, [exitFullscreen, isFullscreen, isMobile, view])
+
   const content = (() => {
-    if (view === 'sessions') return <HistoryView onOpenSession={() => setView('terminal')} />
-    if (view === 'settings') return <SettingsView onNavigate={setView} onFirewallTerminal={setPendingFirewallCommand} onSharePanel={() => { setCopied(false); setShowSharePanel(true) }} />
+    if (view === 'sessions') {
+      return (
+        <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading sessions…</div>}>
+          <HistoryView onOpenSession={() => setView('terminal')} />
+        </Suspense>
+      )
+    }
+    if (view === 'settings') {
+      return (
+        <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading settings…</div>}>
+          <SettingsView onNavigate={setView} onFirewallTerminal={setPendingFirewallCommand} onSharePanel={() => { setCopied(false); setShowSharePanel(true) }} />
+        </Suspense>
+      )
+    }
     if (view === 'overview') return <OverviewView onOpenTab={() => setView('terminal')} />
     return (
       <div className="flex flex-col h-full">
-        <TabBar />
+        {!isLandscapeTerminalView && <TabBar />}
         <div
           className="flex-1 min-h-0 relative bg-background"
           data-testid="terminal-work-area"
+          onTouchStart={handleTerminalChromeRevealTouchStart}
+          onTouchEnd={handleTerminalChromeRevealTouchEnd}
         >
           <div
             className="pointer-events-none absolute inset-x-0 top-0 z-10 h-[3px] bg-background"
@@ -519,69 +589,110 @@ export default function App() {
         data-context={ContextIds.Global}
       >
       {/* Top header bar spanning full width */}
-      <div className="h-8 px-4 flex items-center justify-between border-b border-border/30 bg-background flex-shrink-0">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={toggleSidebarCollapse}
-            className="p-1.5 rounded-md hover:bg-muted transition-colors min-h-11 min-w-11 md:min-h-0 md:min-w-0 flex items-center justify-center"
-            title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
-          >
-            {sidebarCollapsed ? (
-              <PanelLeft className="h-3.5 w-3.5 text-muted-foreground" />
-            ) : (
-              <PanelLeftClose className="h-3.5 w-3.5 text-muted-foreground" />
-            )}
-          </button>
-          <span className="font-mono text-base font-semibold tracking-tight">🐚🔥freshell</span>
-        </div>
-        <div className="flex items-center gap-1">
-          {idleWarningCount > 0 && (
+      {isLandscapeTerminalView ? (
+        <div className="h-6 px-2 flex items-center justify-between border-b border-border/30 bg-background/95 flex-shrink-0 text-xs">
+          <span className="font-mono text-[11px] text-muted-foreground">freshell</span>
+          <div className="flex items-center gap-1">
             <button
-              onClick={() => setView('overview')}
-              className="px-2 py-1 rounded-md bg-amber-100 text-amber-950 hover:bg-amber-200 transition-colors text-xs font-medium"
-              aria-label={`${idleWarningCount} terminal(s) will auto-kill soon`}
-              title="View idle terminals"
+              onClick={() => { triggerHapticFeedback(); void toggleFullscreen(mainContentRef.current) }}
+              className="min-h-6 rounded px-2 text-[11px] text-muted-foreground hover:text-foreground"
+              aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
             >
-              {idleWarningCount} terminal{idleWarningCount === 1 ? '' : 's'} will auto-kill soon
+              {isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
             </button>
-          )}
-          <button
-            onClick={toggleTheme}
-            className="p-1.5 rounded-md hover:bg-muted transition-colors min-h-11 min-w-11 md:min-h-0 md:min-w-0 flex items-center justify-center"
-            title={`Theme: ${settings.theme}`}
-          >
-            {settings.theme === 'dark' ? (
-              <Moon className="h-3.5 w-3.5 text-muted-foreground" />
-            ) : (
-              <Sun className="h-3.5 w-3.5 text-muted-foreground" />
-            )}
-          </button>
-          <button
-            onClick={handleShare}
-            className="p-1.5 rounded-md hover:bg-muted transition-colors min-h-11 min-w-11 md:min-h-0 md:min-w-0 flex items-center justify-center"
-            title="Share LAN access"
-            aria-label="Share"
-          >
-            {networkBusy ? (
-              <Loader2 className="h-3.5 w-3.5 text-muted-foreground animate-spin" />
-            ) : (
-              <Share2 className="h-3.5 w-3.5 text-muted-foreground" />
-            )}
-          </button>
-          <div
-            className="p-1.5 min-h-11 min-w-11 md:min-h-0 md:min-w-0 flex items-center justify-center"
-            title={connection === 'ready' ? 'Connected' : connection === 'connecting' ? 'Connecting...' : connectionError || 'Disconnected'}
-          >
-            {connection === 'ready' ? (
-              <Wifi className="h-3.5 w-3.5 text-muted-foreground" />
-            ) : connection === 'connecting' ? (
-              <Wifi className="h-3.5 w-3.5 text-muted-foreground animate-pulse" />
-            ) : (
-              <WifiOff className="h-3.5 w-3.5 text-muted-foreground" />
-            )}
+            <div
+              className="px-1.5"
+              title={connection === 'ready' ? 'Connected' : connection === 'connecting' ? 'Connecting...' : connectionError || 'Disconnected'}
+            >
+              {connection === 'ready' ? (
+                <Wifi className="h-3 w-3 text-muted-foreground" />
+              ) : connection === 'connecting' ? (
+                <Wifi className="h-3 w-3 text-muted-foreground animate-pulse" />
+              ) : (
+                <WifiOff className="h-3 w-3 text-muted-foreground" />
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      ) : (
+        <div className="h-8 px-3 md:px-4 flex items-center justify-between border-b border-border/30 bg-background flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={toggleSidebarCollapse}
+              className="p-1.5 rounded-md hover:bg-muted transition-colors min-h-11 min-w-11 md:min-h-0 md:min-w-0 flex items-center justify-center"
+              title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+            >
+              {sidebarCollapsed ? (
+                <PanelLeft className="h-3.5 w-3.5 text-muted-foreground" />
+              ) : (
+                <PanelLeftClose className="h-3.5 w-3.5 text-muted-foreground" />
+              )}
+            </button>
+            <span className="font-mono text-base font-semibold tracking-tight">🐚🔥freshell</span>
+          </div>
+          <div className="flex items-center gap-1">
+            {idleWarningCount > 0 && (
+              <button
+                onClick={() => setView('overview')}
+                className="px-2 py-1 rounded-md bg-amber-100 text-amber-950 hover:bg-amber-200 transition-colors text-xs font-medium"
+                aria-label={`${idleWarningCount} terminal(s) will auto-kill soon`}
+                title="View idle terminals"
+              >
+                {idleWarningCount} terminal{idleWarningCount === 1 ? '' : 's'} will auto-kill soon
+              </button>
+            )}
+            <button
+              onClick={toggleTheme}
+              className="p-1.5 rounded-md hover:bg-muted transition-colors min-h-11 min-w-11 md:min-h-0 md:min-w-0 flex items-center justify-center"
+              title={`Theme: ${settings.theme}`}
+            >
+              {settings.theme === 'dark' ? (
+                <Moon className="h-3.5 w-3.5 text-muted-foreground" />
+              ) : (
+                <Sun className="h-3.5 w-3.5 text-muted-foreground" />
+              )}
+            </button>
+            <button
+              onClick={handleShare}
+              className="p-1.5 rounded-md hover:bg-muted transition-colors min-h-11 min-w-11 md:min-h-0 md:min-w-0 flex items-center justify-center"
+              title="Share LAN access"
+              aria-label="Share"
+            >
+              {networkBusy ? (
+                <Loader2 className="h-3.5 w-3.5 text-muted-foreground animate-spin" />
+              ) : (
+                <Share2 className="h-3.5 w-3.5 text-muted-foreground" />
+              )}
+            </button>
+            {isMobile && view === 'terminal' && (
+              <button
+                onClick={() => { triggerHapticFeedback(); void toggleFullscreen(mainContentRef.current) }}
+                className="p-1.5 rounded-md hover:bg-muted transition-colors min-h-11 min-w-11 md:min-h-0 md:min-w-0 flex items-center justify-center"
+                title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+                aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+              >
+                {isFullscreen ? (
+                  <Minimize2 className="h-3.5 w-3.5 text-muted-foreground" />
+                ) : (
+                  <Maximize2 className="h-3.5 w-3.5 text-muted-foreground" />
+                )}
+              </button>
+            )}
+            <div
+              className="p-1.5 min-h-11 min-w-11 md:min-h-0 md:min-w-0 flex items-center justify-center"
+              title={connection === 'ready' ? 'Connected' : connection === 'connecting' ? 'Connecting...' : connectionError || 'Disconnected'}
+            >
+              {connection === 'ready' ? (
+                <Wifi className="h-3.5 w-3.5 text-muted-foreground" />
+              ) : connection === 'connecting' ? (
+                <Wifi className="h-3.5 w-3.5 text-muted-foreground animate-pulse" />
+              ) : (
+                <WifiOff className="h-3.5 w-3.5 text-muted-foreground" />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       {/* Main content area with sidebar */}
       <div className="flex-1 min-h-0 flex relative" ref={mainContentRef} {...(isMobile ? bindSidebarSwipe() : {})} style={isMobile ? { touchAction: 'pan-y' } : undefined}>
         {/* Mobile overlay when sidebar is open */}
@@ -602,12 +713,12 @@ export default function App() {
         )}
         {/* Sidebar - on mobile it overlays, on desktop it's inline */}
         {!sidebarCollapsed && (
-          <div className={isMobile ? 'absolute left-0 top-0 bottom-0 z-20' : 'contents'}>
+          <div className={isMobile ? 'absolute inset-y-0 left-0 right-0 z-20' : 'contents'}>
             <Sidebar view={view} onNavigate={(v) => {
               setView(v)
               // On mobile, collapse sidebar after navigation
               if (isMobile) toggleSidebarCollapse()
-            }} width={sidebarWidth} />
+            }} width={sidebarWidth} fullWidth={isMobile} />
             {!isMobile && (
               <PaneDivider
                 direction="horizontal"

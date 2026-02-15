@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type TouchEvent as ReactTouchEvent } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { updateTab, switchToNextTab, switchToPrevTab } from '@/store/tabsSlice'
-import { updatePaneContent, updatePaneTitle } from '@/store/panesSlice'
+import { addTab, updateTab, switchToNextTab, switchToPrevTab } from '@/store/tabsSlice'
+import { initLayout, updatePaneContent, updatePaneTitle } from '@/store/panesSlice'
 import { updateSessionActivity } from '@/store/sessionActivitySlice'
 import { updateSettingsLocal } from '@/store/settingsSlice'
 import { recordTurnComplete, clearTabAttention, clearPaneAttention } from '@/store/turnCompletionSlice'
@@ -13,6 +13,8 @@ import { copyText, readText } from '@/lib/clipboard'
 import { registerTerminalActions } from '@/lib/pane-action-registry'
 import { consumeTerminalRestoreRequestId, addTerminalRestoreRequestId } from '@/lib/terminal-restore'
 import { isTerminalPasteShortcut } from '@/lib/terminal-input-policy'
+import { useMobile } from '@/hooks/useMobile'
+import { findLocalFilePaths } from '@/lib/path-utils'
 import {
   createTurnCompleteSignalParserState,
   extractTurnCompleteSignals,
@@ -28,6 +30,7 @@ import { resolveTerminalFontFamily } from '@/lib/terminal-fonts'
 import { useChunkedAttach } from '@/components/terminal/useChunkedAttach'
 import { Osc52PromptModal } from '@/components/terminal/Osc52PromptModal'
 import { TerminalSearchBar } from '@/components/terminal/TerminalSearchBar'
+import { MobileTerminalToolbar } from '@/components/terminal/MobileTerminalToolbar'
 import {
   createTerminalRuntime,
   type TerminalRuntime,
@@ -44,6 +47,11 @@ const SESSION_ACTIVITY_THROTTLE_MS = 5000
 const RATE_LIMIT_RETRY_MAX_ATTEMPTS = 3
 const RATE_LIMIT_RETRY_BASE_MS = 250
 const RATE_LIMIT_RETRY_MAX_MS = 1000
+const KEYBOARD_INSET_ACTIVATION_PX = 80
+const MOBILE_TOOLBAR_HEIGHT_PX = 56
+const TAP_MULTI_INTERVAL_MS = 350
+const TAP_MAX_DISTANCE_PX = 24
+const TOUCH_SCROLL_PIXELS_PER_LINE = 18
 
 const SEARCH_DECORATIONS = {
   matchBackground: '#515C6A',
@@ -74,6 +82,7 @@ interface TerminalViewProps {
 
 export default function TerminalView({ tabId, paneId, paneContent, hidden }: TerminalViewProps) {
   const dispatch = useAppDispatch()
+  const isMobile = useMobile()
   const tab = useAppSelector((s) => s.tabs.tabs.find((t) => t.id === tabId))
   const activeTabId = useAppSelector((s) => s.tabs.activeTabId)
   const activePaneId = useAppSelector((s) => s.panes.activePane[tabId])
@@ -91,6 +100,8 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<{ resultIndex: number; resultCount: number } | null>(null)
+  const [keyboardInsetPx, setKeyboardInsetPx] = useState(0)
+  const [ctrlModifierActive, setCtrlModifierActive] = useState(false)
   const setPendingLinkUriRef = useRef(setPendingLinkUri)
 
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -108,8 +119,19 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   const pendingOsc52EventRef = useRef<Osc52Event | null>(null)
   const osc52QueueRef = useRef<Osc52Event[]>([])
   const warnExternalLinksRef = useRef(settings.terminal.warnExternalLinks)
-  const debugRef = useRef(!!(settings as any).logging?.debug)
+  const debugRef = useRef(!!settings.logging?.debug)
   const attentionDismissRef = useRef(settings.panes?.attentionDismiss ?? 'click')
+  const touchActiveRef = useRef(false)
+  const touchSelectionModeRef = useRef(false)
+  const touchStartYRef = useRef(0)
+  const touchLastYRef = useRef(0)
+  const touchScrollAccumulatorRef = useRef(0)
+  const touchStartXRef = useRef(0)
+  const touchMovedRef = useRef(false)
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastTapAtRef = useRef(0)
+  const lastTapPointRef = useRef<{ x: number; y: number } | null>(null)
+  const tapCountRef = useRef(0)
 
   // Extract terminal-specific fields (safe because we check kind later)
   const isTerminal = paneContent.kind === 'terminal'
@@ -159,7 +181,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   hasAttentionRef.current = hasAttention
   hasPaneAttentionRef.current = hasPaneAttention
   attentionDismissRef.current = settings.panes?.attentionDismiss ?? 'click'
-  debugRef.current = !!(settings as any).logging?.debug
+  debugRef.current = !!settings.logging?.debug
 
   const shouldFocusActiveTerminal = !hidden && activeTabId === tabId && activePaneId === paneId
 
@@ -179,6 +201,210 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   useEffect(() => {
     lastSessionActivityAtRef.current = 0
   }, [terminalContent?.resumeSessionId])
+
+  useEffect(() => {
+    if (!isMobile || typeof window === 'undefined' || !window.visualViewport) {
+      setKeyboardInsetPx(0)
+      return
+    }
+
+    const viewport = window.visualViewport
+    let rafId: number | null = null
+
+    const updateKeyboardInset = () => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId)
+      }
+      rafId = requestAnimationFrame(() => {
+        const rawInset = Math.max(0, window.innerHeight - (viewport.height + viewport.offsetTop))
+        const nextInset = rawInset >= KEYBOARD_INSET_ACTIVATION_PX ? Math.round(rawInset) : 0
+        setKeyboardInsetPx((prev) => (prev === nextInset ? prev : nextInset))
+      })
+    }
+
+    updateKeyboardInset()
+    viewport.addEventListener('resize', updateKeyboardInset)
+    viewport.addEventListener('scroll', updateKeyboardInset)
+
+    return () => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId)
+      }
+      viewport.removeEventListener('resize', updateKeyboardInset)
+      viewport.removeEventListener('scroll', updateKeyboardInset)
+    }
+  }, [isMobile])
+
+  useEffect(() => {
+    if (!isMobile) {
+      setCtrlModifierActive(false)
+    }
+  }, [isMobile])
+
+  const clearLongPressTimer = useCallback(() => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current)
+      longPressTimerRef.current = null
+    }
+  }, [])
+
+  const getCellFromClientPoint = useCallback((clientX: number, clientY: number) => {
+    const term = termRef.current
+    const container = containerRef.current
+    if (!term || !container) return null
+    if (term.cols <= 0 || term.rows <= 0) return null
+
+    const rect = container.getBoundingClientRect()
+    const relativeX = clientX - rect.left
+    const relativeY = clientY - rect.top
+    if (relativeX < 0 || relativeY < 0 || relativeX > rect.width || relativeY > rect.height) return null
+
+    const columnWidth = rect.width / term.cols
+    const rowHeight = rect.height / term.rows
+    if (columnWidth <= 0 || rowHeight <= 0) return null
+
+    const col = Math.max(0, Math.min(term.cols - 1, Math.floor(relativeX / columnWidth)))
+    const viewportRow = Math.max(0, Math.min(term.rows - 1, Math.floor(relativeY / rowHeight)))
+    const baseRow = term.buffer.active?.viewportY ?? 0
+    const row = baseRow + viewportRow
+    return { col, row }
+  }, [])
+
+  const selectWordAtPoint = useCallback((clientX: number, clientY: number) => {
+    const term = termRef.current
+    if (!term) return
+    const cell = getCellFromClientPoint(clientX, clientY)
+    if (!cell) return
+
+    const line = term.buffer.active?.getLine(cell.row)
+    const text = line?.translateToString(true) ?? ''
+    if (!text) return
+
+    const isWordChar = (char: string | undefined) => !!char && /[A-Za-z0-9_$./-]/.test(char)
+    let start = Math.min(cell.col, Math.max(0, text.length - 1))
+    let end = start
+
+    if (!isWordChar(text[start])) {
+      term.select(start, cell.row, 1)
+      return
+    }
+
+    while (start > 0 && isWordChar(text[start - 1])) start -= 1
+    while (end < text.length && isWordChar(text[end])) end += 1
+
+    term.select(start, cell.row, Math.max(1, end - start))
+  }, [getCellFromClientPoint])
+
+  const selectLineAtPoint = useCallback((clientX: number, clientY: number) => {
+    const term = termRef.current
+    if (!term) return
+    const cell = getCellFromClientPoint(clientX, clientY)
+    if (!cell) return
+    term.selectLines(cell.row, cell.row)
+  }, [getCellFromClientPoint])
+
+  const handleMobileTouchStart = useCallback((event: ReactTouchEvent<HTMLDivElement>) => {
+    if (!isMobile) return
+    const touch = event.touches[0]
+    if (!touch) return
+
+    touchActiveRef.current = true
+    touchSelectionModeRef.current = false
+    touchMovedRef.current = false
+    touchStartYRef.current = touch.clientY
+    touchLastYRef.current = touch.clientY
+    touchStartXRef.current = touch.clientX
+    touchScrollAccumulatorRef.current = 0
+    clearLongPressTimer()
+    longPressTimerRef.current = setTimeout(() => {
+      touchSelectionModeRef.current = true
+    }, 350)
+  }, [clearLongPressTimer, isMobile])
+
+  const handleMobileTouchMove = useCallback((event: ReactTouchEvent<HTMLDivElement>) => {
+    if (!isMobile || !touchActiveRef.current) return
+    const touch = event.touches[0]
+    if (!touch) return
+
+    const deltaX = Math.abs(touch.clientX - touchStartXRef.current)
+    const deltaYFromStart = Math.abs(touch.clientY - touchStartYRef.current)
+    if (!touchMovedRef.current && (deltaX > 8 || deltaYFromStart > 8)) {
+      touchMovedRef.current = true
+      clearLongPressTimer()
+    }
+
+    if (touchSelectionModeRef.current) return
+
+    const deltaY = touch.clientY - touchLastYRef.current
+    touchLastYRef.current = touch.clientY
+    touchScrollAccumulatorRef.current += deltaY
+
+    const rawLines = touchScrollAccumulatorRef.current / TOUCH_SCROLL_PIXELS_PER_LINE
+    const lines = rawLines > 0 ? Math.floor(rawLines) : Math.ceil(rawLines)
+    if (lines !== 0) {
+      termRef.current?.scrollLines(lines)
+      touchScrollAccumulatorRef.current -= lines * TOUCH_SCROLL_PIXELS_PER_LINE
+    }
+  }, [clearLongPressTimer, isMobile])
+
+  const handleMobileTouchEnd = useCallback((event: ReactTouchEvent<HTMLDivElement>) => {
+    if (!isMobile) return
+    clearLongPressTimer()
+
+    const changed = event.changedTouches[0]
+    const wasSelectionMode = touchSelectionModeRef.current
+    const moved = touchMovedRef.current
+
+    touchActiveRef.current = false
+    touchSelectionModeRef.current = false
+    touchMovedRef.current = false
+    touchScrollAccumulatorRef.current = 0
+
+    if (!changed || wasSelectionMode || moved) return
+
+    const now = Date.now()
+    const lastTapPoint = lastTapPointRef.current
+    const lastTapAt = lastTapAtRef.current
+    const withinInterval = now - lastTapAt <= TAP_MULTI_INTERVAL_MS
+    const withinDistance = !!lastTapPoint
+      && Math.abs(changed.clientX - lastTapPoint.x) <= TAP_MAX_DISTANCE_PX
+      && Math.abs(changed.clientY - lastTapPoint.y) <= TAP_MAX_DISTANCE_PX
+
+    if (withinInterval && withinDistance) {
+      tapCountRef.current += 1
+    } else {
+      tapCountRef.current = 1
+    }
+
+    lastTapAtRef.current = now
+    lastTapPointRef.current = { x: changed.clientX, y: changed.clientY }
+
+    if (tapCountRef.current === 2) {
+      selectWordAtPoint(changed.clientX, changed.clientY)
+      return
+    }
+    if (tapCountRef.current >= 3) {
+      selectLineAtPoint(changed.clientX, changed.clientY)
+      tapCountRef.current = 0
+    }
+  }, [clearLongPressTimer, isMobile, selectLineAtPoint, selectWordAtPoint])
+
+  useEffect(() => {
+    return () => {
+      clearLongPressTimer()
+    }
+  }, [clearLongPressTimer])
+
+  const applyCtrlModifier = useCallback((input: string, keyId: string) => {
+    if (!ctrlModifierActive || keyId === 'ctrl') return input
+    setCtrlModifierActive(false)
+
+    if (input.length === 1 && /[A-Za-z]/.test(input)) {
+      const upper = input.toUpperCase().charCodeAt(0)
+      return String.fromCharCode(upper - 64)
+    }
+    return input
+  }, [ctrlModifierActive])
 
   // Helper to update pane content - uses ref to avoid recreation on content changes
   // This is CRITICAL: if updateContent depended on terminalContent directly,
@@ -322,6 +548,14 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     ws.send({ type: 'terminal.input', terminalId: tid, data })
   }, [dispatch, tabId, paneId, ws])
 
+  const handleMobileToolbarKey = useCallback((input: string, keyId: string) => {
+    const payload = applyCtrlModifier(input, keyId)
+    sendInput(payload)
+    requestAnimationFrame(() => {
+      termRef.current?.focus()
+    })
+  }, [applyCtrlModifier, sendInput])
+
   const searchOpts = useMemo(() => ({
     caseSensitive: false,
     incremental: true,
@@ -399,6 +633,41 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     })
 
     term.open(containerRef.current)
+
+    // Register custom link provider for clickable local file paths
+    const filePathLinkDisposable = typeof term.registerLinkProvider === 'function'
+      ? term.registerLinkProvider({
+        provideLinks(bufferLineNumber: number, callback: (links: import('xterm').ILink[] | undefined) => void) {
+          const bufferLine = term.buffer.active.getLine(bufferLineNumber - 1)
+          if (!bufferLine) { callback(undefined); return }
+          const text = bufferLine.translateToString()
+          const matches = findLocalFilePaths(text)
+          if (matches.length === 0) { callback(undefined); return }
+          callback(matches.map((m) => ({
+            range: {
+              start: { x: m.startIndex + 1, y: bufferLineNumber },
+              end: { x: m.endIndex, y: bufferLineNumber },
+            },
+            text: m.path,
+            activate: () => {
+              const id = nanoid()
+              dispatch(addTab({ id, mode: 'shell' }))
+              dispatch(initLayout({
+                tabId: id,
+                content: {
+                  kind: 'editor',
+                  filePath: m.path,
+                  language: null,
+                  readOnly: false,
+                  content: '',
+                  viewMode: 'source',
+                },
+              }))
+            },
+          })))
+        },
+      })
+      : { dispose: () => {} }
 
     const unregisterActions = registerTerminalActions(paneId, {
       copySelection: async () => {
@@ -513,6 +782,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     ro.observe(containerRef.current)
 
     return () => {
+      filePathLinkDisposable.dispose()
       ro.disconnect()
       unregisterActions()
       searchResultsDisposable.dispose()
@@ -954,6 +1224,15 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   }
 
   const showSpinner = terminalContent.status === 'creating' || isAttaching
+  const mobileBottomInsetPx = isMobile ? keyboardInsetPx + MOBILE_TOOLBAR_HEIGHT_PX : 0
+  const terminalContainerStyle = useMemo(() => {
+    if (!isMobile) return undefined
+
+    return {
+      touchAction: 'none' as const,
+      ...(mobileBottomInsetPx > 0 ? { height: `calc(100% - ${mobileBottomInsetPx}px)` } : {}),
+    }
+  }, [isMobile, mobileBottomInsetPx])
 
   return (
     <div
@@ -962,7 +1241,24 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       data-pane-id={paneId}
       data-tab-id={tabId}
     >
-      <div ref={containerRef} className="h-full w-full" />
+      <div
+        ref={containerRef}
+        data-testid="terminal-xterm-container"
+        className="h-full w-full"
+        style={terminalContainerStyle}
+        onTouchStart={isMobile ? handleMobileTouchStart : undefined}
+        onTouchMove={isMobile ? handleMobileTouchMove : undefined}
+        onTouchEnd={isMobile ? handleMobileTouchEnd : undefined}
+        onTouchCancel={isMobile ? handleMobileTouchEnd : undefined}
+      />
+      {isMobile && (
+        <MobileTerminalToolbar
+          ctrlActive={ctrlModifierActive}
+          keyboardInsetPx={keyboardInsetPx}
+          onCtrlToggle={() => setCtrlModifierActive((prev) => !prev)}
+          onSendKey={handleMobileToolbarKey}
+        />
+      )}
       {showSpinner && (
         <div className="absolute inset-0 flex items-center justify-center bg-background/80">
           <div className="flex flex-col items-center gap-3">

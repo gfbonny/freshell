@@ -2,6 +2,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { switchToNextTab, switchToPrevTab } from '@/store/tabsSlice'
 import { getTabDisplayTitle } from '@/lib/tab-title'
+import { triggerHapticFeedback } from '@/lib/mobile-haptics'
 
 export function MobileTabStrip({ onOpenSwitcher }: { onOpenSwitcher?: () => void }) {
   const dispatch = useAppDispatch()
@@ -23,7 +24,7 @@ export function MobileTabStrip({ onOpenSwitcher }: { onOpenSwitcher?: () => void
     <div className="relative z-20 h-12 flex items-center px-2 bg-background border-b border-border/30">
       <button
         className="min-h-11 min-w-11 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground disabled:opacity-30"
-        onClick={() => dispatch(switchToPrevTab())}
+        onClick={() => { triggerHapticFeedback(); dispatch(switchToPrevTab()) }}
         disabled={isFirst}
         aria-label="Previous tab"
       >
@@ -32,7 +33,7 @@ export function MobileTabStrip({ onOpenSwitcher }: { onOpenSwitcher?: () => void
 
       <button
         className="flex-1 flex items-center justify-center gap-2 min-h-11 rounded-md"
-        onClick={onOpenSwitcher}
+        onClick={() => { triggerHapticFeedback(); onOpenSwitcher?.() }}
         aria-label="Open tab switcher"
       >
         <span className="text-sm font-medium truncate max-w-[200px]">
@@ -45,7 +46,7 @@ export function MobileTabStrip({ onOpenSwitcher }: { onOpenSwitcher?: () => void
 
       <button
         className="min-h-11 min-w-11 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground disabled:opacity-30"
-        onClick={() => dispatch(switchToNextTab())}
+        onClick={() => { triggerHapticFeedback(); dispatch(switchToNextTab()) }}
         disabled={isLast}
         aria-label="Next tab"
       >

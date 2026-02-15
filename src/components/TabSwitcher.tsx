@@ -4,6 +4,7 @@ import { addTab, setActiveTab } from '@/store/tabsSlice'
 import { getTabDisplayTitle } from '@/lib/tab-title'
 import { useCallback, useMemo } from 'react'
 import type { Tab, TerminalStatus } from '@/store/types'
+import { triggerHapticFeedback } from '@/lib/mobile-haptics'
 
 interface TabSwitcherProps {
   onClose: () => void
@@ -37,6 +38,7 @@ export function TabSwitcher({ onClose }: TabSwitcherProps) {
 
   const handleCardClick = useCallback(
     (tabId: string) => {
+      triggerHapticFeedback()
       dispatch(setActiveTab(tabId))
       onClose()
     },
@@ -44,6 +46,7 @@ export function TabSwitcher({ onClose }: TabSwitcherProps) {
   )
 
   const handleNewTab = useCallback(() => {
+    triggerHapticFeedback()
     dispatch(addTab({ mode: 'shell' }))
     onClose()
   }, [dispatch, onClose])

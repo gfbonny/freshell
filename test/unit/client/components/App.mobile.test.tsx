@@ -48,8 +48,8 @@ vi.mock('@/components/TabContent', () => ({
 }))
 
 vi.mock('@/components/Sidebar', () => ({
-  default: ({ view, onNavigate }: { view: string; onNavigate: (v: string) => void }) => (
-    <div data-testid="mock-sidebar" data-view={view}>
+  default: ({ view, fullWidth }: { view: string; fullWidth?: boolean }) => (
+    <div data-testid="mock-sidebar" data-view={view} data-full-width={fullWidth ? 'true' : 'false'}>
       Sidebar
     </div>
   ),
@@ -190,6 +190,11 @@ describe('App Header - Mobile Touch Targets', () => {
     expect(sidebarToggle.className).toContain('md:min-h-0')
     expect(sidebarToggle.className).toContain('md:min-w-0')
   })
+
+  it('renders sidebar in non-full-width mode on desktop', () => {
+    renderApp()
+    expect(screen.getByTestId('mock-sidebar')).toHaveAttribute('data-full-width', 'false')
+  })
 })
 
 describe('App Mobile - Sidebar Backdrop', () => {
@@ -232,6 +237,9 @@ describe('App Mobile - Sidebar Backdrop', () => {
     expect(backdrop.className).toContain('bg-black/50')
     expect(backdrop.className).toContain('absolute')
     expect(backdrop.className).toContain('inset-0')
+
+    // On mobile, sidebar should be rendered in full-width mode.
+    expect(screen.getByTestId('mock-sidebar')).toHaveAttribute('data-full-width', 'true')
   })
 
   it('closes sidebar when backdrop is clicked', async () => {

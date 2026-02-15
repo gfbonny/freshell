@@ -16,6 +16,7 @@ vi.mock('@xterm/xterm', () => ({
   Terminal: vi.fn().mockImplementation(() => ({
     loadAddon: vi.fn(),
     open: vi.fn(),
+    registerLinkProvider: vi.fn(() => ({ dispose: vi.fn() })),
     onData: vi.fn((cb: (data: string) => void) => {
       onDataCallback = cb
       return { dispose: vi.fn() }

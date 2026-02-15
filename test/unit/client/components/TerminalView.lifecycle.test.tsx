@@ -53,6 +53,7 @@ vi.mock('@xterm/xterm', () => {
     rows = 24
     open = vi.fn()
     loadAddon = vi.fn()
+    registerLinkProvider = vi.fn(() => ({ dispose: vi.fn() }))
     write = vi.fn()
     writeln = vi.fn()
     clear = vi.fn()

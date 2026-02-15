@@ -50,6 +50,7 @@ interface LiveWebSocket extends WebSocket {
   isAlive?: boolean
   connectionId?: string
   connectedAt?: number
+  isMobileClient?: boolean
   // Generation counter for chunked session updates to prevent interleaving
   sessionUpdateGeneration?: number
 }
@@ -77,6 +78,11 @@ const ErrorCode = z.enum([
 
 function nowIso() {
   return new Date().toISOString()
+}
+
+function isMobileUserAgent(userAgent: string | undefined): boolean {
+  if (!userAgent) return false
+  return /Mobi|Android|iPhone|iPad|iPod/i.test(userAgent)
 }
 
 /**
@@ -189,6 +195,9 @@ const HelloSchema = z.object({
   capabilities: z.object({
     sessionsPatchV1: z.boolean().optional(),
     terminalAttachChunkV1: z.boolean().optional(),
+  }).optional(),
+  client: z.object({
+    mobile: z.boolean().optional(),
   }).optional(),
   sessions: z.object({
     active: z.string().optional(),
@@ -532,6 +541,7 @@ export class WsHandler {
     const connectionId = randomUUID()
     ws.connectionId = connectionId
     ws.connectedAt = Date.now()
+    ws.isMobileClient = isMobileUserAgent(userAgent)
 
     const state: ClientState = {
       authenticated: false,
@@ -1058,6 +1068,9 @@ export class WsHandler {
         state.authenticated = true
         state.supportsSessionsPatchV1 = !!m.capabilities?.sessionsPatchV1
         state.supportsTerminalAttachChunkV1 = !!m.capabilities?.terminalAttachChunkV1
+        if (typeof m.client?.mobile === 'boolean') {
+          ws.isMobileClient = m.client.mobile
+        }
         if (state.helloTimer) clearTimeout(state.helloTimer)
 
         log.info({ event: 'ws_authenticated', connectionId: ws.connectionId }, 'WebSocket client authenticated')
