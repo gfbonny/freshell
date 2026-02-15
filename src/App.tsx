@@ -69,6 +69,8 @@ const SettingsView = lazy(() => import('@/components/SettingsView'))
 
 const SIDEBAR_MIN_WIDTH = 200
 const SIDEBAR_MAX_WIDTH = 500
+const CHROME_REVEAL_TOP_EDGE_PX = 48
+const CHROME_REVEAL_SWIPE_PX = 60
 const EMPTY_IDLE_WARNINGS: Record<string, unknown> = {}
 
 export default function App() {
@@ -95,6 +97,7 @@ export default function App() {
   const [wizardInitialStep, setWizardInitialStep] = useState<1 | 2>(1)
   const [copied, setCopied] = useState(false)
   const [pendingFirewallCommand, setPendingFirewallCommand] = useState<{ tabId: string; command: string } | null>(null)
+  const [landscapeTabBarRevealed, setLandscapeTabBarRevealed] = useState(false)
   const isMobile = useMobile()
   const isMobileRef = useRef(isMobile)
   const { isLandscape } = useOrientation()
@@ -141,6 +144,12 @@ export default function App() {
       void exitFullscreen()
     }
   }, [exitFullscreen, isFullscreen, view])
+
+  useEffect(() => {
+    if (!isLandscapeTerminalView) {
+      setLandscapeTabBarRevealed(false)
+    }
+  }, [isLandscapeTerminalView])
 
   const handleSidebarResize = useCallback((delta: number) => {
     const newWidth = Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, sidebarWidth + delta))
@@ -515,29 +524,35 @@ export default function App() {
   }, [tabs.length, dispatch])
 
   const handleTerminalChromeRevealTouchStart = useCallback((event: ReactTouchEvent<HTMLDivElement>) => {
-    if (!isMobile || !isFullscreen || view !== 'terminal') return
+    if (!isMobile || view !== 'terminal') return
     const touch = event.touches[0]
     if (!touch) return
-    if (touch.clientY <= 48) {
+    if (touch.clientY <= CHROME_REVEAL_TOP_EDGE_PX) {
       fullscreenTouchStartYRef.current = touch.clientY
     } else {
       fullscreenTouchStartYRef.current = null
     }
-  }, [isFullscreen, isMobile, view])
+  }, [isMobile, view])
 
   const handleTerminalChromeRevealTouchEnd = useCallback((event: ReactTouchEvent<HTMLDivElement>) => {
     const startY = fullscreenTouchStartYRef.current
     fullscreenTouchStartYRef.current = null
-    if (!isMobile || !isFullscreen || view !== 'terminal') return
+    if (!isMobile || view !== 'terminal') return
     if (startY === null) return
     const touch = event.changedTouches[0]
     if (!touch) return
     const deltaY = touch.clientY - startY
-    if (deltaY > 60) {
+    if (deltaY > CHROME_REVEAL_SWIPE_PX) {
+      if (isLandscapeTerminalView) {
+        triggerHapticFeedback()
+        setLandscapeTabBarRevealed(true)
+        return
+      }
+      if (!isFullscreen) return
       triggerHapticFeedback()
       void exitFullscreen()
     }
-  }, [exitFullscreen, isFullscreen, isMobile, view])
+  }, [exitFullscreen, isFullscreen, isLandscapeTerminalView, isMobile, view])
 
   const content = (() => {
     if (view === 'sessions') {
@@ -557,7 +572,7 @@ export default function App() {
     if (view === 'overview') return <OverviewView onOpenTab={() => setView('terminal')} />
     return (
       <div className="flex flex-col h-full">
-        {!isLandscapeTerminalView && <TabBar />}
+        {(!isLandscapeTerminalView || landscapeTabBarRevealed) && <TabBar />}
         <div
           className="flex-1 min-h-0 relative bg-background"
           data-testid="terminal-work-area"
@@ -728,9 +743,6 @@ export default function App() {
             )}
           </div>
         )}
-        {/* TODO(#5): When fullscreen mode (#29) is implemented, add a vertical swipe-down
-             gesture here to reveal the hidden tab bar. The @use-gesture/react useDrag
-             infrastructure from the sidebar swipe can be extended for this. */}
         <div
           className="flex-1 min-w-0 flex flex-col"
           {...(isMobile ? bindTabSwipe() : {})}
