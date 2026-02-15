@@ -733,8 +733,8 @@ export default function App() {
                 >
                   <span>freshell</span>
                   {updateAvailable && <AlertCircle className="h-3 w-3" aria-hidden="true" />}
-                </button>
-              </TooltipTrigger>
+                  </button>
+                </TooltipTrigger>
               <TooltipContent side="bottom">
                 {updateAvailable ? (
                   <div>
@@ -805,8 +805,8 @@ export default function App() {
                   >
                     <span className="truncate">🐚🔥freshell</span>
                     {updateAvailable && <AlertCircle className="h-3.5 w-3.5" aria-hidden="true" />}
-                </button>
-              </TooltipTrigger>
+                  </button>
+                </TooltipTrigger>
                 <TooltipContent side="bottom">
                   {updateAvailable ? (
                     <div>
