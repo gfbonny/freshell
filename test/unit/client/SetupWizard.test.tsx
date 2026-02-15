@@ -21,7 +21,6 @@ const mockPost = vi.fn().mockResolvedValue({
   port: 3001,
   lanIps: ['192.168.1.100'],
   machineHostname: 'test',
-  mdns: { enabled: true, hostname: 'freshell' },
   firewall: { platform: 'linux-none', active: false, portOpen: null, commands: [], configuring: false },
   rebinding: false,
   devMode: false,
@@ -48,7 +47,6 @@ const defaultNetworkStatus = {
   port: 3001,
   lanIps: ['192.168.1.100'],
   machineHostname: 'my-laptop',
-  mdns: null,
   firewall: { platform: 'linux-none', active: false, portOpen: null, commands: [], configuring: false },
   rebinding: false,
   devMode: false,
@@ -142,8 +140,7 @@ describe('SetupWizard', () => {
         configured: true,
         host: '0.0.0.0',
         accessUrl: 'http://192.168.1.100:3001/?token=abc',
-        mdns: { enabled: true, hostname: 'freshell' },
-      },
+            },
     })
     render(
       <Provider store={store}>
@@ -312,8 +309,7 @@ describe('SetupWizard', () => {
       configured: true,
       host: '0.0.0.0',
       accessUrl: 'http://192.168.1.100:5173/?token=abc',
-      mdns: { enabled: true, hostname: 'freshell' },
-      firewall: { platform: 'linux-none', active: false, portOpen: null, commands: [], configuring: false },
+          firewall: { platform: 'linux-none', active: false, portOpen: null, commands: [], configuring: false },
       devMode: true,
       devPort: 5173,
       rebinding: false,
@@ -325,8 +321,7 @@ describe('SetupWizard', () => {
         configured: true,
         host: '0.0.0.0',
         accessUrl: 'http://192.168.1.100:5173/?token=abc',
-        mdns: { enabled: true, hostname: 'freshell' },
-        devMode: true,
+              devMode: true,
         devPort: 5173,
       },
     })

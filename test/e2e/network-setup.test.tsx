@@ -26,7 +26,6 @@ const unconfiguredStatus: NetworkStatusResponse = {
   port: 3001,
   lanIps: ['192.168.1.100'],
   machineHostname: 'my-laptop',
-  mdns: null,
   firewall: { platform: 'linux-none', active: false, portOpen: null, commands: [], configuring: false },
   rebinding: false,
   devMode: false,
@@ -37,7 +36,6 @@ const configuredRemoteStatus: NetworkStatusResponse = {
   ...unconfiguredStatus,
   configured: true,
   host: '0.0.0.0',
-  mdns: { enabled: true, hostname: 'freshell' },
   firewall: { platform: 'linux-none', active: false, portOpen: true, commands: [], configuring: false },
 }
 

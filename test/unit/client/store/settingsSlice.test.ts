@@ -140,7 +140,6 @@ describe('settingsSlice', () => {
         network: {
           host: '127.0.0.1' as const,
           configured: false,
-          mdns: { enabled: false, hostname: 'freshell' },
         },
       }
 

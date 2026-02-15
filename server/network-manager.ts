@@ -359,6 +359,6 @@ export class NetworkManager {
   }
 
   async stop(): Promise<void> {
-    // No-op: previously stopped mDNS; retained for interface compatibility
+    // No-op; retained for interface compatibility
   }
 }

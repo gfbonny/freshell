@@ -841,7 +841,6 @@ describe('State Edge Cases', () => {
           network: {
             host: '127.0.0.1',
             configured: false,
-            mdns: { enabled: false, hostname: 'freshell' },
           },
         }
 
