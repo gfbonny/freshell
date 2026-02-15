@@ -1489,14 +1489,14 @@ describe('TerminalRegistry', () => {
       expect(record.resumeSessionId).toBeUndefined()
     })
 
-    it('stores resumeSessionId for shell mode terminals', () => {
+    it('ignores resumeSessionId for shell mode terminals', () => {
       const record = registry.create({
         mode: 'shell',
         cwd: '/home/user/project',
         resumeSessionId: 'shell-session-123',
       })
 
-      expect(record.resumeSessionId).toBe('shell-session-123')
+      expect(record.resumeSessionId).toBeUndefined()
       expect(record.mode).toBe('shell')
     })
   })
@@ -1647,13 +1647,13 @@ describe('TerminalRegistry', () => {
       expect(found).toHaveLength(0)
     })
 
-    it('finds multiple terminals with same resumeSessionId', () => {
-      registry.create({
+    it('enforces one-owner invariant for the same provider/sessionId', () => {
+      const first = registry.create({
         mode: 'claude',
         cwd: '/home/user/project1',
         resumeSessionId: VALID_CLAUDE_SESSION_ID,
       })
-      registry.create({
+      const second = registry.create({
         mode: 'claude',
         cwd: '/home/user/project2',
         resumeSessionId: VALID_CLAUDE_SESSION_ID,
@@ -1661,8 +1661,9 @@ describe('TerminalRegistry', () => {
 
       const found = registry.findTerminalsBySession('claude', VALID_CLAUDE_SESSION_ID)
 
-      expect(found).toHaveLength(2)
-      expect(found.every(t => t.resumeSessionId === VALID_CLAUDE_SESSION_ID)).toBe(true)
+      expect(found).toHaveLength(1)
+      expect(found[0].terminalId).toBe(first.terminalId)
+      expect(second.resumeSessionId).toBeUndefined()
     })
   })
 

@@ -10,6 +10,8 @@ import { getPerfConfig, logPerfEvent, shouldLog, startPerfTimer } from './perf-l
 import type { AppSettings } from './config-store.js'
 import { convertWindowsPathToWslPath, isReachableDirectorySync } from './path-utils.js'
 import { isValidClaudeSessionId } from './claude-session-id.js'
+import type { CodingCliProviderName } from './coding-cli/types.js'
+import { SessionBindingAuthority, type BindResult } from './session-binding-authority.js'
 
 const MAX_WS_BUFFERED_AMOUNT = Number(process.env.MAX_WS_BUFFERED_AMOUNT || 2 * 1024 * 1024)
 const DEFAULT_MAX_SCROLLBACK_CHARS = Number(process.env.MAX_SCROLLBACK_CHARS || 64 * 1024)
@@ -183,6 +185,11 @@ export type TerminalRecord = {
     maxInputToOutputMs: number
   }
 }
+
+export type BindSessionResult =
+  | { ok: true; terminalId: string; sessionId: string }
+  | { ok: false; reason: 'terminal_missing' | 'mode_mismatch' | 'invalid_session_id' }
+  | BindResult
 
 export class ChunkRingBuffer {
   private chunks: string[] = []
@@ -589,6 +596,7 @@ export function buildSpawnSpec(mode: TerminalMode, cwd: string | undefined, shel
 
 export class TerminalRegistry extends EventEmitter {
   private terminals = new Map<string, TerminalRecord>()
+  private bindingAuthority = new SessionBindingAuthority()
   private settings: AppSettings | undefined
   private idleTimer: NodeJS.Timeout | null = null
   private perfTimer: NodeJS.Timeout | null = null
@@ -806,7 +814,7 @@ export class TerminalRegistry extends EventEmitter {
       title,
       description: undefined,
       mode: opts.mode,
-      resumeSessionId: normalizedResume,
+      resumeSessionId: undefined,
       createdAt,
       lastActivityAt: createdAt,
       status: 'running',
@@ -911,11 +919,21 @@ export class TerminalRegistry extends EventEmitter {
       }
       record.clients.clear()
       record.pendingSnapshotClients.clear()
+      this.releaseBinding(terminalId)
       this.emit('terminal.exit', { terminalId, exitCode: e.exitCode })
       this.reapExitedTerminals()
     })
 
     this.terminals.set(terminalId, record)
+    if (modeSupportsResume(opts.mode) && normalizedResume) {
+      const bound = this.bindSession(terminalId, opts.mode as CodingCliProviderName, normalizedResume)
+      if (!bound.ok) {
+        logger.warn(
+          { terminalId, mode: opts.mode, sessionId: normalizedResume, reason: bound.reason },
+          'Failed to bind resume session during terminal create',
+        )
+      }
+    }
     this.emit('terminal.created', record)
     return record
   }
@@ -1003,6 +1021,7 @@ export class TerminalRegistry extends EventEmitter {
     }
     term.clients.clear()
     term.pendingSnapshotClients.clear()
+    this.releaseBinding(terminalId)
     this.emit('terminal.exit', { terminalId, exitCode: term.exitCode })
     this.reapExitedTerminals()
     return true
@@ -1044,6 +1063,12 @@ export class TerminalRegistry extends EventEmitter {
 
   get(terminalId: string): TerminalRecord | undefined {
     return this.terminals.get(terminalId)
+  }
+
+  private releaseBinding(terminalId: string): void {
+    this.bindingAuthority.unbindTerminal(terminalId)
+    const rec = this.terminals.get(terminalId)
+    if (rec) rec.resumeSessionId = undefined
   }
 
   private isMobileClient(client: WebSocket): boolean {
@@ -1208,6 +1233,16 @@ export class TerminalRegistry extends EventEmitter {
    * Find a running terminal of the given mode that already owns the given sessionId.
    */
   findRunningTerminalBySession(mode: TerminalMode, sessionId: string): TerminalRecord | undefined {
+    if (modeSupportsResume(mode)) {
+      const owner = this.bindingAuthority.ownerForSession(mode as CodingCliProviderName, sessionId)
+      if (owner) {
+        const rec = this.terminals.get(owner)
+        if (rec && rec.mode === mode && rec.status === 'running' && rec.resumeSessionId === sessionId) {
+          return rec
+        }
+        this.bindingAuthority.unbindTerminal(owner)
+      }
+    }
     for (const term of this.terminals.values()) {
       if (term.mode !== mode) continue
       if (term.status !== 'running') continue
@@ -1261,15 +1296,26 @@ export class TerminalRegistry extends EventEmitter {
    * Set the resumeSessionId on a terminal (one-time association).
    * Returns false if terminal not found.
    */
+  bindSession(terminalId: string, provider: CodingCliProviderName, sessionId: string): BindSessionResult {
+    const term = this.terminals.get(terminalId)
+    if (!term) return { ok: false, reason: 'terminal_missing' }
+    if (term.mode !== provider) return { ok: false, reason: 'mode_mismatch' }
+
+    const normalized = normalizeResumeSessionId(provider, sessionId)
+    if (!normalized) return { ok: false, reason: 'invalid_session_id' }
+
+    const bound = this.bindingAuthority.bind({ provider, sessionId: normalized, terminalId })
+    if (!bound.ok) return bound
+
+    term.resumeSessionId = normalized
+    return { ok: true, terminalId, sessionId: normalized }
+  }
+
   setResumeSessionId(terminalId: string, sessionId: string): boolean {
     const term = this.terminals.get(terminalId)
     if (!term) return false
-    if (term.mode === 'claude' && !isValidClaudeSessionId(sessionId)) {
-      logger.warn({ sessionId, terminalId }, 'Ignoring invalid Claude resumeSessionId')
-      return false
-    }
-    term.resumeSessionId = sessionId
-    return true
+    if (term.mode === 'shell') return false
+    return this.bindSession(terminalId, term.mode as CodingCliProviderName, sessionId).ok
   }
 
   /**
