@@ -138,6 +138,8 @@ export function startTabRegistrySync(store: AppStore, ws: TabRegistryWsClient): 
     if (ws.state !== 'ready') return
     const state = store.getState()
     const serverInstanceId = state.connection.serverInstanceId || ws.serverInstanceId
+    // Do not publish snapshot records until the server identity is known.
+    // Without this, tabs can be attributed to a synthetic/unstable server key.
     if (!serverInstanceId) return
     const records = buildRecords(state, Date.now(), revisions, serverInstanceId)
     const fingerprint = JSON.stringify(records)

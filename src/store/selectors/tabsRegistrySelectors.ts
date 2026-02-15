@@ -2,6 +2,7 @@ import { createSelector } from '@reduxjs/toolkit'
 import type { RootState } from '@/store/store'
 import type { RegistryTabRecord } from '@/store/tabRegistryTypes'
 import { buildOpenTabRegistryRecord } from '@/lib/tab-registry-snapshot'
+import { UNKNOWN_SERVER_INSTANCE_ID } from '@/store/tabRegistryConstants'
 
 function sortUpdatedDesc(a: RegistryTabRecord, b: RegistryTabRecord): number {
   return b.updatedAt - a.updatedAt
@@ -29,7 +30,7 @@ const selectLayouts = (state: RootState) => state.panes.layouts
 const selectPaneTitles = (state: RootState) => state.panes.paneTitles
 const selectDeviceId = (state: RootState) => state.tabRegistry.deviceId
 const selectDeviceLabel = (state: RootState) => state.tabRegistry.deviceLabel
-const selectServerInstanceId = (state: RootState) => state.connection.serverInstanceId || 'server-unknown'
+const selectServerInstanceId = (state: RootState) => state.connection.serverInstanceId || UNKNOWN_SERVER_INSTANCE_ID
 const selectRemoteOpen = (state: RootState) => state.tabRegistry.remoteOpen
 const selectClosed = (state: RootState) => state.tabRegistry.closed
 const selectLocalClosed = (state: RootState) => state.tabRegistry.localClosed

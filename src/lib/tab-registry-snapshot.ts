@@ -17,18 +17,18 @@ function stripPanePayload(content: PaneContent, serverInstanceId: string): Recor
         const sessionRef = content.sessionRef
           || (content.resumeSessionId && content.mode !== 'shell'
             ? {
-              provider: content.mode,
-              sessionId: content.resumeSessionId,
-              serverInstanceId,
-            }
+                provider: content.mode,
+                sessionId: content.resumeSessionId,
+                serverInstanceId,
+              }
             : undefined)
-      return {
-        mode: content.mode,
-        shell: content.shell,
-        resumeSessionId: content.resumeSessionId,
-        sessionRef,
-        initialCwd: content.initialCwd,
-      }
+        return {
+          mode: content.mode,
+          shell: content.shell,
+          resumeSessionId: content.resumeSessionId,
+          sessionRef,
+          initialCwd: content.initialCwd,
+        }
       }
     case 'browser':
       return {
@@ -47,19 +47,19 @@ function stripPanePayload(content: PaneContent, serverInstanceId: string): Recor
         const sessionRef = content.sessionRef
           || (content.resumeSessionId
             ? {
-              provider: 'claude',
-              sessionId: content.resumeSessionId,
-              serverInstanceId,
-            }
+                provider: 'claude',
+                sessionId: content.resumeSessionId,
+                serverInstanceId,
+              }
             : undefined)
-      return {
-        resumeSessionId: content.resumeSessionId,
-        sessionRef,
-        initialCwd: content.initialCwd,
-        model: content.model,
-        permissionMode: content.permissionMode,
-        effort: content.effort,
-      }
+        return {
+          resumeSessionId: content.resumeSessionId,
+          sessionRef,
+          initialCwd: content.initialCwd,
+          model: content.model,
+          permissionMode: content.permissionMode,
+          effort: content.effort,
+        }
       }
     case 'picker':
     default:

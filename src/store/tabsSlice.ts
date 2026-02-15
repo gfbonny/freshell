@@ -12,6 +12,7 @@ import {
   countPaneLeaves,
   shouldKeepClosedTab,
 } from '@/lib/tab-registry-snapshot'
+import { UNKNOWN_SERVER_INSTANCE_ID } from './tabRegistryConstants'
 import type { RootState } from './store'
 
 export interface TabsState {
@@ -243,7 +244,7 @@ export const closeTab = createAsyncThunk(
     const tab = stateBeforeClose.tabs.tabs.find((item) => item.id === tabId)
     const layout = stateBeforeClose.panes.layouts[tabId]
     const tabRegistryState = (stateBeforeClose as { tabRegistry?: RootState['tabRegistry'] }).tabRegistry
-    const serverInstanceId = stateBeforeClose.connection?.serverInstanceId || 'server-unknown'
+    const serverInstanceId = stateBeforeClose.connection?.serverInstanceId || UNKNOWN_SERVER_INSTANCE_ID
     if (tab && layout && tabRegistryState) {
       const paneCount = countPaneLeaves(layout)
       const openDurationMs = Math.max(0, Date.now() - (tab.createdAt || Date.now()))
