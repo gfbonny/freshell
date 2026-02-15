@@ -42,7 +42,7 @@ describe('server/path-utils cross-platform path handling', () => {
       configurable: true,
     })
     process.env.WSL_DISTRO_NAME = 'Ubuntu'
-    process.env.WSL_WINDOWS_SYS32 = '/custom-mount/c/Windows/System32'
+    process.env.WSL_WINDOWS_SYS32 = '/custom-mount/c/X/System32'
 
     expect(convertWindowsPathToWslPath(String.raw`D:\users\words with spaces`)).toBe('/custom-mount/d/users/words with spaces')
   })

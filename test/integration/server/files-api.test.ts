@@ -291,12 +291,12 @@ describe('Files API Integration', () => {
       const mappedDir = path.join(tempDir, 'wsl-mount', 'd', 'users', 'words with spaces')
       const mappedMatch = path.join(mappedDir, 'alpha')
 
-      process.env.WSL_DISTRO_NAME = 'Ubuntu'
-      process.env.WSL_WINDOWS_SYS32 = fakeSys32
-      await fsp.mkdir(fakeSys32, { recursive: true })
-      await fsp.mkdir(mappedMatch, { recursive: true })
-
       try {
+        process.env.WSL_DISTRO_NAME = 'Ubuntu'
+        process.env.WSL_WINDOWS_SYS32 = fakeSys32
+        await fsp.mkdir(fakeSys32, { recursive: true })
+        await fsp.mkdir(mappedMatch, { recursive: true })
+
         const res = await request(app)
           .get('/api/files/complete')
           .query({ prefix: String.raw`D:\users\words with spaces\a`, dirs: 'true' })

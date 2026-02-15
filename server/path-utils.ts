@@ -12,6 +12,7 @@ const WINDOWS_UNC_PREFIX_RE = /^\\\\[^\\]+\\[^\\]+/
 const WINDOWS_ROOTED_PREFIX_RE = /^\\(?!\\)/
 const POSIX_ABSOLUTE_PREFIX_RE = /^\//
 const WRAPPED_QUOTES_RE = /^(["'])(.*)\1$/
+const WSL_PATH_TO_WINDOWS_CACHE_MAX_ENTRIES = 256
 
 const wslPathToWindowsCache = new Map<string, Promise<string | undefined>>()
 
@@ -82,7 +83,7 @@ function getWslMountPrefix(): string {
   const sys32 = process.env.WSL_WINDOWS_SYS32
   if (sys32) {
     const normalized = sys32.replace(/\\/g, '/')
-    const match = normalized.match(/^(.*)\/[a-zA-Z]\//)
+    const match = normalized.match(/^(.*?)\/[a-zA-Z]\//)
     if (match) return match[1]
   }
   return '/mnt'
@@ -146,50 +147,49 @@ async function convertWslPathToWindows(posixPath: string): Promise<string | unde
     .catch(() => undefined)
 
   wslPathToWindowsCache.set(posixPath, pending)
+  if (wslPathToWindowsCache.size > WSL_PATH_TO_WINDOWS_CACHE_MAX_ENTRIES) {
+    const oldestKey = wslPathToWindowsCache.keys().next().value
+    if (oldestKey !== undefined) wslPathToWindowsCache.delete(oldestKey)
+  }
   return pending
 }
 
-export function toFilesystemPathSync(resolvedPath: string, flavor: UserPathFlavor): string {
-  if (flavor === 'windows') {
-    if (process.platform === 'win32') return path.win32.resolve(resolvedPath)
-    if (isWslEnvironment()) {
-      const converted = convertWindowsPathToWslPath(resolvedPath)
-      if (converted) return converted
-    }
+function resolveWindowsFlavorPath(resolvedPath: string): string {
+  if (process.platform === 'win32') return path.win32.resolve(resolvedPath)
+  if (isWslEnvironment()) {
+    const converted = convertWindowsPathToWslPath(resolvedPath)
+    if (converted) return converted
+  }
+  return path.win32.resolve(resolvedPath)
+}
+
+function resolvePosixFlavorPathSync(resolvedPath: string): string {
+  if (process.platform === 'win32') {
+    const converted = convertWslMountPathToWindows(resolvedPath)
+    if (converted) return path.win32.resolve(converted)
     return path.win32.resolve(resolvedPath)
   }
+  return path.posix.resolve(resolvedPath)
+}
 
-  if (flavor === 'posix') {
-    if (process.platform === 'win32') {
-      const converted = convertWslMountPathToWindows(resolvedPath)
-      if (converted) return path.win32.resolve(converted)
-      return path.win32.resolve(resolvedPath)
-    }
-    return path.posix.resolve(resolvedPath)
+async function resolvePosixFlavorPathAsync(resolvedPath: string): Promise<string> {
+  if (process.platform === 'win32') {
+    const converted = await convertWslPathToWindows(resolvedPath)
+    if (converted) return path.win32.resolve(converted)
+    return path.win32.resolve(resolvedPath)
   }
+  return path.posix.resolve(resolvedPath)
+}
 
+export function toFilesystemPathSync(resolvedPath: string, flavor: UserPathFlavor): string {
+  if (flavor === 'windows') return resolveWindowsFlavorPath(resolvedPath)
+  if (flavor === 'posix') return resolvePosixFlavorPathSync(resolvedPath)
   return path.resolve(resolvedPath)
 }
 
 export async function toFilesystemPath(resolvedPath: string, flavor: UserPathFlavor): Promise<string> {
-  if (flavor === 'windows') {
-    if (process.platform === 'win32') return path.win32.resolve(resolvedPath)
-    if (isWslEnvironment()) {
-      const converted = convertWindowsPathToWslPath(resolvedPath)
-      if (converted) return converted
-    }
-    return path.win32.resolve(resolvedPath)
-  }
-
-  if (flavor === 'posix') {
-    if (process.platform === 'win32') {
-      const converted = await convertWslPathToWindows(resolvedPath)
-      if (converted) return path.win32.resolve(converted)
-      return path.win32.resolve(resolvedPath)
-    }
-    return path.posix.resolve(resolvedPath)
-  }
-
+  if (flavor === 'windows') return resolveWindowsFlavorPath(resolvedPath)
+  if (flavor === 'posix') return resolvePosixFlavorPathAsync(resolvedPath)
   return path.resolve(resolvedPath)
 }
 
