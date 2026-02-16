@@ -7,7 +7,6 @@ import http from 'http'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import rateLimit from 'express-rate-limit'
-import { z } from 'zod'
 import { logger, setLogLevel } from './logger.js'
 import { requestLogger } from './request-logger.js'
 import { validateStartupSecurity, httpAuthMiddleware } from './auth.js'
@@ -20,21 +19,21 @@ import { CodingCliSessionIndexer } from './coding-cli/session-indexer.js'
 import { CodingCliSessionManager } from './coding-cli/session-manager.js'
 import { claudeProvider } from './coding-cli/providers/claude.js'
 import { codexProvider } from './coding-cli/providers/codex.js'
-import { makeSessionKey, type CodingCliProviderName, type CodingCliSession } from './coding-cli/types.js'
+import { type CodingCliProviderName, type CodingCliSession } from './coding-cli/types.js'
 import { TerminalMetadataService } from './terminal-metadata-service.js'
-import { AI_CONFIG, PROMPTS, stripAnsi } from './ai-prompts.js'
 import { migrateSettingsSortMode } from './settings-migrate.js'
 import { filesRouter } from './files-router.js'
 import { getSessionRepairService } from './session-scanner/service.js'
 import { SdkBridge } from './sdk-bridge.js'
 import { createClientLogsRouter } from './client-logs.js'
+import { createSettingsRouter } from './routes/settings.js'
+import { createSessionsRouter } from './routes/sessions.js'
+import { createTerminalsRouter } from './routes/terminals.js'
 import { createStartupState } from './startup-state.js'
-import { getPerfConfig, initPerfLogging, setPerfLoggingEnabled, startPerfTimer, withPerfSpan } from './perf-logger.js'
-import { detectPlatform, detectAvailableClis } from './platform.js'
+import { getPerfConfig, initPerfLogging, setPerfLoggingEnabled, withPerfSpan } from './perf-logger.js'
 import { resolveVisitPort } from './startup-url.js'
 import { PortForwardManager } from './port-forward.js'
-import { getRequesterIdentity, parseTrustProxyEnv } from './request-ip.js'
-import { collectCandidateDirectories } from './candidate-dirs.js'
+import { parseTrustProxyEnv } from './request-ip.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -234,364 +233,30 @@ async function main() {
 
   applyDebugLogging(!!settings.logging?.debug, 'settings')
 
-  app.post('/api/perf', async (req, res) => {
-    const enabled = req.body?.enabled === true
-    const updated = await configStore.patchSettings({ logging: { debug: enabled } })
-    const migrated = migrateSettingsSortMode(updated)
-    registry.setSettings(migrated)
-    applyDebugLogging(!!migrated.logging?.debug, 'api')
-    wsHandler.broadcast({ type: 'settings.updated', settings: migrated })
-    res.json({ ok: true, enabled })
-  })
+  app.use('/api', createSettingsRouter({
+    registry,
+    wsHandler,
+    codingCliIndexer,
+    claudeIndexer,
+    applyDebugLogging,
+  }))
 
-  // --- API: settings ---
-  //
-  // SECURITY NOTE (XSS Prevention):
-  // User-provided strings (tab titles, descriptions, settings values) are stored
-  // as-is without server-side sanitization. This is intentional because:
-  //
-  // 1. The frontend uses React, which automatically escapes all interpolated
-  //    values in JSX (e.g., {title}, {description}), preventing XSS attacks.
-  //
-  // 2. CRITICAL: `dangerouslySetInnerHTML` must NEVER be used with any user
-  //    data from these APIs. If rich text rendering is ever needed, use a
-  //    sanitization library like DOMPurify on the frontend.
-  //
-  // 3. The same applies to session overrides, terminal overrides, and project
-  //    colors - all user input flows through React's automatic escaping.
-  //
-  // Verified: No dangerouslySetInnerHTML or innerHTML usage exists in src/components/.
-  //
-  app.get('/api/settings', async (_req, res) => {
-    const s = await configStore.getSettings()
-    res.json(migrateSettingsSortMode(s))
-  })
+  app.use('/api', createSessionsRouter({
+    codingCliIndexer,
+    codingCliProviders,
+    claudeIndexer,
+  }))
 
-  app.get('/api/lan-info', (_req, res) => {
-    res.json({ ips: detectLanIps() })
-  })
+  const portForwardManager = new PortForwardManager()
 
-  app.get('/api/platform', async (_req, res) => {
-    const [platform, availableClis] = await Promise.all([
-      detectPlatform(),
-      detectAvailableClis(),
-    ])
-    res.json({ platform, availableClis })
-  })
-
-  app.get('/api/files/candidate-dirs', async (_req, res) => {
-    const cfg = await configStore.snapshot()
-    const providerCwds = Object.values(cfg.settings?.codingCli?.providers || {}).map((provider) => provider?.cwd)
-    const directories = collectCandidateDirectories({
-      projects: codingCliIndexer.getProjects(),
-      terminals: registry.list(),
-      recentDirectories: cfg.recentDirectories || [],
-      providerCwds,
-      defaultCwd: cfg.settings?.defaultCwd,
-    })
-    res.json({ directories })
-  })
-
-  const normalizeSettingsPatch = (patch: Record<string, any>) => {
-    if (Object.prototype.hasOwnProperty.call(patch, 'defaultCwd')) {
-      const raw = patch.defaultCwd
-      if (raw === null) {
-        patch.defaultCwd = undefined
-      } else if (typeof raw === 'string' && raw.trim() === '') {
-        patch.defaultCwd = undefined
-      }
-    }
-    return patch
-  }
-
-  app.patch('/api/settings', async (req, res) => {
-    const patch = normalizeSettingsPatch(migrateSettingsSortMode(req.body || {}) as any)
-    const updated = await configStore.patchSettings(patch)
-    const migrated = migrateSettingsSortMode(updated)
-    registry.setSettings(migrated)
-    applyDebugLogging(!!migrated.logging?.debug, 'settings')
-    wsHandler.broadcast({ type: 'settings.updated', settings: migrated })
-	    await withPerfSpan(
-	      'coding_cli_refresh',
-	      () => codingCliIndexer.refresh(),
-	      {},
-	      { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
-	    )
-	    await withPerfSpan(
-	      'claude_refresh',
-	      () => claudeIndexer.refresh(),
-	      {},
-	      { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
-    )
-    res.json(migrated)
-  })
-
-  // Alias (matches implementation plan)
-  app.put('/api/settings', async (req, res) => {
-    const patch = normalizeSettingsPatch(migrateSettingsSortMode(req.body || {}) as any)
-    const updated = await configStore.patchSettings(patch)
-    const migrated = migrateSettingsSortMode(updated)
-    registry.setSettings(migrated)
-    applyDebugLogging(!!migrated.logging?.debug, 'settings')
-    wsHandler.broadcast({ type: 'settings.updated', settings: migrated })
-	    await withPerfSpan(
-	      'coding_cli_refresh',
-	      () => codingCliIndexer.refresh(),
-	      {},
-	      { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
-	    )
-	    await withPerfSpan(
-	      'claude_refresh',
-	      () => claudeIndexer.refresh(),
-	      {},
-	      { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
-    )
-    res.json(migrated)
-  })
-
-  // --- API: sessions ---
-  // Search endpoint must come BEFORE the generic /api/sessions route
-  app.get('/api/sessions/search', async (req, res) => {
-    try {
-      const { SearchRequestSchema, searchSessions } = await import('./session-search.js')
-
-      const parsed = SearchRequestSchema.safeParse({
-        query: req.query.q,
-        tier: req.query.tier || 'title',
-        limit: req.query.limit ? Number(req.query.limit) : undefined,
-        maxFiles: req.query.maxFiles ? Number(req.query.maxFiles) : undefined,
-      })
-
-      if (!parsed.success) {
-        return res.status(400).json({ error: 'Invalid request', details: parsed.error.issues })
-      }
-
-      const endSearchTimer = startPerfTimer(
-        'sessions_search',
-        {
-          queryLength: parsed.data.query.length,
-          tier: parsed.data.tier,
-          limit: parsed.data.limit,
-        },
-        { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
-      )
-
-      try {
-        const response = await searchSessions({
-          projects: codingCliIndexer.getProjects(),
-          providers: codingCliProviders,
-          query: parsed.data.query,
-          tier: parsed.data.tier,
-          limit: parsed.data.limit,
-          maxFiles: parsed.data.maxFiles,
-        })
-
-        endSearchTimer({ resultCount: response.results.length, totalScanned: response.totalScanned })
-
-        res.json(response)
-      } catch (err: any) {
-        endSearchTimer({
-          error: true,
-          errorName: err?.name,
-          errorMessage: err?.message,
-        })
-        throw err
-      }
-    } catch (err: any) {
-      log.error({ err }, 'Session search failed')
-      res.status(500).json({ error: 'Search failed' })
-    }
-  })
-
-  app.get('/api/sessions', async (_req, res) => {
-    res.json(codingCliIndexer.getProjects())
-  })
-
-  app.patch('/api/sessions/:sessionId', async (req, res) => {
-    const rawId = req.params.sessionId
-    const provider = (req.query.provider as CodingCliProviderName) || 'claude'
-    const compositeKey = rawId.includes(':') ? rawId : makeSessionKey(provider, rawId)
-    const SessionPatchSchema = z.object({
-      titleOverride: z.string().optional().nullable(),
-      summaryOverride: z.string().optional().nullable(),
-      deleted: z.coerce.boolean().optional(),
-      archived: z.coerce.boolean().optional(),
-      createdAtOverride: z.coerce.number().optional(),
-    })
-    const parsed = SessionPatchSchema.safeParse(req.body || {})
-    if (!parsed.success) {
-      return res.status(400).json({ error: 'Invalid request', details: parsed.error.issues })
-    }
-    const cleanString = (value: string | null | undefined) => {
-      const trimmed = typeof value === 'string' ? value.trim() : value
-      return trimmed ? trimmed : undefined
-    }
-    const { titleOverride, summaryOverride, deleted, archived, createdAtOverride } = parsed.data
-	    const next = await configStore.patchSessionOverride(compositeKey, {
-	      titleOverride: cleanString(titleOverride),
-	      summaryOverride: cleanString(summaryOverride),
-	      deleted,
-	      archived,
-	      createdAtOverride,
-	    })
-	    await codingCliIndexer.refresh()
-	    await claudeIndexer.refresh()
-	    res.json(next)
-	  })
-
-  app.delete('/api/sessions/:sessionId', async (req, res) => {
-    const rawId = req.params.sessionId
-    const provider = (req.query.provider as CodingCliProviderName) || 'claude'
-	    const compositeKey = rawId.includes(':') ? rawId : makeSessionKey(provider, rawId)
-	    await configStore.deleteSession(compositeKey)
-	    await codingCliIndexer.refresh()
-	    await claudeIndexer.refresh()
-	    res.json({ ok: true })
-	  })
-
-  app.put('/api/project-colors', async (req, res) => {
-	    const { projectPath, color } = req.body || {}
-	    if (!projectPath || !color) return res.status(400).json({ error: 'projectPath and color required' })
-	    await configStore.setProjectColor(projectPath, color)
-	    await codingCliIndexer.refresh()
-	    await claudeIndexer.refresh()
-	    res.json({ ok: true })
-	  })
-
-  // --- API: terminals ---
-  app.get('/api/terminals', async (_req, res) => {
-    const cfg = await configStore.snapshot()
-    const list = registry.list().filter((t) => !cfg.terminalOverrides?.[t.terminalId]?.deleted)
-    const merged = list.map((t) => {
-      const ov = cfg.terminalOverrides?.[t.terminalId]
-      return {
-        ...t,
-        title: ov?.titleOverride || t.title,
-        description: ov?.descriptionOverride || t.description,
-      }
-    })
-    res.json(merged)
-  })
-
-  app.patch('/api/terminals/:terminalId', async (req, res) => {
-    const terminalId = req.params.terminalId
-    const { titleOverride, descriptionOverride, deleted } = req.body || {}
-
-    const next = await configStore.patchTerminalOverride(terminalId, {
-      titleOverride,
-      descriptionOverride,
-      deleted,
-    })
-
-    // Update live registry copies for immediate UI update.
-    if (typeof titleOverride === 'string' && titleOverride.trim()) registry.updateTitle(terminalId, titleOverride.trim())
-    if (typeof descriptionOverride === 'string') registry.updateDescription(terminalId, descriptionOverride)
-
-    wsHandler.broadcast({ type: 'terminal.list.updated' })
-    res.json(next)
-  })
-
-  app.delete('/api/terminals/:terminalId', async (req, res) => {
-    const terminalId = req.params.terminalId
-    await configStore.deleteTerminal(terminalId)
-    wsHandler.broadcast({ type: 'terminal.list.updated' })
-    res.json({ ok: true })
-  })
-
-  // --- API: AI ---
-  app.post('/api/ai/terminals/:terminalId/summary', async (req, res) => {
-    const terminalId = req.params.terminalId
-    const term = registry.get(terminalId)
-    if (!term) return res.status(404).json({ error: 'Terminal not found' })
-
-    const snapshot = term.buffer.snapshot().slice(-20_000)
-
-    // Fallback heuristic if AI not configured or fails.
-    const heuristic = () => {
-      const cleaned = stripAnsi(snapshot)
-      const lines = cleaned.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
-      const first = lines[0] || 'Terminal session'
-      const second = lines[1] || ''
-      const desc = [first, second].filter(Boolean).join(' - ').slice(0, 240)
-      return desc || 'Terminal session'
-    }
-
-    if (!AI_CONFIG.enabled()) {
-      return res.json({ description: heuristic(), source: 'heuristic' })
-    }
-
-    const endSummaryTimer = startPerfTimer(
-      'ai_summary',
-      { terminalId, snapshotChars: snapshot.length },
-      { minDurationMs: perfConfig.slowAiSummaryMs, level: 'warn' },
-    )
-    let summarySource: 'ai' | 'heuristic' = 'ai'
-    let summaryError = false
-
-    try {
-      const { generateText } = await import('ai')
-      const { google } = await import('@ai-sdk/google')
-      const promptConfig = PROMPTS.terminalSummary
-      const model = google(promptConfig.model)
-      const prompt = promptConfig.build(snapshot)
-
-      const result = await generateText({
-        model,
-        prompt,
-        maxOutputTokens: promptConfig.maxTokens,
-      })
-
-      const description = (result.text || '').trim().slice(0, 240) || heuristic()
-      res.json({ description, source: 'ai' })
-    } catch (err: any) {
-      summarySource = 'heuristic'
-      summaryError = true
-      log.warn({ err }, 'AI summary failed; using heuristic')
-      res.json({ description: heuristic(), source: 'heuristic' })
-    } finally {
-      endSummaryTimer({ source: summarySource, error: summaryError })
-    }
-  })
+  app.use('/api', createTerminalsRouter({
+    registry,
+    wsHandler,
+    portForwardManager,
+  }))
 
   // --- API: files (for editor pane) ---
   app.use('/api/files', filesRouter)
-
-  // --- API: port forwarding (for browser pane remote access) ---
-  const portForwardManager = new PortForwardManager()
-
-  app.post('/api/proxy/forward', async (req, res) => {
-    const { port: targetPort } = req.body || {}
-
-    if (!Number.isInteger(targetPort) || targetPort < 1 || targetPort > 65535) {
-      return res.status(400).json({ error: 'Invalid port number' })
-    }
-
-    try {
-      const requester = getRequesterIdentity(req)
-      const result = await portForwardManager.forward(targetPort, requester)
-      res.json({ forwardedPort: result.port })
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
-      log.error({ err, targetPort }, 'Port forward failed')
-      res.status(500).json({ error: `Failed to create port forward: ${msg}` })
-    }
-  })
-
-  app.delete('/api/proxy/forward/:port', (req, res) => {
-    const targetPort = parseInt(req.params.port, 10)
-    if (!Number.isInteger(targetPort) || targetPort < 1 || targetPort > 65535) {
-      return res.status(400).json({ error: 'Invalid port number' })
-    }
-    try {
-      const requester = getRequesterIdentity(req)
-      portForwardManager.close(targetPort, requester.key)
-      res.json({ ok: true })
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
-      log.error({ err, targetPort }, 'Port forward close failed')
-      res.status(500).json({ error: `Failed to close port forward: ${msg}` })
-    }
-  })
 
   // --- Static client in production ---
   const distRoot = path.resolve(__dirname, '..')
