@@ -11,7 +11,7 @@ import {
   resetWsSnapshotReceived,
 } from '@/store/sessionsSlice'
 import { addTab, switchToNextTab, switchToPrevTab } from '@/store/tabsSlice'
-import { api, type VersionInfo } from '@/lib/api'
+import { api, isApiUnauthorizedError, type VersionInfo } from '@/lib/api'
 import { getShareAction } from '@/lib/share-utils'
 import { getWsClient } from '@/lib/ws-client'
 import { getSessionsForHello } from '@/lib/session-utils'
@@ -341,10 +341,20 @@ export default function App() {
     let cleanup: (() => void) | null = null
     let stopTabRegistrySync: (() => void) | null = null
     async function bootstrap() {
+      const handleBootstrapAuthFailure = (err: unknown): boolean => {
+        if (!isApiUnauthorizedError(err)) return false
+        if (!cancelled) {
+          dispatch(setStatus('disconnected'))
+          dispatch(setError('Authentication failed'))
+        }
+        return true
+      }
+
       try {
         const settings = await api.get('/api/settings')
         if (!cancelled) dispatch(setSettings(applyLocalTerminalFontFamily(settings)))
       } catch (err: any) {
+        if (handleBootstrapAuthFailure(err)) return
         console.warn('Failed to load settings', err)
       }
 
@@ -365,6 +375,7 @@ export default function App() {
           })))
         }
       } catch (err: any) {
+        if (handleBootstrapAuthFailure(err)) return
         console.warn('Failed to load platform info', err)
       }
 
@@ -374,6 +385,7 @@ export default function App() {
           setVersionInfo(nextVersionInfo)
         }
       } catch (err: any) {
+        if (handleBootstrapAuthFailure(err)) return
         console.warn('Failed to load version info', err)
       }
 
@@ -381,6 +393,7 @@ export default function App() {
         const projects = await api.get('/api/sessions')
         if (!cancelled) dispatch(setProjects(projects))
       } catch (err: any) {
+        if (handleBootstrapAuthFailure(err)) return
         console.warn('Failed to load sessions', err)
       }
 

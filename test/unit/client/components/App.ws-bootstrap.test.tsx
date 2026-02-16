@@ -62,6 +62,7 @@ vi.mock('@/lib/api', () => ({
     patch: vi.fn().mockResolvedValue({}),
     post: vi.fn().mockResolvedValue({}),
   },
+  isApiUnauthorizedError: (err: any) => !!err && typeof err === 'object' && err.status === 401,
 }))
 
 function createStore() {
@@ -118,6 +119,29 @@ describe('App WS bootstrap recovery', () => {
 
   afterEach(() => {
     cleanup()
+  })
+
+  it('marks connection as auth-required and skips websocket connect when bootstrap settings request returns 401', async () => {
+    const store = createStore()
+    apiGet.mockImplementation((url: string) => {
+      if (url === '/api/settings') {
+        return Promise.reject({ status: 401, message: 'Unauthorized' })
+      }
+      return Promise.resolve({})
+    })
+
+    render(
+      <Provider store={store}>
+        <App />
+      </Provider>
+    )
+
+    await waitFor(() => {
+      expect(store.getState().connection.status).toBe('disconnected')
+      expect(store.getState().connection.lastError).toBe('Authentication failed')
+    })
+
+    expect(wsMocks.connect).not.toHaveBeenCalled()
   })
 
   it('keeps the WS message handler registered after an initial connect failure, so a later ready can recover state', async () => {
