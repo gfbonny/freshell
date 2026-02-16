@@ -253,7 +253,7 @@ describe('App Component - Share Button', () => {
 
     expect(workArea.className).toContain('relative')
     expect(workArea.className).toContain('bg-background')
-    expect(connector.className).toContain('h-[3px]')
+    expect(connector.className).toContain('h-[5px]')
     expect(connector.className).toContain('bg-background')
   })
 

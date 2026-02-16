@@ -671,7 +671,7 @@ export default function App() {
           onTouchEnd={handleTerminalChromeRevealTouchEnd}
         >
           <div
-            className="pointer-events-none absolute inset-x-0 top-0 z-10 h-[3px] bg-background"
+            className="pointer-events-none absolute inset-x-0 top-0 z-10 h-[5px] bg-background"
             data-testid="terminal-work-area-connector"
             aria-hidden="true"
           />
