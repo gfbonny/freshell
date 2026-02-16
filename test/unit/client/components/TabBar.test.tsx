@@ -224,6 +224,23 @@ describe('TabBar', () => {
       expect(separator).toBeInTheDocument()
       expect(separator?.className).toContain('bg-muted-foreground/45')
     })
+
+    it('hides vertical overflow on the tab strip while preserving horizontal scrolling', () => {
+      const tab = createTab({ id: 'tab-1', title: 'Terminal 1' })
+      const store = createStore({
+        tabs: [tab],
+        activeTabId: 'tab-1',
+      })
+
+      renderWithStore(<TabBar />, store)
+
+      const addButton = screen.getByTitle('New shell tab')
+      const tabStrip = addButton.parentElement as HTMLDivElement | null
+
+      expect(tabStrip).toBeInTheDocument()
+      expect(tabStrip?.className).toContain('overflow-x-auto')
+      expect(tabStrip?.className).toContain('overflow-y-hidden')
+    })
   })
 
   describe('active tab highlighting', () => {
