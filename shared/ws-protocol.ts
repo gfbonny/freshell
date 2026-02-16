@@ -381,6 +381,9 @@ export type TerminalOutputMessage = {
 }
 
 export type TerminalSnapshotMessage = {
+  // Reserved for compatibility with older/experimental clients that expect
+  // a standalone snapshot frame. Current server flow uses terminal.attached*
+  // and terminal.created snapshot payloads instead.
   type: 'terminal.snapshot'
   terminalId: string
   snapshot: string
@@ -435,6 +438,8 @@ export type TerminalIdleWarningMessage = {
 
 export type SessionsUpdatedMessage = {
   type: 'sessions.updated'
+  // Intentionally unknown to avoid coupling this shared protocol package to
+  // client-only ProjectGroup types.
   projects: unknown[]
   clear?: true
   append?: true
@@ -442,6 +447,8 @@ export type SessionsUpdatedMessage = {
 
 export type SessionsPatchMessage = {
   type: 'sessions.patch'
+  // Intentionally unknown to avoid coupling this shared protocol package to
+  // client-only ProjectGroup types.
   upsertProjects: unknown[]
   removeProjectPaths: string[]
 }
@@ -450,6 +457,8 @@ export type SessionsPatchMessage = {
 
 export type SettingsUpdatedMessage = {
   type: 'settings.updated'
+  // Intentionally unknown to avoid coupling this shared protocol package to
+  // client-only AppSettings types.
   settings: unknown
 }
 
@@ -494,6 +503,8 @@ export type CodingCliEventMessage = {
   type: 'codingcli.event'
   sessionId: string
   provider: CodingCliProviderName
+  // Provider-specific payload shape. Consumers should narrow/cast based on
+  // provider and local event normalization contracts.
   event: unknown
 }
 
