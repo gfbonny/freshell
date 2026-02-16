@@ -240,6 +240,7 @@ describe('TabBar', () => {
       expect(tabStrip).toBeInTheDocument()
       expect(tabStrip?.className).toContain('overflow-x-auto')
       expect(tabStrip?.className).toContain('overflow-y-hidden')
+      expect(tabStrip?.className).toContain('pt-px')
     })
   })
 

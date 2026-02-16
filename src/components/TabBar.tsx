@@ -267,7 +267,7 @@ export default function TabBar() {
           items={tabs.map((t: Tab) => t.id)}
           strategy={horizontalListSortingStrategy}
         >
-          <div className="relative z-10 flex items-end gap-0.5 overflow-x-auto overflow-y-hidden flex-1">
+          <div className="relative z-10 flex items-end gap-0.5 overflow-x-auto overflow-y-hidden pt-px flex-1">
             {tabs.map((tab: Tab) => (
               <SortableTab
                 key={tab.id}
