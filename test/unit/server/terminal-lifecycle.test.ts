@@ -63,12 +63,13 @@ import { logger } from '../../../server/logger'
 import type { AppSettings } from '../../../server/config-store'
 
 // Mock WebSocket
-function createMockWebSocket(): any {
+function createMockWebSocket(opts?: { isMobileClient?: boolean }): any {
   return {
     send: vi.fn(),
     close: vi.fn(),
     readyState: 1, // OPEN
     bufferedAmount: 0,
+    isMobileClient: opts?.isMobileClient ?? false,
   }
 }
 
@@ -211,6 +212,47 @@ describe('TerminalRegistry Lifecycle', () => {
       const outputs = sent.filter((m) => m.type === 'terminal.output')
       expect(outputs).toHaveLength(1)
       expect(outputs[0].data).toBe('queued output\n')
+    })
+
+    it('batches terminal.output frames for mobile clients', () => {
+      const term = registry.create({ mode: 'shell' })
+      const pty = mockPtyProcess.instances[0]
+      const mobileClient = createMockWebSocket({ isMobileClient: true })
+
+      registry.attach(term.terminalId, mobileClient)
+
+      pty._emitData('hello ')
+      pty._emitData('mobile')
+
+      expect(mobileClient.send).not.toHaveBeenCalled()
+
+      vi.advanceTimersByTime(50)
+
+      const sent = (mobileClient.send as Mock).mock.calls.map((call) => JSON.parse(call[0]))
+      const outputs = sent.filter((m) => m.type === 'terminal.output')
+      expect(outputs).toHaveLength(1)
+      expect(outputs[0].data).toBe('hello mobile')
+    })
+
+    it('tracks dropped output metrics for flushed mobile batches', () => {
+      setPerfLoggingEnabled(true, 'test')
+      try {
+        const local = new TerminalRegistry(settings)
+        const term = local.create({ mode: 'shell' })
+        const pty = mockPtyProcess.instances[mockPtyProcess.instances.length - 1]
+        const mobileClient = createMockWebSocket({ isMobileClient: true })
+        mobileClient.bufferedAmount = 3 * 1024 * 1024
+
+        local.attach(term.terminalId, mobileClient)
+        pty._emitData('mobile batch')
+
+        vi.advanceTimersByTime(50)
+
+        expect(term.perf?.droppedMessages).toBe(1)
+        local.shutdown()
+      } finally {
+        setPerfLoggingEnabled(false, 'test')
+      }
     })
 
     it('closes the client if the pending snapshot queue grows too large (prevents OOM)', () => {

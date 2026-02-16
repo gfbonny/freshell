@@ -5,7 +5,7 @@ import { useAppSelector } from '@/store/hooks'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
 import { CODING_CLI_PROVIDER_CONFIGS, type CodingCliProviderConfig } from '@/lib/coding-cli-utils'
 import type { CodingCliProviderName } from '@/lib/coding-cli-types'
-import claudeWebIconUrl from '../../../assets/icons/claude-web.svg'
+import claudeIconUrl from '../../../assets/icons/claude-code.svg'
 
 export type PanePickerType = 'shell' | 'cmd' | 'powershell' | 'wsl' | 'browser' | 'editor' | 'claude-web' | CodingCliProviderName
 
@@ -74,12 +74,12 @@ export default function PanePicker({ onSelect, onCancel, isOnlyPane, tabId, pane
     // Shell options depend on platform
     const shellOptions = isWindowsLike(platform) ? windowsShellOptions : [shellOption]
 
-    // Claude Web option: only show if claude CLI is available and enabled
+    // freshclaude option: only show if claude CLI is available and enabled
     const claudeWebOption: PickerOption[] = (availableClis['claude'] && enabledProviders.includes('claude'))
-      ? [{ type: 'claude-web' as PanePickerType, label: 'Claude Web', icon: null, iconUrl: claudeWebIconUrl, shortcut: 'A' }]
+      ? [{ type: 'claude-web' as PanePickerType, label: 'freshclaude', icon: null, iconUrl: claudeIconUrl, shortcut: 'A' }]
       : []
 
-    // Order: CLIs, Claude Web, Editor, Browser, Shell(s)
+    // Order: CLIs, freshclaude, Editor, Browser, Shell(s)
     return [...cliOptions, ...claudeWebOption, ...nonShellOptions, ...shellOptions]
   }, [platform, availableClis, enabledProviders])
 

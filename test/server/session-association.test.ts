@@ -629,7 +629,6 @@ describe('Codex Session-Terminal Association via onUpdate', () => {
       for (const session of project.sessions) {
         if (!modeSupportsResume(session.provider)) continue
         if (!session.cwd) continue
-
         const unassociated = registry.findUnassociatedTerminals(session.provider, session.cwd)
         if (unassociated.length === 0) continue
 
@@ -638,6 +637,7 @@ describe('Codex Session-Terminal Association via onUpdate', () => {
 
         const associated = registry.setResumeSessionId(term.terminalId, session.sessionId)
         if (!associated) continue
+
         broadcasts.push({
           type: 'terminal.session.associated',
           terminalId: term.terminalId,
@@ -699,6 +699,37 @@ describe('Codex Session-Terminal Association via onUpdate', () => {
     associateOnUpdate(registry, projects, broadcasts)
     expect(broadcasts).toHaveLength(1) // Still 1
     expect(registry.get(term.terminalId)?.resumeSessionId).toBe('codex-session-abc-123')
+
+    registry.shutdown()
+  })
+
+  it('does not associate one codex session to multiple terminals across repeated updates', () => {
+    const registry = new TerminalRegistry()
+    const broadcasts: any[] = []
+
+    const term1 = registry.create({ mode: 'codex', cwd: '/home/user/project' })
+    const term2 = registry.create({ mode: 'codex', cwd: '/home/user/project' })
+    const term3 = registry.create({ mode: 'codex', cwd: '/home/user/project' })
+
+    const projects = [{
+      projectPath: '/home/user/project',
+      sessions: [{
+        provider: 'codex' as const,
+        sessionId: 'codex-session-abc-123',
+        projectPath: '/home/user/project',
+        updatedAt: Date.now(),
+        cwd: '/home/user/project',
+      }],
+    }]
+
+    associateOnUpdate(registry, projects, broadcasts)
+    associateOnUpdate(registry, projects, broadcasts)
+    associateOnUpdate(registry, projects, broadcasts)
+
+    expect(registry.get(term1.terminalId)?.resumeSessionId).toBe('codex-session-abc-123')
+    expect(registry.get(term2.terminalId)?.resumeSessionId).toBeUndefined()
+    expect(registry.get(term3.terminalId)?.resumeSessionId).toBeUndefined()
+    expect(broadcasts).toHaveLength(1)
 
     registry.shutdown()
   })

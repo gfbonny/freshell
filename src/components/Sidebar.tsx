@@ -16,7 +16,7 @@ import { ContextIds } from '@/components/context-menu/context-menu-constants'
 import { ProviderIcon } from '@/components/icons/provider-icons'
 import { getActiveSessionRefForTab } from '@/lib/session-utils'
 
-export type AppView = 'terminal' | 'sessions' | 'overview' | 'settings'
+export type AppView = 'terminal' | 'tabs' | 'sessions' | 'overview' | 'settings'
 
 type SessionItem = SidebarSessionItem
 
@@ -46,10 +46,12 @@ export default function Sidebar({
   view,
   onNavigate,
   width = 288,
+  fullWidth = false,
 }: {
   view: AppView
   onNavigate: (v: AppView) => void
   width?: number
+  fullWidth?: boolean
 }) {
   const dispatch = useAppDispatch()
   const store = useAppStore()
@@ -248,9 +250,10 @@ export default function Sidebar({
   }, [dispatch, onNavigate, activeTabId, store])
 
   const nav = [
-    { id: 'terminal' as const, label: 'Terminal', icon: Terminal, shortcut: 'T' },
-    { id: 'sessions' as const, label: 'Sessions', icon: History, shortcut: 'S' },
-    { id: 'overview' as const, label: 'Overview', icon: LayoutGrid, shortcut: 'O' },
+    { id: 'terminal' as const, label: 'Coding Agents', icon: Terminal, shortcut: 'T' },
+    { id: 'tabs' as const, label: 'Tabs', icon: Archive, shortcut: 'A' },
+    { id: 'overview' as const, label: 'Panes', icon: LayoutGrid, shortcut: 'O' },
+    { id: 'sessions' as const, label: 'Projects', icon: History, shortcut: 'P' },
     { id: 'settings' as const, label: 'Settings', icon: Settings, shortcut: ',' },
   ]
 
@@ -288,8 +291,11 @@ export default function Sidebar({
 
   return (
     <div
-      className="h-full flex flex-col bg-card flex-shrink-0 transition-[width] duration-150"
-      style={{ width: `${width}px` }}
+      className={cn(
+        'h-full flex flex-col bg-card flex-shrink-0 transition-[width] duration-150',
+        fullWidth && 'w-full'
+      )}
+      style={fullWidth ? undefined : { width: `${width}px` }}
     >
       {/* Header */}
       <div className="px-4 py-4">
@@ -311,7 +317,7 @@ export default function Sidebar({
             <button
               aria-label="Clear search"
               onClick={() => setFilter('')}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 min-h-11 min-w-11 md:min-h-0 md:min-w-0 flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground"
             >
               <X className="h-3.5 w-3.5" />
             </button>
@@ -344,7 +350,7 @@ export default function Sidebar({
                 key={item.id}
                 onClick={() => onNavigate(item.id)}
                 className={cn(
-                  'flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs transition-colors',
+                  'flex-1 flex items-center justify-center gap-1.5 py-2.5 md:py-1.5 min-h-11 md:min-h-0 rounded-md text-xs transition-colors',
                   active
                     ? 'bg-foreground text-background font-medium'
                     : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
@@ -408,7 +414,7 @@ function SidebarItem({
         <button
           onClick={onClick}
           className={cn(
-            'w-full flex items-center gap-2 px-2 py-2 rounded-md text-left transition-colors group',
+            'w-full flex items-center gap-2 px-2 py-3 md:py-2 rounded-md text-left transition-colors group',
             isActiveTab
               ? 'bg-muted'
               : 'hover:bg-muted/50'
