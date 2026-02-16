@@ -331,6 +331,7 @@ export type ClientMessage = z.infer<typeof ClientMessageSchema>
 export type ReadyMessage = {
   type: 'ready'
   timestamp: string
+  serverInstanceId?: string
 }
 
 export type PongMessage = {
@@ -489,6 +490,29 @@ export type PerfLoggingMessage = {
   enabled: boolean
 }
 
+export type ConfigFallbackMessage = {
+  type: 'config.fallback'
+  reason: 'PARSE_ERROR' | 'VERSION_MISMATCH' | 'READ_ERROR' | 'ENOENT'
+  backupExists: boolean
+}
+
+// -- Tabs sync --
+
+export type TabsSyncAckMessage = {
+  type: 'tabs.sync.ack'
+  updated: number
+}
+
+export type TabsSyncSnapshotMessage = {
+  type: 'tabs.sync.snapshot'
+  requestId: string
+  data: {
+    localOpen: unknown[]
+    remoteOpen: unknown[]
+    closed: unknown[]
+  }
+}
+
 // -- Session repair --
 
 export type SessionStatusMessage = {
@@ -599,6 +623,9 @@ export type ServerMessage =
   | SessionsPatchMessage
   | SettingsUpdatedMessage
   | PerfLoggingMessage
+  | ConfigFallbackMessage
+  | TabsSyncAckMessage
+  | TabsSyncSnapshotMessage
   | SessionStatusMessage
   | SessionRepairActivityMessage
   | CodingCliCreatedMessage

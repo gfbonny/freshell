@@ -39,7 +39,6 @@ import {
   CodingCliCreateSchema,
   CodingCliInputSchema,
   CodingCliKillSchema,
-  ClientMessageSchema,
   SdkCreateSchema,
   SdkSendSchema,
   SdkPermissionRespondSchema,
