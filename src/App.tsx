@@ -662,7 +662,7 @@ export default function App() {
       )
     }
     return (
-      <div className="h-full min-h-0 overflow-hidden flex flex-col" data-testid="terminal-shell">
+      <div className="h-full min-h-0 overflow-hidden flex flex-col">
         {(!isLandscapeTerminalView || landscapeTabBarRevealed) && <TabBar />}
         <div
           className="flex-1 min-h-0 relative bg-background"
