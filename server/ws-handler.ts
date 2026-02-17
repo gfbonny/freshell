@@ -1030,6 +1030,13 @@ export class WsHandler {
         let error = false
         let rateLimited = false
         try {
+          // Load config before the synchronous idempotency check to avoid
+          // async yield points between the check and registration.
+          const cfg = await awaitConfig()
+          const providerSettings = m.mode !== 'shell'
+            ? cfg.settings?.codingCli?.providers?.[m.mode as keyof typeof cfg.settings.codingCli.providers] || {}
+            : undefined
+
           const existingId = state.createdByRequestId.get(m.requestId)
           if (existingId) {
             if (existingId === REPAIR_PENDING_SENTINEL) {
@@ -1162,11 +1169,6 @@ export class WsHandler {
             originalResumeSessionId: m.resumeSessionId,
             effectiveResumeSessionId,
           }, '[TRACE resumeSessionId] about to create terminal')
-
-          const cfg = await awaitConfig()
-          const providerSettings = m.mode !== 'shell'
-            ? cfg.settings?.codingCli?.providers?.[m.mode as keyof typeof cfg.settings.codingCli.providers] || {}
-            : undefined
 
           const record = this.registry.create({
             mode: m.mode as TerminalMode,
