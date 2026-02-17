@@ -97,6 +97,7 @@ function resolveMobileToolbarInput(keyId: Exclude<MobileToolbarKeyId, 'ctrl'>, c
     if (keyId === 'down') return '\u001b[1;5B'
     if (keyId === 'right') return '\u001b[1;5C'
     if (keyId === 'left') return '\u001b[1;5D'
+    // Ctrl+Esc and Ctrl+Tab do not have canonical terminal sequences; send plain key input.
   }
 
   if (keyId === 'esc') return '\u001b'
@@ -1243,20 +1244,23 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     markSnapshotChunkedCreated,
   ])
 
+  const mobileToolbarBottomPx = isMobile ? keyboardInsetPx : 0
+  const mobileBottomInsetPx = isMobile ? keyboardInsetPx + MOBILE_KEYBAR_HEIGHT_PX : 0
+  const terminalContainerStyle = useMemo(() => {
+    if (!isMobile) return undefined
+
+    return {
+      touchAction: 'none' as const,
+      ...(mobileBottomInsetPx > 0 ? { height: `calc(100% - ${mobileBottomInsetPx}px)` } : {}),
+    }
+  }, [isMobile, mobileBottomInsetPx])
+
   // NOW we can do the conditional return - after all hooks
   if (!isTerminal || !terminalContent) {
     return null
   }
 
   const showSpinner = terminalContent.status === 'creating' || isAttaching
-  const mobileToolbarBottomPx = isMobile ? keyboardInsetPx : 0
-  const mobileBottomInsetPx = isMobile ? keyboardInsetPx + MOBILE_KEYBAR_HEIGHT_PX : 0
-  const terminalContainerStyle = !isMobile
-    ? undefined
-    : {
-      touchAction: 'none' as const,
-      ...(mobileBottomInsetPx > 0 ? { height: `calc(100% - ${mobileBottomInsetPx}px)` } : {}),
-    }
 
   return (
     <div
