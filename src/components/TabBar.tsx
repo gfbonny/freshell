@@ -252,7 +252,7 @@ export default function TabBar() {
   }
 
   return (
-    <div className="relative z-20 h-12 md:h-10 flex items-end px-2 bg-background" data-context={ContextIds.Global}>
+    <div className="relative z-20 h-12 md:h-10 shrink-0 flex items-end px-2 bg-background" data-context={ContextIds.Global}>
       <div
         className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-muted-foreground/45"
         aria-hidden="true"

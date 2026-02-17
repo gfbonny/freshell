@@ -30,7 +30,7 @@ export function MobileTabStrip({ onOpenSwitcher }: { onOpenSwitcher?: () => void
   }
 
   return (
-    <div className="relative z-20 h-12 flex items-center px-2 bg-background border-b border-border/30">
+    <div className="relative z-20 h-12 shrink-0 flex items-center px-2 bg-background border-b border-border/30">
       <button
         className="min-h-11 min-w-11 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground disabled:opacity-30"
         onClick={() => { triggerHapticFeedback(); dispatch(switchToPrevTab()) }}

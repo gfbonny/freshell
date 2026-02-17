@@ -115,7 +115,7 @@ export default function Pane({
       )}
 
       {/* Content */}
-      <div className="h-full w-full min-h-0">
+      <div className="flex-1 w-full min-h-0">
         {children}
       </div>
     </div>
