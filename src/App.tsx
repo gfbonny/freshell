@@ -792,6 +792,7 @@ export default function App() {
         )}
         <div
           className="flex-1 min-w-0 min-h-0 overflow-hidden flex flex-col"
+          data-testid="app-pane-column"
           {...(isMobile ? bindTabSwipe() : {})}
           style={isMobile ? { touchAction: 'pan-y' } : undefined}
         >

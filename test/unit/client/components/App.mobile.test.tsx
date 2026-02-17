@@ -255,12 +255,11 @@ describe('App Mobile - Sidebar Backdrop', () => {
     expect(screen.getByTestId('mock-sidebar')).toHaveAttribute('data-full-width', 'true')
   })
 
-  it('keeps header onscreen by making pane area shrink on mobile', async () => {
+  it('keeps header onscreen by making pane area shrinkable in mobile layout', async () => {
     renderApp()
 
     const terminalWorkArea = await screen.findByTestId('terminal-work-area')
-    const appMainContent = screen.getByTestId('app-main-content')
-    const paneColumn = appMainContent.lastElementChild as HTMLElement
+    const paneColumn = screen.getByTestId('app-pane-column')
     const terminalShell = terminalWorkArea.parentElement as HTMLElement
 
     expect(paneColumn.className).toContain('min-h-0')
