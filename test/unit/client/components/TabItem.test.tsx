@@ -60,7 +60,7 @@ describe('TabItem', () => {
     const el = getTabElement()
     expect(el?.className).toContain('bg-background')
     expect(el?.className).toContain('border-b-background')
-    expect(el?.className).toContain('-mb-px')
+    expect(el?.className).not.toContain('-mb-px')
   })
 
   it('applies dragging opacity when isDragging is true', () => {

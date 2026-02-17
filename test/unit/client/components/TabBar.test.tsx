@@ -263,7 +263,7 @@ describe('TabBar', () => {
       expect(activeTabElement?.className).toContain('bg-background')
       expect(activeTabElement?.className).toContain('text-foreground')
       expect(activeTabElement?.className).toContain('border-b-background')
-      expect(activeTabElement?.className).toContain('-mb-px')
+      expect(activeTabElement?.className).not.toContain('-mb-px')
 
       // Inactive tabs should be slightly off-background gray
       expect(inactiveTabElement?.className).toContain('bg-muted')
