@@ -121,6 +121,68 @@ export function getRequiredPorts(devPort?: number): number[] {
 }
 
 /**
+ * Parse netsh advfirewall firewall show rule output to extract allowed ports.
+ * Returns a Set of port numbers from the LocalPort field.
+ */
+export function parseFirewallRulePorts(output: string): Set<number> {
+  const ports = new Set<number>()
+  for (const line of output.split('\n')) {
+    const match = line.match(/LocalPort:\s*(.+)/i)
+    if (match) {
+      for (const p of match[1].trim().split(',')) {
+        const num = parseInt(p.trim(), 10)
+        if (!Number.isNaN(num)) {
+          ports.add(num)
+        }
+      }
+    }
+  }
+  return ports
+}
+
+/**
+ * Query the existing FreshellLANAccess Windows Firewall rule.
+ * Returns a Set of port numbers allowed by the rule, or empty set if the rule doesn't exist.
+ */
+export function getExistingFirewallPorts(): Set<number> {
+  try {
+    const output = execSync(
+      `${NETSH_PATH} advfirewall firewall show rule name=FreshellLANAccess`,
+      { encoding: 'utf-8', timeout: 10000 }
+    )
+    return parseFirewallRulePorts(output)
+  } catch {
+    return new Set()
+  }
+}
+
+/**
+ * Check if the firewall rule needs to be updated.
+ * Returns true if any required port is missing from the existing firewall rule.
+ * Extra ports in the existing rule are tolerated (avoids unnecessary UAC prompts
+ * when switching between dev and production modes).
+ */
+export function needsFirewallUpdate(requiredPorts: number[], existingPorts: Set<number>): boolean {
+  for (const port of requiredPorts) {
+    if (!existingPorts.has(port)) return true
+  }
+  return false
+}
+
+/**
+ * Build PowerShell script to update only the firewall rule (no port forwarding).
+ * Used when port proxy rules are correct but the firewall rule has drifted.
+ */
+export function buildFirewallOnlyScript(ports: number[]): string {
+  const commands: string[] = []
+  commands.push(`netsh advfirewall firewall delete rule name=FreshellLANAccess 2>\\$null`)
+  commands.push(
+    `netsh advfirewall firewall add rule name=FreshellLANAccess dir=in action=allow protocol=tcp localport=${ports.join(',')} profile=private`
+  )
+  return commands.join('; ')
+}
+
+/**
  * Check if port forwarding rules need to be updated.
  * Returns true if any required port is missing, points to wrong IP, or wrong connect port.
  */
@@ -219,17 +281,28 @@ export function setupWslPortForwarding(devPort?: number): SetupResult {
 
   const requiredPorts = getRequiredPorts(devPort)
   const existingRules = getExistingPortProxyRules()
+  const existingFirewallPorts = getExistingFirewallPorts()
 
-  if (!needsPortForwardingUpdate(wslIp, requiredPorts, existingRules)) {
+  const portsNeedUpdate = needsPortForwardingUpdate(wslIp, requiredPorts, existingRules)
+  const firewallNeedsUpdate = needsFirewallUpdate(requiredPorts, existingFirewallPorts)
+
+  if (!portsNeedUpdate && !firewallNeedsUpdate) {
     console.log(`[wsl-port-forward] Rules up to date for ${wslIp}`)
     return 'skipped'
   }
 
-  console.log(`[wsl-port-forward] Configuring port forwarding for ${wslIp}...`)
+  // Choose the appropriate script: full (port forwarding + firewall) or firewall-only.
+  // When only the firewall drifted, skip port forwarding commands to avoid
+  // brief connection interruptions from deleting/re-adding proxy rules.
+  const script = portsNeedUpdate
+    ? buildPortForwardingScript(wslIp, requiredPorts)
+    : buildFirewallOnlyScript(requiredPorts)
+
+  const label = portsNeedUpdate ? 'port forwarding + firewall' : 'firewall'
+  console.log(`[wsl-port-forward] Configuring ${label} for ${wslIp}...`)
   console.log('[wsl-port-forward] UAC prompt required - please approve to enable LAN access')
 
   try {
-    const script = buildPortForwardingScript(wslIp, requiredPorts)
     // Escape single quotes for PowerShell ArgumentList
     const escapedScript = script.replace(/'/g, "''")
 
@@ -238,14 +311,23 @@ export function setupWslPortForwarding(devPort?: number): SetupResult {
       { encoding: 'utf-8', timeout: 60000, stdio: 'inherit' }
     )
 
-    // Verify rules were actually applied (UAC cancel doesn't always throw)
-    const verifyRules = getExistingPortProxyRules()
-    if (needsPortForwardingUpdate(wslIp, requiredPorts, verifyRules)) {
-      console.error('[wsl-port-forward] Rules were not applied - UAC may have been cancelled')
+    // Verify port forwarding rules if they were updated
+    if (portsNeedUpdate) {
+      const verifyRules = getExistingPortProxyRules()
+      if (needsPortForwardingUpdate(wslIp, requiredPorts, verifyRules)) {
+        console.error('[wsl-port-forward] Port forwarding rules were not applied - UAC may have been cancelled')
+        return 'failed'
+      }
+    }
+
+    // Always verify firewall (updated in both full and firewall-only scripts)
+    const verifyFirewall = getExistingFirewallPorts()
+    if (needsFirewallUpdate(requiredPorts, verifyFirewall)) {
+      console.error('[wsl-port-forward] Firewall rule was not applied - UAC may have been cancelled')
       return 'failed'
     }
 
-    console.log('[wsl-port-forward] Port forwarding configured successfully')
+    console.log(`[wsl-port-forward] ${portsNeedUpdate ? 'Port forwarding' : 'Firewall'} configured successfully`)
     return 'success'
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err)
