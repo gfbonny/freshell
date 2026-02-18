@@ -8,7 +8,6 @@ import { getPerfConfig, withPerfSpan } from '../perf-logger.js'
 import type { TerminalRegistry } from '../terminal-registry.js'
 import type { WsHandler } from '../ws-handler.js'
 import type { CodingCliSessionIndexer } from '../coding-cli/session-indexer.js'
-import type { claudeIndexer as ClaudeIndexerType } from '../claude-indexer.js'
 
 const perfConfig = getPerfConfig()
 
@@ -28,12 +27,11 @@ type SettingsRouterDeps = {
   registry: TerminalRegistry
   wsHandler: WsHandler
   codingCliIndexer: CodingCliSessionIndexer
-  claudeIndexer: typeof ClaudeIndexerType
   applyDebugLogging: (enabled: boolean, source: string) => void
 }
 
 export function createSettingsRouter(deps: SettingsRouterDeps) {
-  const { registry, wsHandler, codingCliIndexer, claudeIndexer, applyDebugLogging } = deps
+  const { registry, wsHandler, codingCliIndexer, applyDebugLogging } = deps
   const router = Router()
 
   router.post('/perf', async (req, res) => {
@@ -107,12 +105,6 @@ export function createSettingsRouter(deps: SettingsRouterDeps) {
       {},
       { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
     )
-    await withPerfSpan(
-      'claude_refresh',
-      () => claudeIndexer.refresh(),
-      {},
-      { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
-    )
     res.json(migrated)
   })
 
@@ -127,12 +119,6 @@ export function createSettingsRouter(deps: SettingsRouterDeps) {
     await withPerfSpan(
       'coding_cli_refresh',
       () => codingCliIndexer.refresh(),
-      {},
-      { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
-    )
-    await withPerfSpan(
-      'claude_refresh',
-      () => claudeIndexer.refresh(),
       {},
       { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
     )

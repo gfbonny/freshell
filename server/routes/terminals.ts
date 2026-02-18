@@ -100,7 +100,7 @@ export function createTerminalsRouter(deps: TerminalsRouterDeps) {
       const result = await generateText({
         model,
         prompt,
-        maxOutputTokens: promptConfig.maxTokens,
+        maxOutputTokens: promptConfig.maxOutputTokens,
       })
 
       const description = (result.text || '').trim().slice(0, 240) || heuristic()

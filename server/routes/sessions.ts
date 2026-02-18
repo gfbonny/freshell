@@ -5,7 +5,6 @@ import { configStore } from '../config-store.js'
 import { getPerfConfig, startPerfTimer } from '../perf-logger.js'
 import { makeSessionKey, type CodingCliProviderName } from '../coding-cli/types.js'
 import type { CodingCliSessionIndexer } from '../coding-cli/session-indexer.js'
-import type { claudeIndexer as ClaudeIndexerType } from '../claude-indexer.js'
 import type { CodingCliProvider } from '../coding-cli/provider.js'
 
 const log = logger.child({ component: 'sessions-routes' })
@@ -14,11 +13,10 @@ const perfConfig = getPerfConfig()
 type SessionsRouterDeps = {
   codingCliIndexer: CodingCliSessionIndexer
   codingCliProviders: CodingCliProvider[]
-  claudeIndexer: typeof ClaudeIndexerType
 }
 
 export function createSessionsRouter(deps: SessionsRouterDeps) {
-  const { codingCliIndexer, codingCliProviders, claudeIndexer } = deps
+  const { codingCliIndexer, codingCliProviders } = deps
   const router = Router()
 
   // Search endpoint must come BEFORE the generic /sessions route
@@ -106,7 +104,6 @@ export function createSessionsRouter(deps: SessionsRouterDeps) {
       createdAtOverride,
     })
     await codingCliIndexer.refresh()
-    await claudeIndexer.refresh()
     res.json(next)
   })
 
@@ -116,7 +113,6 @@ export function createSessionsRouter(deps: SessionsRouterDeps) {
     const compositeKey = rawId.includes(':') ? rawId : makeSessionKey(provider, rawId)
     await configStore.deleteSession(compositeKey)
     await codingCliIndexer.refresh()
-    await claudeIndexer.refresh()
     res.json({ ok: true })
   })
 
@@ -125,7 +121,6 @@ export function createSessionsRouter(deps: SessionsRouterDeps) {
     if (!projectPath || !color) return res.status(400).json({ error: 'projectPath and color required' })
     await configStore.setProjectColor(projectPath, color)
     await codingCliIndexer.refresh()
-    await claudeIndexer.refresh()
     res.json({ ok: true })
   })
 
