@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util'
 import type { ProjectGroup, CodingCliSession } from '../coding-cli/types.js'
 
 export type SessionsProjectsDiff = {
@@ -12,13 +13,13 @@ function sessionsEqual(a: CodingCliSession, b: CodingCliSession): boolean {
   for (const key in a) {
     if (!Object.prototype.hasOwnProperty.call(a, key)) continue
     if (key === 'provider') continue
-    if ((a as any)[key] !== (b as any)[key]) return false
+    if (!isDeepStrictEqual((a as any)[key], (b as any)[key])) return false
   }
 
   for (const key in b) {
     if (!Object.prototype.hasOwnProperty.call(b, key)) continue
     if (key === 'provider') continue
-    if ((a as any)[key] !== (b as any)[key]) return false
+    if (!isDeepStrictEqual((a as any)[key], (b as any)[key])) return false
   }
 
   return true
