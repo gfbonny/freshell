@@ -28,6 +28,7 @@ function createActions(): MenuActions {
       selectAll: vi.fn(),
       clearScrollback: vi.fn(),
       reset: vi.fn(),
+      scrollToBottom: vi.fn(),
       hasSelection: vi.fn(() => false),
       openSearch: vi.fn(),
     })),

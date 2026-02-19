@@ -515,9 +515,12 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     const osc = extractOsc52Events(snapshot ?? '', createOsc52ParserState())
     try { term.clear() } catch { /* disposed */ }
     if (osc.cleaned) {
-      try { term.write(osc.cleaned) } catch { /* disposed */ }
+      try {
+        term.write(osc.cleaned, () => { try { term.scrollToBottom() } catch { /* disposed */ } })
+      } catch { /* disposed */ }
+    } else {
+      try { term.scrollToBottom() } catch { /* disposed */ }
     }
-    try { term.scrollToBottom() } catch { /* disposed */ }
     for (const event of osc.events) {
       handleOsc52Event(event)
     }
@@ -873,7 +876,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       // Scroll to bottom: Cmd+End (macOS) / Ctrl+End (other)
       if ((event.metaKey || event.ctrlKey) && event.code === 'End' && event.type === 'keydown' && !event.repeat) {
         event.preventDefault()
-        term.scrollToBottom()
+        try { term.scrollToBottom() } catch { /* disposed */ }
         return false
       }
 
