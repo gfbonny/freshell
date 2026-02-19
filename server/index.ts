@@ -504,27 +504,6 @@ async function main() {
     res.json(migrated)
   })
 
-  // Alias (matches implementation plan)
-  app.put('/api/settings', async (req, res) => {
-    const parsed = SettingsPatchSchema.safeParse(req.body || {})
-    if (!parsed.success) {
-      return res.status(400).json({ error: 'Invalid request', details: parsed.error.issues })
-    }
-    const patch = normalizeSettingsPatch(migrateSettingsSortMode(parsed.data) as any)
-    const updated = await configStore.patchSettings(patch)
-    const migrated = migrateSettingsSortMode(updated)
-    registry.setSettings(migrated)
-    applyDebugLogging(!!migrated.logging?.debug, 'settings')
-    wsHandler.broadcast({ type: 'settings.updated', settings: migrated })
-	    await withPerfSpan(
-	      'coding_cli_refresh',
-	      () => codingCliIndexer.refresh(),
-	      {},
-	      { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
-	    )
-    res.json(migrated)
-  })
-
   // --- API: sessions ---
   // Search endpoint must come BEFORE the generic /api/sessions route
   app.get('/api/sessions/search', async (req, res) => {
