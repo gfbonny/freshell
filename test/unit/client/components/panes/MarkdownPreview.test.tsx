@@ -1,6 +1,8 @@
-import { describe, it, expect } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, it, expect, afterEach } from 'vitest'
+import { render, screen, cleanup } from '@testing-library/react'
 import MarkdownPreview from '../../../../../src/components/panes/MarkdownPreview'
+
+afterEach(() => cleanup())
 
 describe('MarkdownPreview', () => {
   it('renders markdown as HTML', () => {
