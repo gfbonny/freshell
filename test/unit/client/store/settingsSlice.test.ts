@@ -39,7 +39,6 @@ describe('settingsSlice', () => {
       expect(state.settings.defaultCwd).toBeUndefined()
       expect(state.settings.safety).toEqual({
         autoKillIdleMinutes: 180,
-        warnBeforeKillMinutes: 5,
       })
       expect(state.settings.sidebar).toEqual({
         sortMode: 'recency-pinned',
@@ -108,7 +107,6 @@ describe('settingsSlice', () => {
         defaultCwd: '/home/user',
         safety: {
           autoKillIdleMinutes: 60,
-          warnBeforeKillMinutes: 10,
         },
         sidebar: {
           sortMode: 'recency',
@@ -253,7 +251,6 @@ describe('settingsSlice', () => {
       )
 
       expect(state.settings.safety.autoKillIdleMinutes).toBe(60)
-      expect(state.settings.safety.warnBeforeKillMinutes).toBe(defaultSettings.safety.warnBeforeKillMinutes)
     })
 
     it('deep merges sidebar settings', () => {
@@ -309,7 +306,7 @@ describe('settingsSlice', () => {
         updateSettingsLocal({
           theme: 'light',
           terminal: { fontSize: 16, cursorBlink: false },
-          safety: { warnBeforeKillMinutes: 10 },
+          safety: { autoKillIdleMinutes: 60 },
           sidebar: { showProjectBadges: false },
         })
       )
@@ -320,8 +317,7 @@ describe('settingsSlice', () => {
       expect(state.settings.terminal.fontFamily).toBe(defaultSettings.terminal.fontFamily)
       expect(state.settings.terminal.osc52Clipboard).toBe(defaultSettings.terminal.osc52Clipboard)
       expect(state.settings.terminal.renderer).toBe(defaultSettings.terminal.renderer)
-      expect(state.settings.safety.warnBeforeKillMinutes).toBe(10)
-      expect(state.settings.safety.autoKillIdleMinutes).toBe(defaultSettings.safety.autoKillIdleMinutes)
+      expect(state.settings.safety.autoKillIdleMinutes).toBe(60)
       expect(state.settings.sidebar.showProjectBadges).toBe(false)
       expect(state.settings.sidebar.sortMode).toBe(defaultSettings.sidebar.sortMode)
     })

@@ -57,7 +57,6 @@ export type AppSettings = {
   }
   safety: {
     autoKillIdleMinutes: number
-    warnBeforeKillMinutes: number
   }
   panes: {
     defaultNewPane: 'ask' | 'shell' | 'browser' | 'editor'
@@ -141,7 +140,6 @@ export const defaultSettings: AppSettings = {
   },
   safety: {
     autoKillIdleMinutes: 180,
-    warnBeforeKillMinutes: 5,
   },
   notifications: {
     soundEnabled: true,

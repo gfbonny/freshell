@@ -178,7 +178,7 @@ export type TerminalRecord = {
   rows: number
   clients: Set<WebSocket>
   pendingSnapshotClients: Map<WebSocket, PendingSnapshotQueue>
-  warnedIdle?: boolean
+
   buffer: ChunkRingBuffer
   pty: pty.IPty
   perf?: {
@@ -796,12 +796,6 @@ export class TerminalRegistry extends EventEmitter {
     if (!settings) return
     const killMinutes = settings.safety.autoKillIdleMinutes
     if (!killMinutes || killMinutes <= 0) return
-    const rawWarnMinutes = settings.safety.warnBeforeKillMinutes
-    const warnMinutes =
-      typeof rawWarnMinutes === 'number' && Number.isFinite(rawWarnMinutes) && rawWarnMinutes > 0 && rawWarnMinutes < killMinutes
-        ? rawWarnMinutes
-        : 0
-
     const now = Date.now()
 
     for (const term of this.terminals.values()) {
@@ -811,19 +805,6 @@ export class TerminalRegistry extends EventEmitter {
       const idleMs = now - term.lastActivityAt
       const idleMinutes = idleMs / 60000
 
-      if (warnMinutes > 0) {
-        const warnAtMinutes = killMinutes - warnMinutes
-        if (idleMinutes >= warnAtMinutes && idleMinutes < killMinutes && !term.warnedIdle) {
-          term.warnedIdle = true
-          this.emit('terminal.idle.warning', {
-            terminalId: term.terminalId,
-            killMinutes,
-            warnMinutes,
-            lastActivityAt: term.lastActivityAt,
-          })
-        }
-      }
-
       if (idleMinutes >= killMinutes) {
         logger.info({ terminalId: term.terminalId }, 'Auto-killing idle detached terminal')
         this.kill(term.terminalId)
@@ -831,7 +812,7 @@ export class TerminalRegistry extends EventEmitter {
     }
   }
 
-  // Exposed for unit tests to validate idle warning/kill behavior without relying on timers.
+  // Exposed for unit tests to validate idle kill behavior without relying on timers.
   async enforceIdleKillsForTest(): Promise<void> {
     await this.enforceIdleKills()
   }
@@ -908,7 +889,7 @@ export class TerminalRegistry extends EventEmitter {
       rows,
       clients: new Set(),
       pendingSnapshotClients: new Map(),
-      warnedIdle: false,
+
       buffer: new ChunkRingBuffer(this.scrollbackMaxChars),
       pty: ptyProc,
       perf: perfConfig.enabled
@@ -931,7 +912,6 @@ export class TerminalRegistry extends EventEmitter {
     ptyProc.onData((data) => {
       const now = Date.now()
       record.lastActivityAt = now
-      record.warnedIdle = false
       record.buffer.append(data)
       if (record.perf) {
         record.perf.outBytes += data.length
@@ -1027,7 +1007,6 @@ export class TerminalRegistry extends EventEmitter {
     const term = this.terminals.get(terminalId)
     if (!term) return null
     term.clients.add(client)
-    term.warnedIdle = false
     if (opts?.pendingSnapshot) term.pendingSnapshotClients.set(client, { chunks: [], queuedChars: 0 })
     return term
   }
@@ -1058,7 +1037,6 @@ export class TerminalRegistry extends EventEmitter {
     if (!term || term.status !== 'running') return false
     const now = Date.now()
     term.lastActivityAt = now
-    term.warnedIdle = false
     if (term.perf) {
       term.perf.inBytes += data.length
       term.perf.inChunks += 1

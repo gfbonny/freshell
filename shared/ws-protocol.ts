@@ -447,14 +447,6 @@ export type TerminalMetaListResponseMessage = z.infer<typeof TerminalMetaListRes
 
 export type TerminalMetaUpdatedMessage = z.infer<typeof TerminalMetaUpdatedSchema>
 
-export type TerminalIdleWarningMessage = {
-  type: 'terminal.idle.warning'
-  terminalId: string
-  killMinutes: number
-  warnMinutes: number
-  lastActivityAt: number
-}
-
 // -- Sessions --
 
 export type SessionsUpdatedMessage = {
@@ -618,7 +610,6 @@ export type ServerMessage =
   | TerminalListResponseMessage
   | TerminalMetaListResponseMessage
   | TerminalMetaUpdatedMessage
-  | TerminalIdleWarningMessage
   | SessionsUpdatedMessage
   | SessionsPatchMessage
   | SettingsUpdatedMessage

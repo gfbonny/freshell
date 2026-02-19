@@ -140,7 +140,7 @@ export interface AppSettings {
   }
   safety: {
     autoKillIdleMinutes: number
-    warnBeforeKillMinutes: number
+
   }
   sidebar: {
     sortMode: SidebarSortMode

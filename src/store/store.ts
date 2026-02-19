@@ -11,7 +11,7 @@ import codingCliReducer from './codingCliSlice'
 import panesReducer from './panesSlice'
 import sessionActivityReducer from './sessionActivitySlice'
 import terminalActivityReducer from './terminalActivitySlice'
-import idleWarningsReducer from './idleWarningsSlice'
+
 import turnCompletionReducer from './turnCompletionSlice'
 import terminalMetaReducer from './terminalMetaSlice'
 import claudeChatReducer from './claudeChatSlice'
@@ -33,7 +33,7 @@ export const store = configureStore({
     panes: panesReducer,
     sessionActivity: sessionActivityReducer,
     terminalActivity: terminalActivityReducer,
-    idleWarnings: idleWarningsReducer,
+
     turnCompletion: turnCompletionReducer,
     terminalMeta: terminalMetaReducer,
     claudeChat: claudeChatReducer,

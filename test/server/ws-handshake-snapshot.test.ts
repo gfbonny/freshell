@@ -128,7 +128,6 @@ describe('ws handshake snapshot', () => {
         },
         safety: {
           autoKillIdleMinutes: 180,
-          warnBeforeKillMinutes: 5,
         },
         panes: {
           defaultNewPane: 'ask',

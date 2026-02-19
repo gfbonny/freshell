@@ -42,7 +42,7 @@ import { ContextIds } from '@/components/context-menu/context-menu-constants'
 import { triggerHapticFeedback } from '@/lib/mobile-haptics'
 import { X, Copy, Check, PanelLeft, AlertTriangle } from 'lucide-react'
 import { updateSettingsLocal, markSaved } from '@/store/settingsSlice'
-import { clearIdleWarning, recordIdleWarning } from '@/store/idleWarningsSlice'
+
 import { setTerminalMetaSnapshot, upsertTerminalMeta, removeTerminalMeta } from '@/store/terminalMetaSlice'
 import { handleSdkMessage } from '@/lib/sdk-message-handler'
 import type { ProjectGroup, AppSettings } from '@/store/types'
@@ -77,7 +77,7 @@ const SIDEBAR_MIN_WIDTH = 200
 const SIDEBAR_MAX_WIDTH = 500
 const CHROME_REVEAL_TOP_EDGE_PX = 48
 const CHROME_REVEAL_SWIPE_PX = 60
-const EMPTY_IDLE_WARNINGS: Record<string, unknown> = {}
+
 
 function isVersionInfo(value: unknown): value is VersionInfo {
   return !!value && typeof value === 'object' && typeof (value as { currentVersion?: unknown }).currentVersion === 'string'
@@ -115,8 +115,6 @@ export default function App() {
   const tabs = useAppSelector((s) => s.tabs.tabs)
   const activeTabId = useAppSelector((s) => s.tabs.activeTabId)
   const settings = useAppSelector((s) => s.settings.settings)
-  const idleWarnings = useAppSelector((s) => (s as any).idleWarnings?.warnings ?? EMPTY_IDLE_WARNINGS)
-  const idleWarningCount = Object.keys(idleWarnings).length
   const networkStatus = useAppSelector((s) => s.network.status)
 
   const [view, setView] = useState<AppView>('terminal')
@@ -464,18 +462,8 @@ export default function App() {
           const code = msg.exitCode
           if (import.meta.env.MODE === 'development') console.log('terminal exit', terminalId, code)
           if (terminalId) {
-            dispatch(clearIdleWarning(terminalId))
             dispatch(removeTerminalMeta(terminalId))
           }
-        }
-        if (msg.type === 'terminal.idle.warning') {
-          if (!msg.terminalId) return
-          dispatch(recordIdleWarning({
-            terminalId: msg.terminalId,
-            killMinutes: Number(msg.killMinutes) || 0,
-            warnMinutes: Number(msg.warnMinutes) || 0,
-            lastActivityAt: typeof msg.lastActivityAt === 'number' ? msg.lastActivityAt : undefined,
-          }))
         }
         if (msg.type === 'session.status') {
           // Log session repair status (silent for healthy/repaired, visible for problems)
@@ -694,18 +682,6 @@ export default function App() {
         className="h-full min-h-0 overflow-hidden flex flex-col bg-background text-foreground"
         data-context={ContextIds.Global}
       >
-        {idleWarningCount > 0 && (
-          <div className="px-3 md:px-4 py-2 border-b border-amber-300/40 bg-amber-100/60 dark:bg-amber-950/40">
-            <button
-              onClick={() => setView('overview')}
-              className="rounded-md bg-amber-100 text-amber-950 hover:bg-amber-200 transition-colors text-xs font-medium px-2 py-1 dark:bg-amber-900/70 dark:text-amber-100 dark:hover:bg-amber-900"
-              aria-label={`${idleWarningCount} coding agent terminal(s) will auto-kill soon`}
-              title="View in Panes"
-            >
-              {idleWarningCount} terminal{idleWarningCount === 1 ? '' : 's'} will auto-kill soon
-            </button>
-          </div>
-        )}
       {configFallback && (
         <div className="px-3 md:px-4 py-2 border-b border-destructive/30 bg-destructive/10 text-destructive text-xs">
           <div className="flex items-start gap-2">
