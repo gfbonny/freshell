@@ -1,9 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { execSync } from 'child_process'
-import fs from 'fs'
 
 vi.mock('child_process')
-vi.mock('fs')
+vi.mock('../../../server/platform.js', () => ({
+  isWSL2: vi.fn(() => false),
+}))
+
+import { isWSL2 } from '../../../server/platform.js'
 
 import {
   getWslIp,
@@ -386,7 +389,7 @@ Address         Port        Address         Port
       process.env.PORT = '3001'
       process.env.NODE_ENV = 'test'
       // Default: not WSL2
-      vi.mocked(fs.readFileSync).mockReturnValue('Linux version 5.10.0')
+      vi.mocked(isWSL2).mockReturnValue(false)
     })
 
     afterEach(() => {
@@ -395,7 +398,7 @@ Address         Port        Address         Port
     })
 
     it('returns not-wsl2 when not running in WSL2', () => {
-      vi.mocked(fs.readFileSync).mockReturnValue('Linux version 5.10.0-generic')
+      vi.mocked(isWSL2).mockReturnValue(false)
 
       const result = setupWslPortForwarding()
 
@@ -404,7 +407,7 @@ Address         Port        Address         Port
 
     it('returns skipped when rules are already correct', () => {
       // Mock WSL2 detection
-      vi.mocked(fs.readFileSync).mockReturnValue('Linux version 5.15.0-microsoft-standard-WSL2')
+      vi.mocked(isWSL2).mockReturnValue(true)
 
       // Mock execSync calls in order
       vi.mocked(execSync)
@@ -425,7 +428,7 @@ Address         Port        Address         Port
 
     it('returns failed when WSL IP cannot be detected', () => {
       vi.spyOn(console, 'error').mockImplementation(() => {})
-      vi.mocked(fs.readFileSync).mockReturnValue('Linux version 5.15.0-microsoft-standard-WSL2')
+      vi.mocked(isWSL2).mockReturnValue(true)
       vi.mocked(execSync).mockImplementation(() => {
         throw new Error('Command failed')
       })
@@ -436,7 +439,7 @@ Address         Port        Address         Port
     })
 
     it('returns success when rules are applied and verified', () => {
-      vi.mocked(fs.readFileSync).mockReturnValue('Linux version 5.15.0-microsoft-standard-WSL2')
+      vi.mocked(isWSL2).mockReturnValue(true)
 
       // Mock execSync calls in order
       vi.mocked(execSync)
@@ -464,7 +467,7 @@ Address         Port        Address         Port
 
     it('returns failed when rules not applied after elevation (UAC cancelled)', () => {
       vi.spyOn(console, 'error').mockImplementation(() => {})
-      vi.mocked(fs.readFileSync).mockReturnValue('Linux version 5.15.0-microsoft-standard-WSL2')
+      vi.mocked(isWSL2).mockReturnValue(true)
 
       // Mock execSync calls in order
       vi.mocked(execSync)
@@ -480,7 +483,7 @@ Address         Port        Address         Port
 
     it('returns failed when PowerShell execution throws an error', () => {
       vi.spyOn(console, 'error').mockImplementation(() => {})
-      vi.mocked(fs.readFileSync).mockReturnValue('Linux version 5.15.0-microsoft-standard-WSL2')
+      vi.mocked(isWSL2).mockReturnValue(true)
 
       vi.mocked(execSync)
         .mockReturnValueOnce('inet 172.30.149.249/20 scope global eth0\n') // ip -4 addr show eth0
@@ -496,8 +499,8 @@ Address         Port        Address         Port
     })
 
     it('returns not-wsl2 for WSL1 (which has Microsoft but not WSL2 pattern)', () => {
-      // WSL1 has "Microsoft" in version but not "wsl2" or "microsoft-standard"
-      vi.mocked(fs.readFileSync).mockReturnValue('Linux version 4.4.0-18362-Microsoft')
+      // WSL1 is not WSL2 — isWSL2() returns false
+      vi.mocked(isWSL2).mockReturnValue(false)
 
       const result = setupWslPortForwarding()
 

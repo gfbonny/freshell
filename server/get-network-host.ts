@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import dotenv from 'dotenv'
+import { isWSL } from './platform.js'
 
 /**
  * Read the effective network bind host from ~/.freshell/config.json.
@@ -31,7 +32,7 @@ export function getNetworkHost(): string {
 
   // On WSL2, binding to 127.0.0.1 makes the server unreachable from the
   // Windows host browser. Always bind to 0.0.0.0 so Windows can connect.
-  if (isWSL2()) return '0.0.0.0'
+  if (isWSL()) return '0.0.0.0'
 
   try {
     const configPath = join(homedir(), '.freshell', 'config.json')
@@ -55,11 +56,3 @@ export function getNetworkHost(): string {
   }
 }
 
-function isWSL2(): boolean {
-  try {
-    const version = readFileSync('/proc/version', 'utf-8')
-    return version.toLowerCase().includes('microsoft')
-  } catch {
-    return false
-  }
-}
