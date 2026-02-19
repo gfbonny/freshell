@@ -1290,7 +1290,7 @@ describe('shutdownGracefully', () => {
 
     const ptys = mockPtyProcess.instances
 
-    // Simulate processes that exit when SIGTERM arrives
+    // Simulate processes that exit when kill arrives
     for (const pty of ptys) {
       pty.kill.mockImplementation(() => {
         setTimeout(() => pty._emitExit(0), 10)
@@ -1300,7 +1300,13 @@ describe('shutdownGracefully', () => {
     await registry.shutdownGracefully(5000)
 
     for (const pty of ptys) {
-      expect(pty.kill).toHaveBeenCalledWith('SIGTERM')
+      // On Windows, kill() is called without a signal argument;
+      // on Unix, it's called with 'SIGTERM'
+      if (process.platform === 'win32') {
+        expect(pty.kill).toHaveBeenCalledWith()
+      } else {
+        expect(pty.kill).toHaveBeenCalledWith('SIGTERM')
+      }
     }
   })
 
@@ -1322,14 +1328,20 @@ describe('shutdownGracefully', () => {
     registry.create({ mode: 'shell' })
     const pty = mockPtyProcess.instances[0]
 
-    // Never exits on SIGTERM
+    // Never exits on kill
     pty.kill.mockImplementation(() => {})
 
     await registry.shutdownGracefully(200)
 
-    // Should have been called at least twice: once SIGTERM, once forced
+    // Should have been called at least twice: once for graceful kill, once forced
     expect(pty.kill).toHaveBeenCalledTimes(2)
-    expect(pty.kill).toHaveBeenNthCalledWith(1, 'SIGTERM')
+    // On Windows, kill() is called without a signal argument;
+    // on Unix, it's called with 'SIGTERM'
+    if (process.platform === 'win32') {
+      expect(pty.kill).toHaveBeenNthCalledWith(1)
+    } else {
+      expect(pty.kill).toHaveBeenNthCalledWith(1, 'SIGTERM')
+    }
   })
 
   it('should handle already exited terminals', async () => {

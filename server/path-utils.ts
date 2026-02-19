@@ -102,6 +102,10 @@ function convertWslMountPathToWindows(posixPath: string): string | undefined {
 export function convertWindowsPathToWslPath(input: string): string | undefined {
   const cleaned = sanitizeUserPathInput(input)
   if (!cleaned) return undefined
+  // POSIX absolute paths are already native Linux paths, not Windows paths to convert.
+  // Skipping early avoids path.win32.resolve prepending a drive letter on Windows
+  // (e.g. /home/user -> C:\home\user), which would cause a false-positive conversion.
+  if (POSIX_ABSOLUTE_PREFIX_RE.test(cleaned)) return undefined
   const normalized = path.win32.resolve(cleaned)
 
   const driveMatch = normalized.match(/^([a-zA-Z]):(?:\\(.*))?$/)
