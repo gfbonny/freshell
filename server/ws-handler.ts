@@ -575,7 +575,6 @@ export class WsHandler {
     let messageType: string | undefined
     try {
       // Backpressure guard.
-      // @ts-ignore
       const buffered = ws.bufferedAmount as number | undefined
       if (this.closeForBackpressureIfNeeded(ws, buffered)) return
       let serialized = ''
@@ -660,7 +659,6 @@ export class WsHandler {
   private queueAttachFrame(ws: LiveWebSocket, msg: unknown): Promise<boolean> {
     if (ws.readyState !== WebSocket.OPEN) return Promise.resolve(false)
 
-    // @ts-ignore
     const buffered = ws.bufferedAmount as number | undefined
     if (this.closeForBackpressureIfNeeded(ws, buffered)) return Promise.resolve(false)
 

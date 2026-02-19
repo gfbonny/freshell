@@ -1248,7 +1248,6 @@ export class TerminalRegistry extends EventEmitter {
 
   safeSend(client: WebSocket, msg: unknown, context?: { terminalId?: string; perf?: TerminalRecord['perf'] }) {
     // Backpressure guard.
-    // @ts-ignore
     const buffered = client.bufferedAmount as number | undefined
     if (typeof buffered === 'number' && buffered > MAX_WS_BUFFERED_AMOUNT) {
       if (context?.perf) context.perf.droppedMessages += 1
