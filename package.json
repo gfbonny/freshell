@@ -17,7 +17,7 @@
     "build:server": "tsc -p tsconfig.server.json",
     "start": "cross-env NODE_ENV=production node dist/server/index.js",
     "serve": "npm run build && npm run start",
-    "test": "vitest run",
+    "test": "vitest run && vitest run --config vitest.server.config.ts",
     "verify": "npm run build && npm test",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
