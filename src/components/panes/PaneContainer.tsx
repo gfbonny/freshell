@@ -166,6 +166,11 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
     if (trimmed) {
       dispatch(updatePaneTitle({ tabId, paneId: renamingPaneId, title: trimmed }))
 
+      // Sync tab title when renaming the only pane in a tab
+      if (isOnlyPane) {
+        dispatch(updateTab({ id: tabId, updates: { title: trimmed } }))
+      }
+
       // For coding CLI panes, persist the rename to the server so it
       // cascades as a session title override.
       if (node.type === 'leaf' && node.content.kind === 'terminal') {
@@ -180,7 +185,7 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
     // Empty value keeps the original title (no dispatch)
     setRenamingPaneId(null)
     setRenameValue('')
-  }, [dispatch, tabId, renamingPaneId, renameValue, node])
+  }, [dispatch, tabId, renamingPaneId, renameValue, node, isOnlyPane])
 
   const handleRenameKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' || e.key === 'Escape') {

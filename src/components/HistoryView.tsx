@@ -4,7 +4,7 @@ import type { CodingCliProviderName, CodingCliSession, ProjectGroup } from '@/st
 import { toggleProjectExpanded, setProjects } from '@/store/sessionsSlice'
 import { api } from '@/lib/api'
 import { openSessionTab } from '@/store/tabsSlice'
-import { updatePaneTitleByTerminalId } from '@/store/panesSlice'
+import { syncPaneTitleByTerminalId } from '@/store/paneTitleSync'
 import { cn } from '@/lib/utils'
 import { getProviderLabel } from '@/lib/coding-cli-utils'
 import { useMobile } from '@/hooks/useMobile'
@@ -88,7 +88,7 @@ export default function HistoryView({ onOpenSession }: { onOpenSession?: () => v
     const compositeKey = `${provider || 'claude'}:${sessionId}`
     const result = await api.patch<{ cascadedTerminalId?: string }>(`/api/sessions/${encodeURIComponent(compositeKey)}`, { titleOverride, summaryOverride })
     if (result.cascadedTerminalId && titleOverride) {
-      dispatch(updatePaneTitleByTerminalId({ terminalId: result.cascadedTerminalId, title: titleOverride }))
+      dispatch(syncPaneTitleByTerminalId({ terminalId: result.cascadedTerminalId, title: titleOverride }))
     }
     await refresh()
   }
