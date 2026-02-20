@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import type { IDisposable } from '@xterm/xterm'
 import { createTerminalRuntime } from '@/components/terminal/terminal-runtime'

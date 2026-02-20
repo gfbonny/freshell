@@ -31,6 +31,13 @@ function loadWebglAddonModule() {
   return webglAddonModulePromise
 }
 
+function supportsWebglRuntime() {
+  if (typeof navigator !== 'undefined' && /jsdom/i.test(navigator.userAgent)) {
+    return false
+  }
+  return true
+}
+
 export function createTerminalRuntime({
   terminal,
   enableWebgl,
@@ -69,7 +76,7 @@ export function createTerminalRuntime({
     searchAddon = new SearchAddon()
     terminal.loadAddon(searchAddon)
 
-    if (!enableWebgl) return
+    if (!enableWebgl || !supportsWebglRuntime()) return
     void loadWebglAddonModule()
       .then(({ WebglAddon }) => {
         if (disposed || webglAddon) return
