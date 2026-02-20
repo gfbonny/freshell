@@ -472,16 +472,19 @@ async function main() {
     res.json({ directories })
   })
 
-  const normalizeSettingsPatch = (patch: SettingsPatch) => {
-    if (Object.prototype.hasOwnProperty.call(patch, 'defaultCwd')) {
+  type NormalizedSettingsPatch = Omit<SettingsPatch, 'defaultCwd'> & { defaultCwd?: string }
+
+  const normalizeSettingsPatch = (patch: SettingsPatch): NormalizedSettingsPatch => {
+    const normalized = { ...patch }
+    if (Object.prototype.hasOwnProperty.call(normalized, 'defaultCwd')) {
       const raw = patch.defaultCwd
       if (raw === null) {
-        patch.defaultCwd = undefined
+        delete normalized.defaultCwd
       } else if (typeof raw === 'string' && raw.trim() === '') {
-        patch.defaultCwd = undefined
+        delete normalized.defaultCwd
       }
     }
-    return patch
+    return normalized as NormalizedSettingsPatch
   }
 
   app.patch('/api/settings', async (req, res) => {

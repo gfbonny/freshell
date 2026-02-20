@@ -1391,7 +1391,7 @@ describe('TerminalView lifecycle updates', () => {
 
       expect(term.clear).toHaveBeenCalledTimes(1)
       expect(term.write).toHaveBeenCalledTimes(1)
-      expect(term.write).toHaveBeenCalledWith('abcdef')
+      expect(term.write).toHaveBeenCalledWith('abcdef', expect.any(Function))
     })
 
     it('keeps attaching state pending after terminal.created with snapshotChunked until end arrives', async () => {
@@ -1412,7 +1412,7 @@ describe('TerminalView lifecycle updates', () => {
       messageHandler!({ type: 'terminal.attached.chunk', terminalId: 'term-chunk-created', chunk: 'ok!' })
       messageHandler!({ type: 'terminal.attached.end', terminalId: 'term-chunk-created', totalCodeUnits: 3, totalChunks: 1 })
 
-      expect(term.write).toHaveBeenCalledWith('ok!')
+      expect(term.write).toHaveBeenCalledWith('ok!', expect.any(Function))
     })
 
     it('drops snapshot when totalCodeUnits mismatches and triggers guarded auto-reattach', async () => {
@@ -1457,7 +1457,7 @@ describe('TerminalView lifecycle updates', () => {
       messageHandler!({ type: 'terminal.attached.chunk', terminalId, chunk: 'abc' })
       messageHandler!({ type: 'terminal.attached.end', terminalId, totalCodeUnits: 3, totalChunks: 1 })
 
-      expect(term.write).toHaveBeenCalledWith('abc')
+      expect(term.write).toHaveBeenCalledWith('abc', expect.any(Function))
       expect(warnSpy).toHaveBeenCalled()
       warnSpy.mockRestore()
     })
@@ -1484,7 +1484,7 @@ describe('TerminalView lifecycle updates', () => {
       messageHandler!({ type: 'terminal.attached.end', terminalId, totalCodeUnits: 3, totalChunks: 1 })
 
       expect(term.write).toHaveBeenCalledTimes(1)
-      expect(term.write).toHaveBeenCalledWith('new')
+      expect(term.write).toHaveBeenCalledWith('new', expect.any(Function))
     })
 
     it('times out chunked attach and auto-reattaches at most once per terminal per generation', async () => {
@@ -1645,7 +1645,7 @@ describe('TerminalView lifecycle updates', () => {
       })
 
       expect(term.clear).toHaveBeenCalled()
-      expect(term.write).toHaveBeenCalledWith('hello world')
+      expect(term.write).toHaveBeenCalledWith('hello world', expect.any(Function))
       expect(store.getState().turnCompletion.lastEvent).toBeNull()
     })
 
@@ -1685,7 +1685,7 @@ describe('TerminalView lifecycle updates', () => {
       })
 
       expect(term.clear).toHaveBeenCalled()
-      expect(term.write).toHaveBeenCalledWith('snapshot')
+      expect(term.write).toHaveBeenCalledWith('snapshot', expect.any(Function))
       expect(store.getState().turnCompletion.lastEvent).toBeNull()
     })
 
@@ -1767,7 +1767,7 @@ describe('TerminalView lifecycle updates', () => {
       })
 
       expect(term.clear).toHaveBeenCalled()
-      expect(term.write).toHaveBeenCalledWith('attached content')
+      expect(term.write).toHaveBeenCalledWith('attached content', expect.any(Function))
       expect(store.getState().turnCompletion.lastEvent).toBeNull()
     })
   })

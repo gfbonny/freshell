@@ -1,5 +1,5 @@
 import path from 'path'
-import type { TerminalMode, TerminalRegistry } from './terminal-registry.js'
+import type { TerminalMode } from './terminal-registry.js'
 import type { CodingCliSession, CodingCliProviderName, TokenSummary } from './coding-cli/types.js'
 import {
   resolveGitRepoRoot,
@@ -9,7 +9,12 @@ import {
 
 type TerminalProvider = Exclude<TerminalMode, 'shell'>
 
-type TerminalListRecord = ReturnType<TerminalRegistry['list']>[number]
+type TerminalSeedRecord = {
+  terminalId: string
+  mode: TerminalMode
+  resumeSessionId?: string
+  cwd?: string
+}
 
 export type TerminalMeta = {
   terminalId: string
@@ -121,7 +126,7 @@ export class TerminalMetadataService {
     return Array.from(this.byTerminalId.values())
   }
 
-  async seedFromTerminal(record: TerminalListRecord): Promise<TerminalMeta | undefined> {
+  async seedFromTerminal(record: TerminalSeedRecord): Promise<TerminalMeta | undefined> {
     const provider = isTerminalProvider(record.mode) ? record.mode : undefined
     const sessionId = provider ? record.resumeSessionId : undefined
     return this.upsert(record.terminalId, {
