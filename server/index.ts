@@ -25,6 +25,7 @@ import { AI_CONFIG, PROMPTS, stripAnsi } from './ai-prompts.js'
 import { migrateSettingsSortMode } from './settings-migrate.js'
 import { filesRouter } from './files-router.js'
 import { getSessionRepairService } from './session-scanner/service.js'
+import { cascadeTerminalRenameToSession, cascadeSessionRenameToTerminal } from './rename-cascade.js'
 import { SdkBridge } from './sdk-bridge.js'
 import { createClientLogsRouter } from './client-logs.js'
 import { createStartupState } from './startup-state.js'
@@ -592,8 +593,32 @@ async function main() {
 	      archived,
 	      createdAtOverride,
 	    })
+
+    // Cascade: if this session is running in a terminal, also rename the terminal
+    const cleanTitle = cleanString(titleOverride)
+    let cascadedTerminalId: string | undefined
+    if (cleanTitle) {
+      try {
+        const parts = compositeKey.split(':')
+        const sessionProvider = (parts.length >= 2 ? parts[0] : provider) as CodingCliProviderName
+        const sessionId = parts.length >= 2 ? parts.slice(1).join(':') : rawId
+        cascadedTerminalId = await cascadeSessionRenameToTerminal(
+          terminalMetadata.list(),
+          sessionProvider,
+          sessionId,
+          cleanTitle,
+        )
+        if (cascadedTerminalId) {
+          registry.updateTitle(cascadedTerminalId, cleanTitle)
+          wsHandler.broadcast({ type: 'terminal.list.updated' })
+        }
+      } catch (err) {
+        log.warn({ err, compositeKey }, 'Cascade rename to terminal failed (non-fatal)')
+      }
+    }
+
 	    await codingCliIndexer.refresh()
-	    res.json(next)
+	    res.json({ ...next, cascadedTerminalId })
 	  })
 
   app.delete('/api/sessions/:sessionId', async (req, res) => {
@@ -641,6 +666,19 @@ async function main() {
     // Update live registry copies for immediate UI update.
     if (typeof titleOverride === 'string' && titleOverride.trim()) registry.updateTitle(terminalId, titleOverride.trim())
     if (typeof descriptionOverride === 'string') registry.updateDescription(terminalId, descriptionOverride)
+
+    // Cascade: if this terminal has a coding CLI session, also rename the session
+    if (typeof titleOverride === 'string' && titleOverride.trim()) {
+      try {
+        const meta = terminalMetadata.list().find((m) => m.terminalId === terminalId)
+        await cascadeTerminalRenameToSession(meta, titleOverride.trim())
+        if (meta?.provider && meta?.sessionId) {
+          await codingCliIndexer.refresh()
+        }
+      } catch (err) {
+        log.warn({ err, terminalId }, 'Cascade rename to session failed (non-fatal)')
+      }
+    }
 
     wsHandler.broadcast({ type: 'terminal.list.updated' })
     res.json(next)
