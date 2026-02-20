@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils'
 import { getWsClient } from '@/lib/ws-client'
 import { api } from '@/lib/api'
 import { derivePaneTitle } from '@/lib/derivePaneTitle'
+import { shouldSyncRenameToServer } from '@/lib/rename-utils'
 import { getTabDirectoryPreference } from '@/lib/tab-directory-preference'
 import { formatPaneRuntimeLabel, formatPaneRuntimeTooltip } from '@/lib/format-terminal-title-meta'
 import { snap1D, collectCollinearSnapTargets, convertThresholdToLocal } from '@/lib/pane-snap'
@@ -164,11 +165,22 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
     const trimmed = renameValue.trim()
     if (trimmed) {
       dispatch(updatePaneTitle({ tabId, paneId: renamingPaneId, title: trimmed }))
+
+      // For coding CLI panes, persist the rename to the server so it
+      // cascades as a session title override.
+      if (node.type === 'leaf' && node.content.kind === 'terminal') {
+        const { mode, terminalId } = node.content
+        if (shouldSyncRenameToServer(mode, terminalId)) {
+          api.patch(`/api/terminals/${encodeURIComponent(terminalId!)}`, {
+            titleOverride: trimmed,
+          }).catch(() => {}) // Best-effort; UI already updated via Redux
+        }
+      }
     }
     // Empty value keeps the original title (no dispatch)
     setRenamingPaneId(null)
     setRenameValue('')
-  }, [dispatch, tabId, renamingPaneId, renameValue])
+  }, [dispatch, tabId, renamingPaneId, renameValue, node])
 
   const handleRenameKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' || e.key === 'Escape') {
