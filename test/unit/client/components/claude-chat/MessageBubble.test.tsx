@@ -19,11 +19,11 @@ describe('MessageBubble', () => {
     expect(article.className).toContain('border-l-[3px]')
   })
 
-  it('renders assistant text with blue left border and markdown', () => {
+  it('renders assistant text with blue left border and markdown', async () => {
     const { container } = render(
       <MessageBubble role="assistant" content={[{ type: 'text', text: '**Bold text**' }]} />
     )
-    expect(screen.getByText('Bold text')).toBeInTheDocument()
+    expect(await screen.findByText('Bold text')).toBeInTheDocument()
     const article = container.querySelector('[role="article"]')!
     expect(article.className).toContain('border-l-2')
   })
@@ -56,7 +56,7 @@ describe('MessageBubble', () => {
     expect(screen.getByText('Bash:')).toBeInTheDocument()
   })
 
-  it('renders timestamp and model', () => {
+  it('renders timestamp and model', async () => {
     render(
       <MessageBubble
         role="assistant"
@@ -66,6 +66,7 @@ describe('MessageBubble', () => {
         showTimecodes={true}
       />
     )
+    await screen.findByText('Hi')
     expect(screen.getByText('claude-sonnet-4-5')).toBeInTheDocument()
   })
 
@@ -135,7 +136,7 @@ describe('MessageBubble display toggles', () => {
   const toolUseBlock: ChatContentBlock = { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }
   const toolResultBlock: ChatContentBlock = { type: 'tool_result', tool_use_id: 't1', content: 'file.txt' }
 
-  it('hides thinking blocks when showThinking is false', () => {
+  it('hides thinking blocks when showThinking is false', async () => {
     render(
       <MessageBubble
         role="assistant"
@@ -144,7 +145,7 @@ describe('MessageBubble display toggles', () => {
       />
     )
     expect(screen.queryByText(/Let me think/)).not.toBeInTheDocument()
-    expect(screen.getByText('Hello world')).toBeInTheDocument()
+    expect(await screen.findByText('Hello world')).toBeInTheDocument()
   })
 
   it('shows thinking blocks when showThinking is true', () => {

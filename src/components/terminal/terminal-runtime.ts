@@ -1,7 +1,6 @@
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import type { ISearchOptions, ISearchResultChangeEvent } from '@xterm/addon-search'
-import { WebglAddon } from '@xterm/addon-webgl'
 import type { IDisposable, Terminal } from '@xterm/xterm'
 
 export type SearchOptions = ISearchOptions
@@ -23,14 +22,27 @@ type CreateTerminalRuntimeParams = {
   enableWebgl: boolean
 }
 
+let webglAddonModulePromise: Promise<typeof import('@xterm/addon-webgl')> | null = null
+
+function loadWebglAddonModule() {
+  if (!webglAddonModulePromise) {
+    webglAddonModulePromise = import('@xterm/addon-webgl').catch((error) => {
+      webglAddonModulePromise = null
+      throw error
+    })
+  }
+  return webglAddonModulePromise
+}
+
 export function createTerminalRuntime({
   terminal,
   enableWebgl,
 }: CreateTerminalRuntimeParams): TerminalRuntime {
   let attached = false
+  let disposed = false
   let fitAddon: FitAddon | null = null
   let searchAddon: SearchAddon | null = null
-  let webglAddon: WebglAddon | null = null
+  let webglAddon: { dispose: () => void; onContextLoss: (handler: () => void) => IDisposable } | null = null
   let webglLossDisposable: IDisposable | null = null
   let isWebglActive = false
 
@@ -51,7 +63,7 @@ export function createTerminalRuntime({
   }
 
   const attachAddons = () => {
-    if (attached) return
+    if (attached || disposed) return
     attached = true
 
     fitAddon = new FitAddon()
@@ -61,16 +73,28 @@ export function createTerminalRuntime({
     terminal.loadAddon(searchAddon)
 
     if (!enableWebgl) return
-    try {
-      webglAddon = new WebglAddon()
-      terminal.loadAddon(webglAddon)
-      isWebglActive = true
-      webglLossDisposable = webglAddon.onContextLoss(() => {
+    void loadWebglAddonModule()
+      .then(({ WebglAddon }) => {
+        if (disposed || webglAddon) return
+        try {
+          const addon = new WebglAddon()
+          terminal.loadAddon(addon)
+          if (disposed) {
+            addon.dispose()
+            return
+          }
+          webglAddon = addon
+          isWebglActive = true
+          webglLossDisposable = webglAddon.onContextLoss(() => {
+            disableWebgl()
+          })
+        } catch {
+          disableWebgl()
+        }
+      })
+      .catch(() => {
         disableWebgl()
       })
-    } catch {
-      disableWebgl()
-    }
   }
 
   return {
@@ -94,6 +118,7 @@ export function createTerminalRuntime({
       return searchAddon.onDidChangeResults(callback)
     },
     dispose: () => {
+      disposed = true
       disableWebgl()
       fitAddon = null
       searchAddon = null

@@ -1,24 +1,26 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
 import MarkdownPreview from '../../../../../src/components/panes/MarkdownPreview'
 
 afterEach(() => cleanup())
 
 describe('MarkdownPreview', () => {
-  it('renders markdown as HTML', () => {
+  it('renders markdown as HTML', async () => {
     render(<MarkdownPreview content="# Hello World" />)
 
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Hello World')
+    await vi.dynamicImportSettled()
+    expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('Hello World')
   })
 
-  it('renders links', () => {
+  it('renders links', async () => {
     render(<MarkdownPreview content="[Click here](https://example.com)" />)
 
-    const link = screen.getByRole('link', { name: /click here/i })
+    await vi.dynamicImportSettled()
+    const link = await screen.findByRole('link', { name: /click here/i })
     expect(link).toHaveAttribute('href', 'https://example.com')
   })
 
-  it('renders code blocks', () => {
+  it('renders code blocks', async () => {
     render(
       <MarkdownPreview
         content={`\`\`\`js
@@ -27,7 +29,8 @@ const x = 1
       />
     )
 
-    expect(screen.getByText('const x = 1')).toBeInTheDocument()
+    await vi.dynamicImportSettled()
+    expect(await screen.findByText('const x = 1')).toBeInTheDocument()
   })
 
   it('renders empty content without error', () => {
@@ -53,7 +56,7 @@ const x = 1
     expect(outer).not.toHaveClass('dark:bg-gray-900')
   })
 
-  it('renders GFM tables', () => {
+  it('renders GFM tables', async () => {
     render(
       <MarkdownPreview
         content={`
@@ -64,7 +67,8 @@ const x = 1
       />
     )
 
-    expect(screen.getByRole('table')).toBeInTheDocument()
+    await vi.dynamicImportSettled()
+    expect(await screen.findByRole('table')).toBeInTheDocument()
   })
 
   describe('XSS sanitization', () => {

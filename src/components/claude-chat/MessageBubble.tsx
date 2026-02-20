@@ -1,8 +1,7 @@
 import { memo, useMemo } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import { cn } from '@/lib/utils'
 import type { ChatContentBlock } from '@/store/claudeChatTypes'
+import { LazyMarkdown } from '@/components/markdown/LazyMarkdown'
 import ToolBlock from './ToolBlock'
 
 /** Strip SDK-injected <system-reminder>...</system-reminder> tags from text. */
@@ -86,7 +85,10 @@ function MessageBubble({
           }
           return (
             <div key={i} className="prose prose-sm dark:prose-invert max-w-none">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.text}</ReactMarkdown>
+              <LazyMarkdown
+                content={block.text}
+                fallback={<p className="whitespace-pre-wrap">{block.text}</p>}
+              />
             </div>
           )
         }
