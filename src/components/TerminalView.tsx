@@ -36,6 +36,7 @@ import {
 } from '@/lib/terminal-osc52'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
 import { resolveTerminalFontFamily } from '@/lib/terminal-fonts'
+import { ConnectionErrorOverlay } from '@/components/terminal/ConnectionErrorOverlay'
 import { useChunkedAttach } from '@/components/terminal/useChunkedAttach'
 import { Osc52PromptModal } from '@/components/terminal/Osc52PromptModal'
 import { TerminalSearchBar } from '@/components/terminal/TerminalSearchBar'
@@ -136,6 +137,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   const activeTabId = useAppSelector((s) => s.tabs.activeTabId)
   const activePaneId = useAppSelector((s) => s.panes.activePane[tabId])
   const localServerInstanceId = useAppSelector((s) => s.connection.serverInstanceId)
+  const connectionErrorCode = useAppSelector((s) => s.connection.lastErrorCode)
   const settings = useAppSelector((s) => s.settings.settings)
   const hasAttention = useAppSelector((s) => !!s.turnCompletion?.attentionByTab?.[tabId])
   const hasAttentionRef = useRef(hasAttention)
@@ -1359,7 +1361,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     return null
   }
 
-  const showSpinner = terminalContent.status === 'creating' || isAttaching
+  const showSpinner = (terminalContent.status === 'creating' || isAttaching) && connectionErrorCode !== 4003
 
   return (
     <div
@@ -1423,6 +1425,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           </div>
         </div>
       )}
+      <ConnectionErrorOverlay />
       {searchOpen && (
         <TerminalSearchBar
           query={searchQuery}
