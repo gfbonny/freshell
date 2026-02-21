@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Use `@superpowers:executing-plans` for execution handoff.
 
-**Goal:** Replace reconnect-heavy terminal transport with a sequence-based, bounded, non-destructive streaming architecture so terminals remain interactive on slow/flaky links (SSH-like behavior).
+**Goal:** Replace reconnect-heavy terminal transport with a sequence-based, bounded, non-destructive streaming architecture so terminals stay interactive and low-latency on slow/flaky links.
 
 **Architecture:** Introduce a server-side terminal stream broker that decouples PTY lifecycle from WebSocket transport, uses sequence replay (`sinceSeq`) instead of snapshot reattach, and applies bounded per-client output queues with explicit gap signaling (instead of routine socket closes). Perform a hard protocol cutover (no backward compatibility), plus a deterministic client upgrade path that clears/migrates stale persisted data while preserving auth token/cookie continuity.
 
@@ -41,6 +41,7 @@
 5. `terminal.output.gap.fromSeq` and `.toSeq` are inclusive dropped ranges.
 6. `headSeq` is the current inclusive high-water mark at the end of attach replay assembly.
 7. Legacy hello capabilities for chunk attach (`terminalAttachChunkV1`) are removed in v2; no downgrade negotiation.
+8. `sinceSeq = 0` and `sinceSeq = undefined` both mean "no output rendered yet; replay from first available sequence."
 
 ---
 
@@ -65,7 +66,7 @@ This guarantees no output loss/reorder across the attach boundary, replacing cur
 - Modify: `shared/ws-protocol.ts`
 - Modify: `server/ws-handler.ts`
 - Modify: `src/lib/ws-client.ts`
-- Test: `test/unit/server/ws-handler-sdk.test.ts`
+- Test: `test/server/ws-edge-cases.test.ts`
 - Test: `test/unit/client/lib/ws-client.test.ts`
 
 **Step 1: Write failing protocol/version tests**
@@ -86,7 +87,7 @@ expect(error.code).toBe('PROTOCOL_MISMATCH')
 Run:
 
 ```bash
-npm test -- test/unit/server/ws-handler-sdk.test.ts -t "PROTOCOL_MISMATCH"
+npm test -- test/server/ws-edge-cases.test.ts -t "PROTOCOL_MISMATCH|protocol version"
 npm test -- test/unit/client/lib/ws-client.test.ts -t "protocol version"
 ```
 
@@ -113,6 +114,7 @@ export const HelloSchema = z.object({
 export const TerminalAttachSchema = z.object({
   type: z.literal('terminal.attach'),
   terminalId: z.string().min(1),
+  // 0 or undefined => replay from first available sequence
   sinceSeq: z.number().int().nonnegative().optional(),
 })
 ```
@@ -156,7 +158,7 @@ In `src/lib/ws-client.ts`, include `protocolVersion: WS_PROTOCOL_VERSION` in hel
 Run:
 
 ```bash
-npm test -- test/unit/server/ws-handler-sdk.test.ts -t "PROTOCOL_MISMATCH"
+npm test -- test/server/ws-edge-cases.test.ts -t "PROTOCOL_MISMATCH|protocol version"
 npm test -- test/unit/client/lib/ws-client.test.ts -t "protocol version"
 ```
 
@@ -165,7 +167,7 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add shared/ws-protocol.ts server/ws-handler.ts src/lib/ws-client.ts test/unit/server/ws-handler-sdk.test.ts test/unit/client/lib/ws-client.test.ts
+git add shared/ws-protocol.ts server/ws-handler.ts src/lib/ws-client.ts test/server/ws-edge-cases.test.ts test/unit/client/lib/ws-client.test.ts
 git commit -m "feat(protocol): enforce websocket protocol v2 with hard mismatch rejection and attach sinceSeq contract"
 ```
 
@@ -226,13 +228,25 @@ export function runStorageMigration(): void {
 }
 ```
 
-In `src/main.tsx`, make bootstrap order explicit:
+In `src/main.tsx`, make bootstrap order explicit using an async bootstrap function (not top-level await):
 
 ```ts
-initializeAuthToken()
-runStorageMigration()
-const { store } = await import('@/store/store')
+async function bootstrap() {
+  initializeAuthToken()
+  runStorageMigration()
+  const { store } = await import('@/store/store')
+
+  ReactDOM.createRoot(document.getElementById('root')!).render(
+    <Provider store={store}>
+      <App />
+    </Provider>,
+  )
+}
+
+void bootstrap()
 ```
+
+Keep existing pre-render side effects (`createClientLogger().installConsoleCapture()`, `initClientPerfLogging()`, `registerServiceWorker()`) before `void bootstrap()`.
 
 In `src/store/store.ts`, remove side-effect import of `./storage-migration` so migration is not implicit.
 
@@ -367,7 +381,7 @@ Expected: FAIL.
 Create broker-facing event types in `server/terminal-stream/registry-events.ts` and emit them from `TerminalRegistry`:
 
 ```ts
-this.emit('terminal.output', {
+this.emit('terminal.output.raw', {
   terminalId,
   data,
   at: Date.now(),
@@ -599,7 +613,7 @@ Expected: FAIL.
   - do not close for ordinary queue overflow
   - close with `4008` only when `ws.bufferedAmount > TERMINAL_WS_CATASTROPHIC_BUFFERED_BYTES` continuously for `TERMINAL_WS_CATASTROPHIC_STALL_MS`
 
-In `server/ws-handler.ts`, remove chunked attach snapshot path (`terminal.attached*`) and call broker APIs.
+In `server/ws-handler.ts`, remove routing/invocation of legacy chunked attach snapshot flow (`terminal.attached*`) and delegate attach to broker APIs. Keep residual helper/constant/schema cleanup for Task 10.
 
 **Step 4: Run tests to verify pass**
 
@@ -705,7 +719,9 @@ git commit -m "feat(client): switch terminal view to v2 sequence stream and remo
 - Modify: `src/components/TerminalView.tsx`
 - Modify: `src/store/connectionSlice.ts`
 - Modify: `src/components/terminal/ConnectionErrorOverlay.tsx`
+- Modify: `src/lib/ws-client.ts`
 - Test: `test/unit/client/components/TerminalView.lifecycle.test.tsx`
+- Test: `test/unit/client/lib/ws-client.test.ts`
 - Update: `docs/index.html`
 
 **Step 1: Write failing UX tests**
@@ -727,6 +743,7 @@ Run:
 
 ```bash
 npm test -- test/unit/client/components/TerminalView.lifecycle.test.tsx -t "non-blocking reconnect"
+npm test -- test/unit/client/lib/ws-client.test.ts -t "queues input while disconnected"
 ```
 
 Expected: FAIL.
@@ -744,6 +761,19 @@ Separate state presentation:
 - `connection.status === 'ready'` + attach replay in progress: inline "recovering output" status (non-blocking).
 - keep `ConnectionErrorOverlay` only for fatal limits (`4003`, protocol mismatch fatal, auth fatal).
 
+In `src/lib/ws-client.ts`, make queueing behavior explicit for disconnected/connecting states:
+
+```ts
+if (this._state !== 'ready') {
+  // queue terminal.input and control messages; flush after ready
+  if (this.pendingMessages.length >= this.maxQueueSize) {
+    this.pendingMessages.shift()
+  }
+  this.pendingMessages.push(msg)
+  return
+}
+```
+
 Update `docs/index.html` mock to reflect inline degraded status treatment.
 
 **Step 4: Run tests to verify pass**
@@ -752,6 +782,7 @@ Run:
 
 ```bash
 npm test -- test/unit/client/components/TerminalView.lifecycle.test.tsx
+npm test -- test/unit/client/lib/ws-client.test.ts -t "queues input while disconnected"
 ```
 
 Expected: PASS.
@@ -759,7 +790,7 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add src/components/TerminalView.tsx src/store/connectionSlice.ts src/components/terminal/ConnectionErrorOverlay.tsx docs/index.html test/unit/client/components/TerminalView.lifecycle.test.tsx
+git add src/components/TerminalView.tsx src/store/connectionSlice.ts src/components/terminal/ConnectionErrorOverlay.tsx src/lib/ws-client.ts docs/index.html test/unit/client/components/TerminalView.lifecycle.test.tsx test/unit/client/lib/ws-client.test.ts
 git commit -m "feat(ui): make terminal reconnect state non-blocking and align mock docs with degraded-stream status"
 ```
 
@@ -797,7 +828,7 @@ Expected: FAIL.
 **Step 3: Remove dead code and env docs**
 
 Remove/replace:
-- `terminal.attached*` stream sender paths
+- remaining `terminal.attached*` supporting code after Task 7 cutover (legacy message types/schemas/constants/helpers)
 - attach chunk constants and timeouts
 - duplicated terminal snapshot chunking helpers in `server/ws-handler.ts` and `server/ws-chunking.ts` (remove terminal snapshot chunking implementation; retain non-terminal sessions chunking only if still used)
 - legacy docs for `MAX_WS_ATTACH_CHUNK_BYTES` / `WS_ATTACH_FRAME_SEND_TIMEOUT_MS` where no longer used for terminal replay
