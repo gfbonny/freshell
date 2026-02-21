@@ -47,6 +47,7 @@ import {
   SdkAttachSchema,
   SdkSetModelSchema,
   SdkSetPermissionModeSchema,
+  WS_PROTOCOL_VERSION,
 } from '../shared/ws-protocol.js'
 
 const MAX_CONNECTIONS = Number(process.env.MAX_CONNECTIONS || 50)
@@ -87,6 +88,7 @@ const CLOSE_CODES = {
   MAX_CONNECTIONS: 4003,
   BACKPRESSURE: 4008,
   SERVER_SHUTDOWN: 4009,
+  PROTOCOL_MISMATCH: 4010,
 }
 
 
@@ -764,20 +766,18 @@ export class WsHandler {
           type: 'terminal.created'
           requestId: string
           terminalId: string
-          snapshot: string
           createdAt: number
           effectiveResumeSessionId?: string
         } = {
           type: 'terminal.created',
           requestId: created.requestId,
           terminalId,
-          snapshot,
           createdAt: created.createdAt,
         }
         if (created.effectiveResumeSessionId) {
           createdMsg.effectiveResumeSessionId = created.effectiveResumeSessionId
         }
-        return await this.queueAttachFrame(ws, createdMsg)
+        if (!await this.queueAttachFrame(ws, createdMsg)) return false
       }
       return await this.queueAttachFrame(ws, { type: 'terminal.attached', terminalId, snapshot })
     }
@@ -808,14 +808,12 @@ export class WsHandler {
           type: 'terminal.created'
           requestId: string
           terminalId: string
-          snapshotChunked: true
           createdAt: number
           effectiveResumeSessionId?: string
         } = {
           type: 'terminal.created',
           requestId: created.requestId,
           terminalId,
-          snapshotChunked: true,
           createdAt: created.createdAt,
         }
         if (created.effectiveResumeSessionId) {
@@ -1002,6 +1000,15 @@ export class WsHandler {
         return
       }
 
+      if (msg?.type === 'hello' && msg?.protocolVersion !== WS_PROTOCOL_VERSION) {
+        this.sendError(ws, {
+          code: 'PROTOCOL_MISMATCH',
+          message: `Expected protocol version ${WS_PROTOCOL_VERSION}`,
+        })
+        ws.close(CLOSE_CODES.PROTOCOL_MISMATCH, 'Protocol version mismatch')
+        return
+      }
+
       const parsed = ClientMessageSchema.safeParse(msg)
       if (!parsed.success) {
         this.sendError(ws, { code: 'INVALID_MESSAGE', message: parsed.error.message, requestId: msg?.requestId })
@@ -1027,7 +1034,7 @@ export class WsHandler {
         }
         state.authenticated = true
         state.supportsSessionsPatchV1 = !!m.capabilities?.sessionsPatchV1
-        state.supportsTerminalAttachChunkV1 = !!m.capabilities?.terminalAttachChunkV1
+        state.supportsTerminalAttachChunkV1 = false
         if (typeof m.client?.mobile === 'boolean') {
           ws.isMobileClient = m.client.mobile
         }

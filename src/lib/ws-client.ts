@@ -24,6 +24,7 @@ type TabsSyncQueryPayload = {
 }
 
 const CONNECTION_TIMEOUT_MS = 10_000
+const WS_PROTOCOL_VERSION = 2
 const perfConfig = getClientPerfConfig()
 
 export class WsClient {
@@ -121,7 +122,8 @@ export class WsClient {
         this.ws?.send(JSON.stringify({
           type: 'hello',
           token,
-          capabilities: { sessionsPatchV1: true, terminalAttachChunkV1: true },
+          protocolVersion: WS_PROTOCOL_VERSION,
+          capabilities: { sessionsPatchV1: true },
           ...extensions,
         }))
       }
@@ -182,6 +184,15 @@ export class WsClient {
           return
         }
 
+        if (msg.type === 'error' && msg.code === 'PROTOCOL_MISMATCH') {
+          this.clearReadyTimeout()
+          this.intentionalClose = true
+          const err = new Error('Protocol version mismatch')
+          ;(err as any).wsCloseCode = 4010
+          finishReject(err)
+          return
+        }
+
         if (perfConfig.enabled) {
           const start = performance.now()
           this.messageHandlers.forEach((handler) => handler(msg))
@@ -223,6 +234,14 @@ export class WsClient {
           this.intentionalClose = true
           const err = new Error('Server busy: max connections reached')
           ;(err as any).wsCloseCode = 4003
+          finishReject(err)
+          return
+        }
+
+        if (event.code === 4010) {
+          this.intentionalClose = true
+          const err = new Error('Protocol version mismatch')
+          ;(err as any).wsCloseCode = 4010
           finishReject(err)
           return
         }

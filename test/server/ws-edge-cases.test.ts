@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi, beforeEach, afterEach } from 'vitest'
 import http from 'http'
 import WebSocket from 'ws'
+import { WS_PROTOCOL_VERSION } from '../../shared/ws-protocol'
 
 const TEST_TIMEOUT_MS = 30_000
 const HOOK_TIMEOUT_MS = 30_000
@@ -292,6 +293,7 @@ describe('WebSocket edge cases', () => {
 
   // Helper: create authenticated connection
   async function createAuthenticatedConnection(opts?: {
+    protocolVersion?: number
     capabilities?: {
       sessionsPatchV1?: boolean
       terminalAttachChunkV1?: boolean
@@ -312,6 +314,7 @@ describe('WebSocket edge cases', () => {
     ws.send(JSON.stringify({
       type: 'hello',
       token: 'testtoken-testtoken',
+      protocolVersion: opts?.protocolVersion ?? WS_PROTOCOL_VERSION,
       ...(opts?.capabilities ? { capabilities: opts.capabilities } : {}),
     }))
 
@@ -481,6 +484,42 @@ describe('WebSocket edge cases', () => {
   })
 
   describe('Messages arriving out of order', () => {
+    it('rejects hello without protocol version', async () => {
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`)
+      await new Promise<void>((resolve) => ws.on('open', () => resolve()))
+
+      ws.send(JSON.stringify({ type: 'hello', token: 'testtoken-testtoken' }))
+
+      const error = await waitForMessage(ws, (m) => m.type === 'error')
+      expect(error.code).toBe('PROTOCOL_MISMATCH')
+      expect(error.message).toContain('protocol version')
+
+      const closeCode = await new Promise<number>((resolve) => {
+        ws.on('close', (code) => resolve(code))
+      })
+      expect(closeCode).toBe(4010)
+    })
+
+    it('rejects hello with mismatched protocol version', async () => {
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`)
+      await new Promise<void>((resolve) => ws.on('open', () => resolve()))
+
+      ws.send(JSON.stringify({
+        type: 'hello',
+        token: 'testtoken-testtoken',
+        protocolVersion: WS_PROTOCOL_VERSION - 1,
+      }))
+
+      const error = await waitForMessage(ws, (m) => m.type === 'error')
+      expect(error.code).toBe('PROTOCOL_MISMATCH')
+      expect(error.message).toContain('protocol version')
+
+      const closeCode = await new Promise<number>((resolve) => {
+        ws.on('close', (code) => resolve(code))
+      })
+      expect(closeCode).toBe(4010)
+    })
+
     it('rejects messages before hello', async () => {
       const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`)
       await new Promise<void>((resolve) => ws.on('open', () => resolve()))
@@ -635,6 +674,8 @@ describe('WebSocket edge cases', () => {
 
       const created = await waitForMessage(ws, (m) => m.type === 'terminal.created' && m.requestId === 'with-extra')
       expect(created.terminalId).toMatch(/^term_/)
+      expect(created.snapshot).toBeUndefined()
+      expect(created.snapshotChunked).toBeUndefined()
 
       close()
     })

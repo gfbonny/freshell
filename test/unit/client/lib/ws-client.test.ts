@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { WsClient, getWsClient, resetWsClientForTests } from '../../../../src/lib/ws-client'
+import { WS_PROTOCOL_VERSION } from '../../../../shared/ws-protocol'
 
 class MockWebSocket {
   static OPEN = 1
@@ -78,6 +79,21 @@ describe('WsClient.connect', () => {
     expect(resolved).toBe(true)
   })
 
+  it('sends protocol version in hello and omits legacy terminalAttachChunk capability', async () => {
+    const c = new WsClient('ws://example/ws')
+    const p = c.connect()
+    expect(MockWebSocket.instances).toHaveLength(1)
+    MockWebSocket.instances[0]._open()
+
+    const hello = JSON.parse(MockWebSocket.instances[0].sent[0])
+    expect(hello.type).toBe('hello')
+    expect(hello.protocolVersion).toBe(WS_PROTOCOL_VERSION)
+    expect(hello.capabilities).toEqual({ sessionsPatchV1: true })
+
+    MockWebSocket.instances[0]._message({ type: 'ready' })
+    await p
+  })
+
   it('treats HELLO_TIMEOUT as transient and schedules reconnect', async () => {
     const setTimeoutSpy = vi.spyOn(window, 'setTimeout')
 
@@ -130,6 +146,28 @@ describe('WsClient.connect', () => {
     expect(reconnectDelays).toContain(1000)
     // No exponential backoff — max reconnect delay should be 1000ms
     expect(Math.max(...reconnectDelays)).toBe(1000)
+  })
+
+  it('treats protocol version mismatch as fatal and does not reconnect', async () => {
+    const setTimeoutSpy = vi.spyOn(window, 'setTimeout')
+
+    const c = new WsClient('ws://example/ws')
+    const p = c.connect()
+    expect(MockWebSocket.instances).toHaveLength(1)
+
+    MockWebSocket.instances[0]._open()
+    MockWebSocket.instances[0]._close(4010, 'Protocol version mismatch')
+
+    await expect(p).rejects.toThrow(/protocol version/i)
+    await Promise.resolve()
+
+    const reconnectDelays = setTimeoutSpy.mock.calls
+      .map((call) => call[1])
+      .filter((d): d is number => typeof d === 'number' && d < 10000)
+    expect(reconnectDelays).toHaveLength(0)
+
+    vi.advanceTimersByTime(30_000)
+    expect(MockWebSocket.instances).toHaveLength(1)
   })
 
   it('disconnect clears pending reconnect timers', async () => {
