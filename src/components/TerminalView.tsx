@@ -37,7 +37,6 @@ import {
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
 import { resolveTerminalFontFamily } from '@/lib/terminal-fonts'
 import { ConnectionErrorOverlay } from '@/components/terminal/ConnectionErrorOverlay'
-import { useChunkedAttach } from '@/components/terminal/useChunkedAttach'
 import { Osc52PromptModal } from '@/components/terminal/Osc52PromptModal'
 import { TerminalSearchBar } from '@/components/terminal/TerminalSearchBar'
 import {
@@ -206,12 +205,14 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   // CRITICAL: Use refs to avoid callback/effect dependency on changing content
   const requestIdRef = useRef<string>(terminalContent?.createRequestId || '')
   const terminalIdRef = useRef<string | undefined>(terminalContent?.terminalId)
+  const lastSeqRef = useRef(0)
   const contentRef = useRef<TerminalPaneContent | null>(terminalContent)
 
   // Keep refs in sync with props
   useEffect(() => {
     if (terminalContent) {
       const prev = contentRef.current
+      const prevTerminalId = terminalIdRef.current
       if (prev && terminalContent.resumeSessionId !== prev.resumeSessionId) {
         if (debugRef.current) log.debug('[TRACE resumeSessionId] ref sync from props CHANGED resumeSessionId', {
           paneId,
@@ -221,6 +222,9 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         })
       }
       terminalIdRef.current = terminalContent.terminalId
+      if (terminalContent.terminalId !== prevTerminalId) {
+        lastSeqRef.current = 0
+      }
       requestIdRef.current = terminalContent.createRequestId
       contentRef.current = terminalContent
     }
@@ -479,10 +483,6 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     }))
   }, [dispatch, tabId, paneId]) // NO terminalContent dependency - uses ref
 
-  const sendWsMessage = useCallback((msg: { type: 'terminal.attach'; terminalId: string }) => {
-    ws.send(msg)
-  }, [ws])
-
   const requestTerminalLayout = useCallback((options: {
     fit?: boolean
     resize?: boolean
@@ -634,31 +634,6 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       handleOsc52Event(event)
     }
   }, [dispatch, enqueueTerminalWrite, handleOsc52Event, tabId])
-
-  const applyChunkedSnapshot = useCallback((snapshot: string) => {
-    const term = termRef.current
-    if (!term) return
-    handleTerminalSnapshot(snapshot, term)
-  }, [handleTerminalSnapshot])
-
-  const markChunkedRunning = useCallback(() => {
-    updateContent({ status: 'running' })
-  }, [updateContent])
-
-  const {
-    snapshotWarning,
-    handleChunkLifecycleMessage,
-    markSnapshotChunkedCreated,
-    bumpConnectionGeneration,
-    clearChunkedAttachState,
-  } = useChunkedAttach({
-    activeTerminalId: terminalContent?.terminalId,
-    activeTerminalIdRef: terminalIdRef,
-    setIsAttaching,
-    applySnapshot: applyChunkedSnapshot,
-    markRunning: markChunkedRunning,
-    wsSend: sendWsMessage,
-  })
 
   const sendInput = useCallback((data: string) => {
     const tid = terminalIdRef.current
@@ -1165,7 +1140,11 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
 
     function attach(tid: string) {
       setIsAttaching(true)
-      ws.send({ type: 'terminal.attach', terminalId: tid })
+      ws.send({
+        type: 'terminal.attach',
+        terminalId: tid,
+        sinceSeq: lastSeqRef.current,
+      })
       // NOTE: Do NOT send terminal.resize here. At this point fit() hasn't run yet,
       // so term.cols/rows are xterm defaults (80×24), not the actual viewport size.
       // Sending a resize with wrong dimensions causes the PTY to resize, triggering
@@ -1187,26 +1166,51 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         const tid = terminalIdRef.current
         const reqId = requestIdRef.current
 
-        const msgTerminalId = typeof (msg as { terminalId?: unknown }).terminalId === 'string'
-          ? (msg as { terminalId: string }).terminalId
-          : undefined
-        const isChunkLifecycleType =
-          msg.type === 'terminal.attached.start'
-          || msg.type === 'terminal.attached.chunk'
-          || msg.type === 'terminal.attached.end'
-
-        if (isChunkLifecycleType && msgTerminalId && tid && msgTerminalId !== tid) {
-          return
-        }
-
-        if (handleChunkLifecycleMessage(msg)) {
-          return
-        }
-
         if (msg.type === 'terminal.output' && msg.terminalId === tid) {
+          if (typeof msg.seqStart !== 'number' || typeof msg.seqEnd !== 'number') {
+            if (import.meta.env.DEV) {
+              log.warn('Ignoring terminal.output without sequence range', {
+                paneId: paneIdRef.current,
+                terminalId: tid,
+              })
+            }
+            return
+          }
+          if (msg.seqStart <= lastSeqRef.current) {
+            if (import.meta.env.DEV) {
+              log.warn('Ignoring overlapping terminal.output sequence range', {
+                paneId: paneIdRef.current,
+                terminalId: tid,
+                seqStart: msg.seqStart,
+                seqEnd: msg.seqEnd,
+                lastSeq: lastSeqRef.current,
+              })
+            }
+            return
+          }
           const raw = msg.data || ''
           const mode = contentRef.current?.mode || 'shell'
           handleTerminalOutput(raw, mode, tid)
+          lastSeqRef.current = msg.seqEnd
+        }
+
+        if (msg.type === 'terminal.output.gap' && msg.terminalId === tid) {
+          const reason = msg.reason === 'replay_window_exceeded'
+            ? 'reconnect window exceeded'
+            : 'slow link backlog'
+          try {
+            term.writeln(`\r\n[Output gap ${msg.fromSeq}-${msg.toSeq}: ${reason}]\r\n`)
+          } catch {
+            // disposed
+          }
+          lastSeqRef.current = Math.max(lastSeqRef.current, msg.toSeq)
+          setIsAttaching(false)
+        }
+
+        if (msg.type === 'terminal.attach.ready' && msg.terminalId === tid) {
+          lastSeqRef.current = Math.max(lastSeqRef.current, msg.replayToSeq)
+          setIsAttaching(false)
+          updateContent({ status: 'running' })
         }
 
         if (msg.type === 'terminal.snapshot' && msg.terminalId === tid) {
@@ -1225,6 +1229,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
             willUpdate: !!(msg.effectiveResumeSessionId && msg.effectiveResumeSessionId !== contentRef.current?.resumeSessionId),
           })
           terminalIdRef.current = newId
+          lastSeqRef.current = 0
           updateContent({ terminalId: newId, status: 'running' })
           // Also update tab for title purposes
           const currentTab = tabRef.current
@@ -1234,26 +1239,9 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           if (msg.effectiveResumeSessionId && msg.effectiveResumeSessionId !== contentRef.current?.resumeSessionId) {
             updateContent({ resumeSessionId: msg.effectiveResumeSessionId })
           }
-          const isSnapshotChunked = msg.snapshotChunked === true
-          if (isSnapshotChunked) {
-            markSnapshotChunkedCreated()
-          } else {
-            handleTerminalSnapshot(msg.snapshot, term)
-          }
-          // Creator is already attached server-side for this terminal.
-          // Avoid sending terminal.attach here: it can race with terminal.output and lead to
-          // the later terminal.attached snapshot wiping already-rendered output.
+          // Creator is already attached server-side for this terminal through v2 broker.
           ws.send({ type: 'terminal.resize', terminalId: newId, cols: term.cols, rows: term.rows })
-          if (!isSnapshotChunked) {
-            setIsAttaching(false)
-          }
-        }
-
-        if (msg.type === 'terminal.attached' && msg.terminalId === tid) {
-          clearRateLimitRetry()
-          setIsAttaching(false)
-          handleTerminalSnapshot(msg.snapshot, term)
-          updateContent({ status: 'running' })
+          setIsAttaching(true)
         }
 
         if (msg.type === 'terminal.exit' && msg.terminalId === tid) {
@@ -1263,6 +1251,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           // We must clear both the ref AND the Redux state because the ref sync effect
           // would otherwise reset the ref from the Redux state on re-render.
           terminalIdRef.current = undefined
+          lastSeqRef.current = 0
           updateContent({ terminalId: undefined, status: 'exited' })
           const exitTab = tabRef.current
           if (exitTab) {
@@ -1368,6 +1357,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
             }
             requestIdRef.current = newRequestId
             terminalIdRef.current = undefined
+            lastSeqRef.current = 0
             updateContent({ terminalId: undefined, createRequestId: newRequestId, status: 'creating' })
             // Also clear the tab's terminalId to keep it in sync.
             // This prevents openSessionTab from using the stale terminalId for dedup.
@@ -1382,7 +1372,6 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       })
 
       unsubReconnect = ws.onReconnect(() => {
-        bumpConnectionGeneration()
         const tid = terminalIdRef.current
         if (debugRef.current) log.debug('[TRACE resumeSessionId] onReconnect', {
           paneId: paneIdRef.current,
@@ -1418,7 +1407,6 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       clearRateLimitRetry()
       unsub()
       unsubReconnect()
-      clearChunkedAttachState()
     }
   // Dependencies explanation:
   // - isTerminal: skip effect for non-terminal panes
@@ -1444,12 +1432,8 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     updateContent,
     ws,
     dispatch,
-    bumpConnectionGeneration,
-    clearChunkedAttachState,
-    handleChunkLifecycleMessage,
     handleTerminalOutput,
     handleTerminalSnapshot,
-    markSnapshotChunkedCreated,
   ])
 
   const mobileToolbarBottomPx = isMobile ? keyboardInsetPx : 0
@@ -1546,11 +1530,6 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           resultIndex={searchResults?.resultIndex}
           resultCount={searchResults?.resultCount}
         />
-      )}
-      {snapshotWarning && (
-        <div className="pointer-events-none absolute inset-x-2 bottom-2 rounded border border-amber-300 bg-amber-50/95 px-2 py-1 text-xs text-amber-900">
-          {snapshotWarning}
-        </div>
       )}
       <Osc52PromptModal
         open={pendingOsc52Event !== null}
