@@ -7,7 +7,6 @@ import http from 'http'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import rateLimit from 'express-rate-limit'
-import { z } from 'zod'
 import { logger, setLogLevel } from './logger.js'
 import { requestLogger } from './request-logger.js'
 import { validateStartupSecurity, httpAuthMiddleware, timingSafeCompare } from './auth.js'
@@ -48,7 +47,7 @@ import { createTabsRegistryStore } from './tabs-registry/store.js'
 import { checkForUpdate } from './updater/version-checker.js'
 import { SessionAssociationCoordinator } from './session-association-coordinator.js'
 import { loadOrCreateServerInstanceId } from './instance-id.js'
-import { SettingsPatchSchema, type SettingsPatch } from './settings-schema.js'
+import { createSettingsRouter } from './settings-router.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -251,27 +250,14 @@ async function main() {
   })
 
   // --- API: settings ---
-  //
-  // SECURITY NOTE (XSS Prevention):
-  // User-provided strings (tab titles, descriptions, settings values) are stored
-  // as-is without server-side sanitization. This is intentional because:
-  //
-  // 1. The frontend uses React, which automatically escapes all interpolated
-  //    values in JSX (e.g., {title}, {description}), preventing XSS attacks.
-  //
-  // 2. CRITICAL: `dangerouslySetInnerHTML` must NEVER be used with any user
-  //    data from these APIs. If rich text rendering is ever needed, use a
-  //    sanitization library like DOMPurify on the frontend.
-  //
-  // 3. The same applies to session overrides, terminal overrides, and project
-  //    colors - all user input flows through React's automatic escaping.
-  //
-  // Verified: No dangerouslySetInnerHTML or innerHTML usage exists in src/components/.
-  //
-  app.get('/api/settings', async (_req, res) => {
-    const s = await configStore.getSettings()
-    res.json(migrateSettingsSortMode(s))
-  })
+  app.use('/api/settings', createSettingsRouter({
+    configStore,
+    registry,
+    wsHandler,
+    codingCliIndexer,
+    perfConfig,
+    applyDebugLogging,
+  }))
 
   // --- Network management endpoints ---
   app.use('/api', createNetworkRouter({
@@ -300,41 +286,6 @@ async function main() {
       defaultCwd: cfg.settings?.defaultCwd,
     })
     res.json({ directories })
-  })
-
-  type NormalizedSettingsPatch = Omit<SettingsPatch, 'defaultCwd'> & { defaultCwd?: string }
-
-  const normalizeSettingsPatch = (patch: SettingsPatch): NormalizedSettingsPatch => {
-    const normalized = { ...patch }
-    if (Object.prototype.hasOwnProperty.call(normalized, 'defaultCwd')) {
-      const raw = patch.defaultCwd
-      if (raw === null) {
-        delete normalized.defaultCwd
-      } else if (typeof raw === 'string' && raw.trim() === '') {
-        delete normalized.defaultCwd
-      }
-    }
-    return normalized as NormalizedSettingsPatch
-  }
-
-  app.patch('/api/settings', async (req, res) => {
-    const parsed = SettingsPatchSchema.safeParse(req.body || {})
-    if (!parsed.success) {
-      return res.status(400).json({ error: 'Invalid request', details: parsed.error.issues })
-    }
-    const patch = normalizeSettingsPatch(migrateSettingsSortMode(parsed.data))
-    const updated = await configStore.patchSettings(patch)
-    const migrated = migrateSettingsSortMode(updated)
-    registry.setSettings(migrated)
-    applyDebugLogging(!!migrated.logging?.debug, 'settings')
-    wsHandler.broadcast({ type: 'settings.updated', settings: migrated })
-	    await withPerfSpan(
-	      'coding_cli_refresh',
-	      () => codingCliIndexer.refresh(),
-	      {},
-	      { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
-	    )
-    res.json(migrated)
   })
 
   // --- API: sessions ---
