@@ -312,6 +312,7 @@ git commit -m "feat(bootstrap): use existing storage migration v3 to clear legac
 - Test: `test/unit/client/store/panesPersistence.test.ts`
 - Test: `test/unit/client/store/tabsPersistence.test.ts`
 - Create: `test/unit/client/store/persistBroadcast.test.ts`
+- Modify: `test/unit/client/store/tabRegistrySlice.test.ts`
 
 **Step 1: Write failing key-namespace tests**
 
@@ -321,6 +322,11 @@ Require all store persistence reads/writes to use `.v2` keys and broadcast chann
 expect(TABS_STORAGE_KEY).toBe('freshell.tabs.v2')
 expect(PANES_STORAGE_KEY).toBe('freshell.panes.v2')
 expect(PERSIST_BROADCAST_CHANNEL_NAME).toBe('freshell.persist.v2')
+expect(DEVICE_ID_STORAGE_KEY).toBe('freshell.device-id.v2')
+expect(DEVICE_LABEL_STORAGE_KEY).toBe('freshell.device-label.v2')
+expect(DEVICE_LABEL_CUSTOM_STORAGE_KEY).toBe('freshell.device-label-custom.v2')
+expect(DEVICE_FINGERPRINT_STORAGE_KEY).toBe('freshell.device-fingerprint.v2')
+expect(DEVICE_ALIASES_STORAGE_KEY).toBe('freshell.device-aliases.v2')
 ```
 
 **Step 2: Run tests to verify failure**
@@ -328,7 +334,7 @@ expect(PERSIST_BROADCAST_CHANNEL_NAME).toBe('freshell.persist.v2')
 Run:
 
 ```bash
-npm test -- test/unit/client/store/persistedState.test.ts test/unit/client/store/panesPersistence.test.ts test/unit/client/store/tabsPersistence.test.ts test/unit/client/store/persistBroadcast.test.ts
+npm test -- test/unit/client/store/persistedState.test.ts test/unit/client/store/panesPersistence.test.ts test/unit/client/store/tabsPersistence.test.ts test/unit/client/store/persistBroadcast.test.ts test/unit/client/store/tabRegistrySlice.test.ts
 ```
 
 Expected: FAIL.
@@ -343,7 +349,10 @@ export const STORAGE_KEYS = {
   panes: 'freshell.panes.v2',
   sessionActivity: 'freshell.sessionActivity.v2',
   deviceId: 'freshell.device-id.v2',
-  ...
+  deviceLabel: 'freshell.device-label.v2',
+  deviceLabelCustom: 'freshell.device-label-custom.v2',
+  deviceFingerprint: 'freshell.device-fingerprint.v2',
+  deviceAliases: 'freshell.device-aliases.v2',
 } as const
 ```
 
@@ -354,13 +363,14 @@ Update broadcast channel constant to `freshell.persist.v2` in `src/store/persist
 Add migration note in comments/docs: storage key namespace suffix (`.v1`, `.v2`) is independent from `freshell_version` migration counter (`STORAGE_VERSION`).
 
 In `src/store/panesSlice.ts`, remove or refactor legacy `.v1` recovery helpers (`applyLegacyResumeSessionIds`, `cleanOrphanedLayouts`) that become dead after Task 2's full storage reset on version bump.
+In `test/unit/client/store/panesPersistence.test.ts`, remove/replace legacy resumeSessionId migration suites that only validate those retired helpers.
 
 **Step 4: Run tests to verify pass**
 
 Run:
 
 ```bash
-npm test -- test/unit/client/store/persistedState.test.ts test/unit/client/store/panesPersistence.test.ts test/unit/client/store/tabsPersistence.test.ts test/unit/client/store/persistBroadcast.test.ts
+npm test -- test/unit/client/store/persistedState.test.ts test/unit/client/store/panesPersistence.test.ts test/unit/client/store/tabsPersistence.test.ts test/unit/client/store/persistBroadcast.test.ts test/unit/client/store/tabRegistrySlice.test.ts
 ```
 
 Expected: PASS.
@@ -368,7 +378,7 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add src/store/storage-keys.ts src/store/persistedState.ts src/store/persistMiddleware.ts src/store/panesSlice.ts src/store/tabsSlice.ts src/store/sessionActivitySlice.ts src/store/sessionActivityPersistence.ts src/store/tabRegistrySlice.ts src/store/persistBroadcast.ts src/store/crossTabSync.ts test/unit/client/store/persistedState.test.ts test/unit/client/store/panesPersistence.test.ts test/unit/client/store/tabsPersistence.test.ts test/unit/client/store/persistBroadcast.test.ts
+git add src/store/storage-keys.ts src/store/persistedState.ts src/store/persistMiddleware.ts src/store/panesSlice.ts src/store/tabsSlice.ts src/store/sessionActivitySlice.ts src/store/sessionActivityPersistence.ts src/store/tabRegistrySlice.ts src/store/persistBroadcast.ts src/store/crossTabSync.ts test/unit/client/store/persistedState.test.ts test/unit/client/store/panesPersistence.test.ts test/unit/client/store/tabsPersistence.test.ts test/unit/client/store/persistBroadcast.test.ts test/unit/client/store/tabRegistrySlice.test.ts
 git commit -m "refactor(storage): move persisted client state to v2 keys and channel namespace for hard protocol cutover"
 ```
 
@@ -725,13 +735,16 @@ In `src/components/TerminalView.tsx`:
 - keep existing `enqueueTerminalWrite` + RAF queue behavior to avoid WS message-loop blocking
 - assume broker emits strictly increasing, non-overlapping sequence ranges
 - on `terminal.created`: set terminal state only (no snapshot parsing), rely on broker auto-attach stream
+- treat any overlap (`seqStart <= lastSeqRef.current`) as protocol violation and ignore frame to avoid duplicate rendering
 
 ```ts
 if (msg.type === 'terminal.output' && msg.terminalId === tid) {
-  if (import.meta.env.DEV && msg.seqStart <= lastSeqRef.current) {
-    console.warn('Unexpected overlapping sequence range', msg.seqStart, msg.seqEnd, lastSeqRef.current)
+  if (msg.seqStart <= lastSeqRef.current) {
+    if (import.meta.env.DEV) {
+      console.warn('Unexpected overlapping sequence range', msg.seqStart, msg.seqEnd, lastSeqRef.current)
+    }
+    return
   }
-  if (msg.seqEnd <= lastSeqRef.current) return
   enqueueTerminalWrite(msg.data)
   lastSeqRef.current = msg.seqEnd
 }
