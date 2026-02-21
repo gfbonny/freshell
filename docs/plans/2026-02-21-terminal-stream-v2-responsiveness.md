@@ -16,17 +16,46 @@
 2. Client and server both require `WS_PROTOCOL_VERSION = 2`.
 3. Persisted UI state is namespace-bumped (`*.v2`) and legacy persisted state is cleared during upgrade.
 4. Auth continuity is preserved: keep token across storage reset and re-issue `freshell-auth` cookie.
-5. Routine terminal slow-consumer handling must never close the websocket; only catastrophic safety breakers may close.
+5. Routine terminal slow-consumer handling must never close the websocket.
+6. Catastrophic safety breaker is explicit: close with `4008` only if `ws.bufferedAmount > 16 MiB` for `>= 10s` despite queue shedding.
 
 ---
 
 ## System Invariants (Must Hold)
 
 1. `terminal.input` path is independent from output backlog and remains low-latency.
-2. Terminal output memory is bounded at all levels (PTY replay ring, broker queue, ws buffered amount guardrails).
+2. Terminal output memory is bounded at all levels (PTY replay ring, broker queue, ws buffered amount guardrails and catastrophic breaker).
 3. If output is dropped due pressure, user receives explicit `terminal.output.gap` marker.
 4. Reconnect/reattach sends only missing sequence range when possible.
 5. No full-screen blocking reconnect spinner during normal degraded transport.
+6. Sequence semantics are explicit and consistent across server/client/tests: all `seq*` and gap ranges are inclusive.
+
+---
+
+## Protocol Semantics (Normative)
+
+1. `protocolVersion` in `hello` is new in v2; pre-v2 clients send no version and are rejected by design.
+2. Sequence domain is per terminal and starts at `1`.
+3. `seqStart` and `seqEnd` are inclusive frame sequence numbers.
+4. `sinceSeq` means "highest contiguous sequence already rendered by the client"; server replays `seq > sinceSeq`.
+5. `terminal.output.gap.fromSeq` and `.toSeq` are inclusive dropped ranges.
+6. `headSeq` is the current inclusive high-water mark at the end of attach replay assembly.
+7. Legacy hello capabilities for chunk attach (`terminalAttachChunkV1`) are removed in v2; no downgrade negotiation.
+
+---
+
+## Attach Replay Atomicity (Normative)
+
+Broker attach for one terminal is executed under a per-terminal critical section:
+
+1. Register client as an attaching consumer (starts buffering live frames in an attach-staging queue).
+2. Snapshot replay window from replay ring using `sinceSeq`.
+3. Send `terminal.attach.ready` with replay bounds.
+4. Send replay frames in-order.
+5. Flush attach-staging queue frames with `seq > replayToSeq` in-order.
+6. Promote client from attaching to live stream consumer.
+
+This guarantees no output loss/reorder across the attach boundary, replacing current `pendingSnapshotClients` behavior.
 
 ---
 
@@ -43,8 +72,9 @@
 
 Add tests that require:
 - `hello.protocolVersion === 2`
-- server closes with `PROTOCOL_MISMATCH` when version missing/mismatched
+- server closes with `PROTOCOL_MISMATCH` when version missing/mismatched (including old clients with no version field)
 - client treats mismatch as fatal upgrade-required state (no reconnect loop)
+- legacy `capabilities.terminalAttachChunkV1` is removed from hello payload construction
 
 ```ts
 expect(close.code).toBe(4010)
@@ -73,6 +103,10 @@ export const HelloSchema = z.object({
   type: z.literal('hello'),
   token: z.string().optional(),
   protocolVersion: z.literal(WS_PROTOCOL_VERSION),
+  // no v1 chunk capability negotiation in protocol v2
+  capabilities: z.object({
+    sessionsPatchV1: z.boolean().optional(),
+  }).optional(),
   ...
 })
 
@@ -97,6 +131,7 @@ type TerminalAttachReadyMessage = {
 type TerminalOutputMessage = {
   type: 'terminal.output'
   terminalId: string
+  // inclusive sequence range
   seqStart: number
   seqEnd: number
   data: string
@@ -105,6 +140,7 @@ type TerminalOutputMessage = {
 type TerminalOutputGapMessage = {
   type: 'terminal.output.gap'
   terminalId: string
+  // inclusive dropped range
   fromSeq: number
   toSeq: number
   reason: 'queue_overflow' | 'replay_window_exceeded'
@@ -113,7 +149,7 @@ type TerminalOutputGapMessage = {
 
 In `server/ws-handler.ts`, reject mismatched `protocolVersion` with close code `4010` and typed error.
 
-In `src/lib/ws-client.ts`, handle `4010` as fatal (set explicit upgrade-required error, no reconnect timer).
+In `src/lib/ws-client.ts`, include `protocolVersion: WS_PROTOCOL_VERSION` in hello, remove chunk-attach capability, and handle `4010` as fatal (set explicit upgrade-required error, no reconnect timer).
 
 **Step 4: Run tests to verify pass**
 
@@ -138,19 +174,20 @@ git commit -m "feat(protocol): enforce websocket protocol v2 with hard mismatch 
 ### Task 2: Implement Deterministic Client Upgrade + Storage/Cookie Safety
 
 **Files:**
-- Create: `src/bootstrap/client-upgrade.ts`
 - Modify: `src/main.tsx`
 - Modify: `src/lib/auth.ts`
 - Modify: `src/store/storage-migration.ts`
-- Test: `test/unit/client/bootstrap/client-upgrade.test.ts`
+- Modify: `src/store/store.ts`
+- Create: `test/unit/client/store/storage-migration.test.ts`
+- Modify: `test/unit/client/lib/auth.test.ts`
 
 **Step 1: Write failing upgrade tests**
 
 Cover:
-- preserves auth token while clearing legacy `freshell.*.v1`
-- restores `freshell-auth` cookie from preserved token
-- clears stale cookie when no token exists
-- bumps migration marker and performs idempotent no-op on second run
+- bumping existing `STORAGE_VERSION` clears legacy `freshell.*.v1` while preserving `freshell.auth-token`
+- migration clears stale `freshell-auth` cookie when no auth token remains
+- bootstrap order is deterministic: auth initialization runs before storage migration, and storage migration runs before store import
+- second migration run is idempotent no-op
 
 ```ts
 expect(localStorage.getItem('freshell.auth-token')).toBe('token-123')
@@ -163,49 +200,50 @@ expect(localStorage.getItem('freshell.tabs.v1')).toBeNull()
 Run:
 
 ```bash
-npm test -- test/unit/client/bootstrap/client-upgrade.test.ts
+npm test -- test/unit/client/store/storage-migration.test.ts test/unit/client/lib/auth.test.ts
 ```
 
-Expected: FAIL (upgrade module missing).
+Expected: FAIL (migration/auth bootstrap behavior not updated).
 
-**Step 3: Implement synchronous upgrade bootstrap**
+**Step 3: Implement synchronous upgrade using existing migration system**
 
-In `src/bootstrap/client-upgrade.ts`:
+In `src/store/storage-migration.ts`:
 
 ```ts
-const CLIENT_STORAGE_SCHEMA_VERSION = 3
+const STORAGE_VERSION = 3
+const AUTH_STORAGE_KEY = 'freshell.auth-token'
 
-export function runClientUpgrade(): void {
-  const authToken = readBestAuthTokenSource() // URL token > localStorage > legacy session > cookie
-  const current = Number(localStorage.getItem('freshell.storage-schema') || '0')
-  if (current >= CLIENT_STORAGE_SCHEMA_VERSION) {
-    if (authToken) persistAuthTokenAndCookie(authToken)
-    return
-  }
+export function runStorageMigration(): void {
+  const currentVersion = readStorageVersion()
+  if (currentVersion >= STORAGE_VERSION) return
 
-  clearLegacyFreshellKeysExceptAuth()
-  if (authToken) persistAuthTokenAndCookie(authToken)
+  const preservedAuthToken = localStorage.getItem(AUTH_STORAGE_KEY)
+  clearFreshellKeysExcept([AUTH_STORAGE_KEY])
+  if (preservedAuthToken) localStorage.setItem(AUTH_STORAGE_KEY, preservedAuthToken)
   else clearAuthCookie()
 
-  localStorage.setItem('freshell.storage-schema', String(CLIENT_STORAGE_SCHEMA_VERSION))
+  localStorage.setItem('freshell_version', String(STORAGE_VERSION))
 }
 ```
 
-In `src/main.tsx`, run upgrade before store creation by moving store import to bootstrap phase:
+In `src/main.tsx`, make bootstrap order explicit:
 
 ```ts
-runClientUpgrade()
+initializeAuthToken()
+runStorageMigration()
 const { store } = await import('@/store/store')
 ```
 
-(Use top-level async bootstrap function to avoid ESM import-order race.)
+In `src/store/store.ts`, remove side-effect import of `./storage-migration` so migration is not implicit.
+
+In `src/lib/auth.ts`, add and use `clearAuthCookie()` helper instead of duplicating token-source logic. Keep `initializeAuthToken()` as the single source of truth for URL/session/local token bootstrap.
 
 **Step 4: Run tests to verify pass**
 
 Run:
 
 ```bash
-npm test -- test/unit/client/bootstrap/client-upgrade.test.ts
+npm test -- test/unit/client/store/storage-migration.test.ts test/unit/client/lib/auth.test.ts
 npm test -- test/unit/client/lib/ws-client.test.ts -t "protocol version"
 ```
 
@@ -214,8 +252,8 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add src/bootstrap/client-upgrade.ts src/main.tsx src/lib/auth.ts src/store/storage-migration.ts test/unit/client/bootstrap/client-upgrade.test.ts
-git commit -m "feat(bootstrap): hard-cut client upgrade clears legacy storage while preserving auth token and cookie continuity"
+git add src/main.tsx src/lib/auth.ts src/store/storage-migration.ts src/store/store.ts test/unit/client/store/storage-migration.test.ts test/unit/client/lib/auth.test.ts
+git commit -m "feat(bootstrap): use existing storage migration v3 to clear legacy state while preserving auth token and cookie continuity"
 ```
 
 ---
@@ -235,6 +273,7 @@ git commit -m "feat(bootstrap): hard-cut client upgrade clears legacy storage wh
 - Test: `test/unit/client/store/persistedState.test.ts`
 - Test: `test/unit/client/store/panesPersistence.test.ts`
 - Test: `test/unit/client/store/tabsPersistence.test.ts`
+- Create: `test/unit/client/store/persistBroadcast.test.ts`
 
 **Step 1: Write failing key-namespace tests**
 
@@ -244,6 +283,7 @@ Require all store persistence reads/writes to use `.v2` keys and broadcast chann
 expect(TABS_STORAGE_KEY).toBe('freshell.tabs.v2')
 expect(PANES_STORAGE_KEY).toBe('freshell.panes.v2')
 expect(PERSIST_BROADCAST_CHANNEL_NAME).toBe('freshell.persist.v2')
+expect(CROSS_TAB_SYNC_CHANNEL_NAME).toBe('freshell.persist.v2')
 ```
 
 **Step 2: Run tests to verify failure**
@@ -251,7 +291,7 @@ expect(PERSIST_BROADCAST_CHANNEL_NAME).toBe('freshell.persist.v2')
 Run:
 
 ```bash
-npm test -- test/unit/client/store/persistedState.test.ts test/unit/client/store/panesPersistence.test.ts test/unit/client/store/tabsPersistence.test.ts
+npm test -- test/unit/client/store/persistedState.test.ts test/unit/client/store/panesPersistence.test.ts test/unit/client/store/tabsPersistence.test.ts test/unit/client/store/persistBroadcast.test.ts
 ```
 
 Expected: FAIL.
@@ -277,7 +317,7 @@ Update broadcast channel constant to `freshell.persist.v2`.
 Run:
 
 ```bash
-npm test -- test/unit/client/store/persistedState.test.ts test/unit/client/store/panesPersistence.test.ts test/unit/client/store/tabsPersistence.test.ts
+npm test -- test/unit/client/store/persistedState.test.ts test/unit/client/store/panesPersistence.test.ts test/unit/client/store/tabsPersistence.test.ts test/unit/client/store/persistBroadcast.test.ts
 ```
 
 Expected: PASS.
@@ -285,7 +325,7 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add src/store/storage-keys.ts src/store/persistedState.ts src/store/persistMiddleware.ts src/store/panesSlice.ts src/store/tabsSlice.ts src/store/sessionActivitySlice.ts src/store/tabRegistrySlice.ts src/store/persistBroadcast.ts src/store/crossTabSync.ts test/unit/client/store/persistedState.test.ts test/unit/client/store/panesPersistence.test.ts test/unit/client/store/tabsPersistence.test.ts
+git add src/store/storage-keys.ts src/store/persistedState.ts src/store/persistMiddleware.ts src/store/panesSlice.ts src/store/tabsSlice.ts src/store/sessionActivitySlice.ts src/store/tabRegistrySlice.ts src/store/persistBroadcast.ts src/store/crossTabSync.ts test/unit/client/store/persistedState.test.ts test/unit/client/store/panesPersistence.test.ts test/unit/client/store/tabsPersistence.test.ts test/unit/client/store/persistBroadcast.test.ts
 git commit -m "refactor(storage): move persisted client state to v2 keys and channel namespace for hard protocol cutover"
 ```
 
@@ -295,19 +335,20 @@ git commit -m "refactor(storage): move persisted client state to v2 keys and cha
 
 **Files:**
 - Modify: `server/terminal-registry.ts`
+- Create: `server/terminal-stream/registry-events.ts`
 - Test: `test/unit/server/terminal-lifecycle.test.ts`
 - Test: `test/server/ws-edge-cases.test.ts`
 
-**Step 1: Write failing transport-decoupling tests**
+**Step 1: Write failing registry-surface extraction tests**
 
 Add tests that assert:
-- registry emits terminal output events
-- registry no longer directly owns websocket clients or sends frames
-- terminal list `hasClients` derives from broker-managed attachment counts
+- registry emits `terminal.output.raw` event for every PTY output chunk
+- registry exposes attachment-count helpers needed by broker metadata (`getAttachedClientCount`)
+- existing behavior is preserved during this step (no regression in current attach/snapshot flow)
 
 ```ts
 expect(onOutput).toHaveBeenCalledWith(
-  expect.objectContaining({ terminalId, data: 'hello' })
+  expect.objectContaining({ terminalId, data: 'hello', at: expect.any(Number) })
 )
 ```
 
@@ -321,11 +362,9 @@ npm test -- test/unit/server/terminal-lifecycle.test.ts -t "transport agnostic"
 
 Expected: FAIL.
 
-**Step 3: Implement registry decoupling**
+**Step 3: Implement staged decoupling seam (no behavior removal yet)**
 
-Remove direct websocket send logic from `TerminalRegistry` (`sendTerminalOutput`, output buffer flushing, pending snapshot client maps).
-
-Replace with events:
+Create broker-facing event types in `server/terminal-stream/registry-events.ts` and emit them from `TerminalRegistry`:
 
 ```ts
 this.emit('terminal.output', {
@@ -335,12 +374,20 @@ this.emit('terminal.output', {
 })
 ```
 
-Track only opaque attachment count metadata:
+Add explicit APIs for broker handoff:
 
 ```ts
-attachClient(terminalId: string, clientId: string): boolean
-detachClient(terminalId: string, clientId: string): boolean
+getAttachedClientCount(terminalId: string): number
+listAttachedClientIds(terminalId: string): string[]
 ```
+
+Document exact concern migration destination in code comments and plan notes:
+
+1. `pendingSnapshotClients` ordering logic -> broker attach-staging queue (Task 7, atomic attach flow).
+2. `outputBuffers`/flush timers/mobile batching -> broker client-output queue (Tasks 6-7).
+3. `safeSendOutputFrames` splitting + `safeSend` backpressure guards -> broker send scheduler and catastrophic breaker (Task 7).
+
+Do not delete legacy transport code in this task; this task establishes a safe extraction seam so Task 7 can cut over without large blind rewrites.
 
 **Step 4: Run tests to verify pass**
 
@@ -355,8 +402,8 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add server/terminal-registry.ts test/unit/server/terminal-lifecycle.test.ts test/server/ws-edge-cases.test.ts
-git commit -m "refactor(server): decouple terminal registry from websocket transport and emit output events"
+git add server/terminal-registry.ts server/terminal-stream/registry-events.ts test/unit/server/terminal-lifecycle.test.ts test/server/ws-edge-cases.test.ts
+git commit -m "refactor(server): add terminal registry event seam and explicit concern-migration path for broker cutover"
 ```
 
 ---
@@ -374,6 +421,7 @@ Cover:
 - bounded byte eviction
 - replay since sequence
 - replay miss detection (requested seq older than tail)
+- default memory budget (`256 KiB`) enforcement
 
 ```ts
 expect(ring.headSeq()).toBe(42)
@@ -412,7 +460,7 @@ export class ReplayRing {
 }
 ```
 
-Use UTF-8 byte sizing (`Buffer.byteLength`) for memory budget enforcement.
+Use UTF-8 byte sizing (`Buffer.byteLength`) for memory budget enforcement. Define `DEFAULT_TERMINAL_REPLAY_RING_MAX_BYTES = 256 * 1024` (configurable by env) and document rationale: enough reconnect delta room while keeping per-terminal memory bounded.
 
 **Step 4: Run tests to verify pass**
 
@@ -481,6 +529,7 @@ Policy:
 - drop oldest data frames on overflow
 - store dropped range as pending gap
 - emit `gap` before next data batch
+- default `TERMINAL_CLIENT_QUEUE_MAX_BYTES = 128 * 1024` per attached client
 
 **Step 4: Run tests to verify pass**
 
@@ -506,6 +555,7 @@ git commit -m "feat(server): add bounded per-client terminal output queue with e
 **Files:**
 - Create: `server/terminal-stream/broker.ts`
 - Create: `server/terminal-stream/types.ts`
+- Create: `server/terminal-stream/constants.ts`
 - Modify: `server/ws-handler.ts`
 - Modify: `server/index.ts`
 - Test: `test/unit/server/ws-handler-backpressure.test.ts`
@@ -518,6 +568,8 @@ Add tests requiring:
 - `terminal.attach` with `sinceSeq` replays only missing frames
 - no routine `4008` close under slow consumer simulation
 - emits `terminal.output.gap` on bounded overflow instead of close
+- attach boundary ordering: output produced during attach replay is delivered after replay (no loss/reorder)
+- catastrophic breaker: `4008` only when `bufferedAmount` exceeds hard threshold for sustained stall window
 
 ```ts
 expect(closeCode).not.toBe(4008)
@@ -542,6 +594,10 @@ Expected: FAIL.
 - handle `terminal.attach` replay (`sinceSeq`)
 - emit `terminal.attach.ready`, `terminal.output`, `terminal.output.gap`
 - maintain per-terminal attachment counts for list metadata
+- enforce per-terminal attach critical section and attach-staging queue flush (replaces `pendingSnapshotClients`)
+- run catastrophic breaker guard:
+  - do not close for ordinary queue overflow
+  - close with `4008` only when `ws.bufferedAmount > TERMINAL_WS_CATASTROPHIC_BUFFERED_BYTES` continuously for `TERMINAL_WS_CATASTROPHIC_STALL_MS`
 
 In `server/ws-handler.ts`, remove chunked attach snapshot path (`terminal.attached*`) and call broker APIs.
 
@@ -558,7 +614,7 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add server/terminal-stream/broker.ts server/terminal-stream/types.ts server/ws-handler.ts server/index.ts test/unit/server/ws-handler-backpressure.test.ts test/server/ws-edge-cases.test.ts test/server/ws-terminal-create-reuse-running-codex.test.ts
+git add server/terminal-stream/broker.ts server/terminal-stream/types.ts server/terminal-stream/constants.ts server/ws-handler.ts server/index.ts test/unit/server/ws-handler-backpressure.test.ts test/server/ws-edge-cases.test.ts test/server/ws-terminal-create-reuse-running-codex.test.ts
 git commit -m "feat(server): add terminal stream broker with sinceSeq replay and non-destructive slow-consumer handling"
 ```
 
@@ -581,6 +637,7 @@ Require:
 - `terminal.output` with sequence applies in-order
 - `terminal.output.gap` renders system marker
 - reconnect no longer depends on `terminal.attached.start/chunk/end`
+- preserve existing RAF-based `term.write` batching (no synchronous write in WS handler)
 
 ```ts
 expect(ws.send).toHaveBeenCalledWith({
@@ -608,10 +665,11 @@ In `src/components/TerminalView.tsx`:
 - send `sinceSeq` on attach/reconnect
 - on `terminal.output`: write and update `lastSeqRef`
 - on `terminal.output.gap`: write explicit marker line
+- keep existing `enqueueTerminalWrite` + RAF queue behavior to avoid WS message-loop blocking
 
 ```ts
 if (msg.type === 'terminal.output' && msg.terminalId === tid) {
-  if (msg.seqEnd <= lastSeqRef.current) return
+  if (msg.seqStart <= lastSeqRef.current) return
   enqueueTerminalWrite(msg.data)
   lastSeqRef.current = msg.seqEnd
 }
@@ -653,13 +711,14 @@ git commit -m "feat(client): switch terminal view to v2 sequence stream and remo
 **Step 1: Write failing UX tests**
 
 Require:
-- reconnect state does not render full-screen blocking overlay
-- terminal remains focusable and can send input while stream recovers
+- non-fatal reconnect/reattach states do not render full-screen blocking overlay
+- terminal remains focusable during attach replay/degraded streaming
+- when websocket is disconnected, input events are queued via `wsClient.send` (not dropped), and UI shows non-blocking offline status
 - only severe/fatal states use blocking overlay
 
 ```ts
 expect(screen.queryByText('Reconnecting...')).not.toBeInTheDocument()
-expect(sendInputSpy).toHaveBeenCalled()
+expect(wsSendSpy).toHaveBeenCalledWith(expect.objectContaining({ type: 'terminal.input' }))
 ```
 
 **Step 2: Run tests to verify failure**
@@ -680,7 +739,10 @@ Change spinner overlay logic:
 const showBlockingSpinner = terminalContent.status === 'creating' && connectionErrorCode !== 4003
 ```
 
-Add inline status badge/banner for reconnect/degraded stream; keep `ConnectionErrorOverlay` only for fatal limits.
+Separate state presentation:
+- `connection.status !== 'ready'`: inline offline/retrying status (non-blocking), no claim of immediate delivery.
+- `connection.status === 'ready'` + attach replay in progress: inline "recovering output" status (non-blocking).
+- keep `ConnectionErrorOverlay` only for fatal limits (`4003`, protocol mismatch fatal, auth fatal).
 
 Update `docs/index.html` mock to reflect inline degraded status treatment.
 
@@ -737,6 +799,7 @@ Expected: FAIL.
 Remove/replace:
 - `terminal.attached*` stream sender paths
 - attach chunk constants and timeouts
+- duplicated terminal snapshot chunking helpers in `server/ws-handler.ts` and `server/ws-chunking.ts` (remove terminal snapshot chunking implementation; retain non-terminal sessions chunking only if still used)
 - legacy docs for `MAX_WS_ATTACH_CHUNK_BYTES` / `WS_ATTACH_FRAME_SEND_TIMEOUT_MS` where no longer used for terminal replay
 
 Update README transport section to sequence replay and gap semantics.
@@ -767,11 +830,15 @@ git commit -m "chore(transport): remove legacy attach snapshot chunk pipeline af
 - Create: `test/e2e/terminal-flaky-network-responsiveness.test.tsx`
 - Modify: `test/unit/server/ws-handler-backpressure.test.ts`
 - Modify: `test/unit/client/lib/ws-client.test.ts`
+- Modify (if required by failing assertions): `server/terminal-stream/broker.ts`
+- Modify (if required by failing assertions): `src/lib/ws-client.ts`
+- Modify (if required by failing assertions): `src/components/TerminalView.tsx`
 
 **Step 1: Write failing resilience tests**
 
 Add scenarios:
 - simulated high `bufferedAmount` does not cause routine disconnect for terminal stream
+- simulated sustained catastrophic `bufferedAmount` does close with `4008`
 - reconnect with `sinceSeq` recovers only delta
 - queue overflow emits `terminal.output.gap` and continues streaming
 - client no 5-second reconnect loop for ordinary backlog
@@ -792,9 +859,14 @@ npm test -- test/unit/server/ws-handler-backpressure.test.ts test/server/ws-term
 
 Expected: FAIL.
 
-**Step 3: Implement missing behavior discovered by tests**
+**Step 3: Implement explicit fixes for any failing resilience case**
 
-Apply targeted fixes in broker/ws-client/TerminalView only where tests fail.
+Fix only the concrete failed assertions:
+
+1. Replay delta failure -> correct inclusive sequence comparisons (`sinceSeq`, `seqStart`, `seqEnd`) in broker/client.
+2. Attach-boundary race failure -> ensure attach-staging queue flush runs after replay completion under same terminal lock.
+3. Catastrophic breaker failure -> enforce "sustained threshold exceedance" logic (`bytes + stall duration`) before close.
+4. Client reconnect-loop failure -> keep ordinary queue pressure as non-fatal and retain queued input sends.
 
 **Step 4: Run tests to verify pass**
 
@@ -809,7 +881,7 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add test/server/ws-terminal-stream-v2-replay.test.ts test/e2e/terminal-flaky-network-responsiveness.test.tsx test/unit/server/ws-handler-backpressure.test.ts test/unit/client/lib/ws-client.test.ts
+git add test/server/ws-terminal-stream-v2-replay.test.ts test/e2e/terminal-flaky-network-responsiveness.test.tsx test/unit/server/ws-handler-backpressure.test.ts test/unit/client/lib/ws-client.test.ts server/terminal-stream/broker.ts src/lib/ws-client.ts src/components/TerminalView.tsx
 git commit -m "test(resilience): lock in v2 terminal streaming behavior under flaky-network and backpressure conditions"
 ```
 
@@ -852,8 +924,13 @@ Add server events:
 - `terminal_stream_replay_miss`
 - `terminal_stream_gap`
 - `terminal_stream_queue_pressure`
+- `terminal_stream_catastrophic_close`
 
-Document operational guidance and new env knobs in `README.md`.
+Document operational guidance and env knobs in `README.md`:
+- `TERMINAL_REPLAY_RING_MAX_BYTES` (default `262144`)
+- `TERMINAL_CLIENT_QUEUE_MAX_BYTES` (default `131072`)
+- `TERMINAL_WS_CATASTROPHIC_BUFFERED_BYTES` (default `16777216`)
+- `TERMINAL_WS_CATASTROPHIC_STALL_MS` (default `10000`)
 
 **Step 4: Full verification run**
 
@@ -881,9 +958,11 @@ git commit -m "chore(observability): add terminal stream v2 replay/gap/queue met
 
 1. Confirm no references remain to `terminal.attached.start|chunk|end`.
 2. Confirm no runtime path closes websocket for ordinary terminal output backpressure.
-3. Confirm `freshell.*.v1` keys are never read or written by current code.
-4. Confirm auth token survives upgrade and cookie is re-synced.
-5. Confirm `docs/index.html` reflects non-blocking reconnect UX.
+3. Confirm catastrophic close only occurs after sustained hard-threshold exceedance (bytes + duration).
+4. Confirm no runtime path reads/writes `pendingSnapshotClients`.
+5. Confirm `freshell.*.v1` keys are never read or written by current code.
+6. Confirm auth token survives upgrade and cookie is re-synced.
+7. Confirm `docs/index.html` reflects non-blocking reconnect UX.
 
 ---
 
