@@ -3,8 +3,10 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { EventEmitter } from 'events'
 import http from 'http'
 import WebSocket from 'ws'
-import { WsHandler, chunkProjects } from '../../../server/ws-handler'
+import { WsHandler } from '../../../server/ws-handler'
 import { TerminalRegistry } from '../../../server/terminal-registry'
+import { TerminalStreamBroker } from '../../../server/terminal-stream/broker'
+import { chunkProjects } from '../../../server/ws-chunking'
 import type { ProjectGroup } from '../../../server/coding-cli/types'
 import { WS_PROTOCOL_VERSION } from '../../../shared/ws-protocol'
 
@@ -28,6 +30,25 @@ function createMockWs(overrides: Record<string, unknown> = {}) {
   ws.close = vi.fn()
   Object.assign(ws, overrides)
   return ws
+}
+
+class FakeBrokerRegistry extends EventEmitter {
+  private records = new Map<string, { terminalId: string; buffer: { snapshot: () => string } }>()
+
+  createTerminal(terminalId: string) {
+    this.records.set(terminalId, {
+      terminalId,
+      buffer: { snapshot: () => '' },
+    })
+  }
+
+  attach(terminalId: string) {
+    return this.records.get(terminalId) ?? null
+  }
+
+  detach(_terminalId: string) {
+    return true
+  }
 }
 
 describe('WsHandler backpressure', () => {
@@ -465,5 +486,66 @@ describe('WsHandler integration: chunked handshake snapshot delivery', () => {
       delete process.env.AUTH_TOKEN
       delete process.env.HELLO_TIMEOUT_MS
     }
+  })
+})
+
+describe('TerminalStreamBroker catastrophic bufferedAmount handling', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.runOnlyPendingTimers()
+    vi.useRealTimers()
+  })
+
+  it('does not close the socket for short-lived catastrophic bufferedAmount spikes', async () => {
+    const registry = new FakeBrokerRegistry()
+    const broker = new TerminalStreamBroker(registry as any)
+    registry.createTerminal('term-spike')
+
+    const ws = createMockWs({
+      bufferedAmount: 17 * 1024 * 1024, // Above catastrophic threshold
+    })
+    const closeSpy = vi.spyOn(ws, 'close')
+
+    const attached = await broker.attach(ws as any, 'term-spike', 0)
+    expect(attached).toBe(true)
+
+    registry.emit('terminal.output.raw', { terminalId: 'term-spike', data: 'first', at: Date.now() })
+
+    // Stay above threshold for less than the sustained stall window.
+    vi.advanceTimersByTime(9_000)
+    expect(closeSpy).not.toHaveBeenCalled()
+
+    // Recover below threshold and allow queued frame to flush.
+    ws.bufferedAmount = 0
+    vi.advanceTimersByTime(100)
+    expect(ws.send).toHaveBeenCalledWith(expect.stringContaining('"type":"terminal.output"'))
+
+    broker.close()
+  })
+
+  it('closes the socket with 4008 after sustained catastrophic bufferedAmount', async () => {
+    const registry = new FakeBrokerRegistry()
+    const broker = new TerminalStreamBroker(registry as any)
+    registry.createTerminal('term-stalled')
+
+    const ws = createMockWs({
+      bufferedAmount: 17 * 1024 * 1024, // Above catastrophic threshold
+    })
+    const closeSpy = vi.spyOn(ws, 'close')
+
+    const attached = await broker.attach(ws as any, 'term-stalled', 0)
+    expect(attached).toBe(true)
+
+    registry.emit('terminal.output.raw', { terminalId: 'term-stalled', data: 'blocked', at: Date.now() })
+
+    // Exceed the sustained stall threshold (10s default) so broker must hard-close.
+    vi.advanceTimersByTime(11_000)
+
+    expect(closeSpy).toHaveBeenCalledWith(4008, 'Catastrophic backpressure')
+
+    broker.close()
   })
 })

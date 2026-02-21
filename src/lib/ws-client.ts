@@ -210,7 +210,8 @@ export class WsClient {
 
       this.ws.onclose = (event) => {
         this.clearReadyTimeout()
-        const wasConnecting = this._state === 'connecting'
+        const wasReady = this._state === 'ready'
+        const closedBeforeReady = !wasReady
         this._state = 'disconnected'
         this.ws = null
 
@@ -262,7 +263,7 @@ export class WsClient {
           return
         }
 
-        if (wasConnecting) {
+        if (closedBeforeReady) {
           finishReject(new Error('Connection closed before ready'))
         }
 
@@ -270,7 +271,7 @@ export class WsClient {
           logClientPerf('perf.ws_closed', {
             code: event.code,
             reason: event.reason,
-            wasConnecting,
+            closedBeforeReady,
           }, 'warn')
         }
 

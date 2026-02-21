@@ -126,6 +126,26 @@ describe('WsClient.connect', () => {
     expect(Math.max(...delays)).toBeGreaterThanOrEqual(5000)
   })
 
+  it('uses standard reconnect timing for ordinary disconnects (no backpressure penalty loop)', async () => {
+    const setTimeoutSpy = vi.spyOn(window, 'setTimeout')
+
+    const c = new WsClient('ws://example/ws')
+    const p = c.connect()
+    expect(MockWebSocket.instances).toHaveLength(1)
+
+    MockWebSocket.instances[0]._open()
+    MockWebSocket.instances[0]._close(1006, 'Abnormal closure')
+
+    await expect(p).rejects.toThrow(/closed before ready/i)
+
+    const reconnectDelays = setTimeoutSpy.mock.calls
+      .map((call) => call[1])
+      .filter((d): d is number => typeof d === 'number' && d < 10000)
+
+    expect(reconnectDelays).toContain(1000)
+    expect(reconnectDelays.every((delay) => delay < 5000)).toBe(true)
+  })
+
   it('treats SERVER_SHUTDOWN (4009) as transient and resets backoff for fast reconnect', async () => {
     const setTimeoutSpy = vi.spyOn(window, 'setTimeout')
 
