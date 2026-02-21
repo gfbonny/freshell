@@ -188,7 +188,7 @@ git commit -m "feat(protocol): enforce websocket protocol v2 with hard mismatch 
 Cover:
 - bumping existing `STORAGE_VERSION` clears legacy `freshell.*.v1` while preserving `freshell.auth-token`
 - migration clears stale `freshell-auth` cookie when no auth token remains
-- bootstrap order is deterministic: auth initialization runs before storage migration, and storage migration runs before store import
+- bootstrap order is deterministic without dynamic imports: storage migration module executes before store module initialization
 - second migration run is idempotent no-op
 
 ```ts
@@ -226,29 +226,21 @@ export function runStorageMigration(): void {
 
   localStorage.setItem('freshell_version', String(STORAGE_VERSION))
 }
+
+// Execute on import so migration runs before store initialization.
+runStorageMigration()
 ```
 
-In `src/main.tsx`, make bootstrap order explicit using an async bootstrap function (not top-level await):
+In `src/main.tsx`, keep synchronous bootstrap and enforce import order:
 
 ```ts
-async function bootstrap() {
-  initializeAuthToken()
-  runStorageMigration()
-  const { store } = await import('@/store/store')
+import '@/store/storage-migration'
+import { store } from '@/store/store'
 
-  ReactDOM.createRoot(document.getElementById('root')!).render(
-    <Provider store={store}>
-      <App />
-    </Provider>,
-  )
-}
-
-void bootstrap()
+initializeAuthToken()
 ```
 
-Keep existing pre-render side effects (`createClientLogger().installConsoleCapture()`, `initClientPerfLogging()`, `registerServiceWorker()`) before `void bootstrap()`.
-
-In `src/store/store.ts`, remove side-effect import of `./storage-migration` so migration is not implicit.
+In `src/store/store.ts`, remove side-effect import of `./storage-migration` (migration now owned by `main.tsx` import order). This preserves static module graph for Vite HMR and avoids async dynamic-import bootstrap complexity.
 
 In `src/lib/auth.ts`, add and use `clearAuthCookie()` helper instead of duplicating token-source logic. Keep `initializeAuthToken()` as the single source of truth for URL/session/local token bootstrap.
 
@@ -281,6 +273,7 @@ git commit -m "feat(bootstrap): use existing storage migration v3 to clear legac
 - Modify: `src/store/panesSlice.ts`
 - Modify: `src/store/tabsSlice.ts`
 - Modify: `src/store/sessionActivitySlice.ts`
+- Modify: `src/store/sessionActivityPersistence.ts`
 - Modify: `src/store/tabRegistrySlice.ts`
 - Modify: `src/store/persistBroadcast.ts`
 - Modify: `src/store/crossTabSync.ts`
@@ -297,7 +290,6 @@ Require all store persistence reads/writes to use `.v2` keys and broadcast chann
 expect(TABS_STORAGE_KEY).toBe('freshell.tabs.v2')
 expect(PANES_STORAGE_KEY).toBe('freshell.panes.v2')
 expect(PERSIST_BROADCAST_CHANNEL_NAME).toBe('freshell.persist.v2')
-expect(CROSS_TAB_SYNC_CHANNEL_NAME).toBe('freshell.persist.v2')
 ```
 
 **Step 2: Run tests to verify failure**
@@ -324,7 +316,11 @@ export const STORAGE_KEYS = {
 } as const
 ```
 
-Update broadcast channel constant to `freshell.persist.v2`.
+Explicitly refactor duplicated constants in `src/store/persistMiddleware.ts` to import from `src/store/storage-keys.ts` (do not leave local `.v1` literals).
+
+Update broadcast channel constant to `freshell.persist.v2` in `src/store/persistBroadcast.ts`, and keep `src/store/crossTabSync.ts` consuming the shared `PERSIST_BROADCAST_CHANNEL_NAME` export (no separate channel constant).
+
+Add migration note in comments/docs: storage key namespace suffix (`.v1`, `.v2`) is independent from `freshell_version` migration counter (`STORAGE_VERSION`).
 
 **Step 4: Run tests to verify pass**
 
@@ -339,7 +335,7 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add src/store/storage-keys.ts src/store/persistedState.ts src/store/persistMiddleware.ts src/store/panesSlice.ts src/store/tabsSlice.ts src/store/sessionActivitySlice.ts src/store/tabRegistrySlice.ts src/store/persistBroadcast.ts src/store/crossTabSync.ts test/unit/client/store/persistedState.test.ts test/unit/client/store/panesPersistence.test.ts test/unit/client/store/tabsPersistence.test.ts test/unit/client/store/persistBroadcast.test.ts
+git add src/store/storage-keys.ts src/store/persistedState.ts src/store/persistMiddleware.ts src/store/panesSlice.ts src/store/tabsSlice.ts src/store/sessionActivitySlice.ts src/store/sessionActivityPersistence.ts src/store/tabRegistrySlice.ts src/store/persistBroadcast.ts src/store/crossTabSync.ts test/unit/client/store/persistedState.test.ts test/unit/client/store/panesPersistence.test.ts test/unit/client/store/tabsPersistence.test.ts test/unit/client/store/persistBroadcast.test.ts
 git commit -m "refactor(storage): move persisted client state to v2 keys and channel namespace for hard protocol cutover"
 ```
 
@@ -613,7 +609,8 @@ Expected: FAIL.
   - do not close for ordinary queue overflow
   - close with `4008` only when `ws.bufferedAmount > TERMINAL_WS_CATASTROPHIC_BUFFERED_BYTES` continuously for `TERMINAL_WS_CATASTROPHIC_STALL_MS`
 
-In `server/ws-handler.ts`, remove routing/invocation of legacy chunked attach snapshot flow (`terminal.attached*`) and delegate attach to broker APIs. Keep residual helper/constant/schema cleanup for Task 10.
+In `server/ws-handler.ts`, remove attach call sites/wiring for legacy snapshot flow (including `terminal.attach` branches, `attachSendChains` usage, and calls into `sendAttachSnapshotAndFinalize`) and delegate attach to broker APIs.
+Leave only dead helper definitions/constants/types cleanup for Task 10.
 
 **Step 4: Run tests to verify pass**
 
@@ -680,10 +677,11 @@ In `src/components/TerminalView.tsx`:
 - on `terminal.output`: write and update `lastSeqRef`
 - on `terminal.output.gap`: write explicit marker line
 - keep existing `enqueueTerminalWrite` + RAF queue behavior to avoid WS message-loop blocking
+- assume broker emits strictly increasing, non-overlapping sequence ranges
 
 ```ts
 if (msg.type === 'terminal.output' && msg.terminalId === tid) {
-  if (msg.seqStart <= lastSeqRef.current) return
+  if (msg.seqEnd <= lastSeqRef.current) return
   enqueueTerminalWrite(msg.data)
   lastSeqRef.current = msg.seqEnd
 }
@@ -774,6 +772,8 @@ if (this._state !== 'ready') {
 }
 ```
 
+Use `maxQueueSize = 1000` (existing default in `ws-client.ts`) and keep it bounded to avoid unbounded client memory during long disconnects.
+
 Update `docs/index.html` mock to reflect inline degraded status treatment.
 
 **Step 4: Run tests to verify pass**
@@ -829,8 +829,9 @@ Expected: FAIL.
 
 Remove/replace:
 - remaining `terminal.attached*` supporting code after Task 7 cutover (legacy message types/schemas/constants/helpers)
+- remove dead helpers: `sendAttachSnapshotAndFinalize`, `enqueueAttachSnapshotSend`, local `chunkTerminalSnapshot` path in `server/ws-handler.ts`
 - attach chunk constants and timeouts
-- duplicated terminal snapshot chunking helpers in `server/ws-handler.ts` and `server/ws-chunking.ts` (remove terminal snapshot chunking implementation; retain non-terminal sessions chunking only if still used)
+- remove terminal snapshot chunking export from `server/ws-chunking.ts`; retain non-terminal sessions chunking only if still used
 - legacy docs for `MAX_WS_ATTACH_CHUNK_BYTES` / `WS_ATTACH_FRAME_SEND_TIMEOUT_MS` where no longer used for terminal replay
 
 Update README transport section to sequence replay and gap semantics.
