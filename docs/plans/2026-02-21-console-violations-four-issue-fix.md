@@ -595,3 +595,14 @@ git commit -m "chore(perf-plan): record verification outcomes for console violat
 - Follow strict Red-Green-Refactor for every task.
 - Keep commits small and task-scoped.
 - Run targeted tests after each step, then full `npm test` before merge.
+
+## Implementation Outcomes (2026-02-21)
+
+Automated regression checks now cover all four issue clusters.
+
+| Metric | Before | After |
+| --- | --- | --- |
+| chunked mismatch warns / synthetic run | present (failing assertion) | `0` (`test/e2e/terminal-console-violations-regression.test.tsx`) |
+| slow ws handler samples (`>30ms`) in synthetic run | present (failing assertion) | none observed (`test/e2e/terminal-console-violations-regression.test.tsx`) |
+| oversized `terminal.output` frame handling | single oversized frames possible | bounded to `<= 8192` chars/frame with order preserved (`test/unit/server/terminal-lifecycle.test.ts`) |
+| `/api/logs/client` perf recursion signal | included in remote transport/perf resource warnings | filtered + deduped (`test/unit/client/lib/client-logger.test.ts`, `test/unit/client/lib/perf-logger.test.ts`) |
