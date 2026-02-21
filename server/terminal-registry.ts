@@ -13,6 +13,7 @@ import { convertWindowsPathToWslPath, isReachableDirectorySync } from './path-ut
 import { isValidClaudeSessionId } from './claude-session-id.js'
 import type { CodingCliProviderName } from './coding-cli/types.js'
 import { SessionBindingAuthority, type BindResult } from './session-binding-authority.js'
+import type { TerminalOutputRawEvent } from './terminal-stream/registry-events.js'
 
 const MAX_WS_BUFFERED_AMOUNT = Number(process.env.MAX_WS_BUFFERED_AMOUNT || 2 * 1024 * 1024)
 const DEFAULT_MAX_SCROLLBACK_CHARS = Number(process.env.MAX_SCROLLBACK_CHARS || 64 * 1024)
@@ -691,6 +692,8 @@ export class TerminalRegistry extends EventEmitter {
   private maxExitedTerminals: number
   private scrollbackMaxChars: number
   private maxPendingSnapshotChars: number
+  // Legacy transport batching path. Broker cutover destination:
+  // - outputBuffers/flush timers/mobile batching -> broker client-output queue.
   private outputBuffers = new Map<WebSocket, PendingOutput>()
 
   constructor(settings?: AppSettings, maxTerminals?: number, maxExitedTerminals?: number) {
@@ -935,6 +938,11 @@ export class TerminalRegistry extends EventEmitter {
       record.lastActivityAt = now
       record.warnedIdle = false
       record.buffer.append(data)
+      this.emit('terminal.output.raw', {
+        terminalId,
+        data,
+        at: now,
+      } satisfies TerminalOutputRawEvent)
       if (record.perf) {
         record.perf.outBytes += data.length
         record.perf.outChunks += 1
@@ -968,6 +976,8 @@ export class TerminalRegistry extends EventEmitter {
         }
       }
       for (const client of record.clients) {
+        // Legacy snapshot ordering path. Broker cutover destination:
+        // - pendingSnapshotClients ordering -> broker attach-staging queue.
         const pending = record.pendingSnapshotClients.get(client)
         if (pending) {
           const nextChars = pending.queuedChars + data.length
@@ -1152,6 +1162,22 @@ export class TerminalRegistry extends EventEmitter {
     return this.terminals.get(terminalId)
   }
 
+  getAttachedClientCount(terminalId: string): number {
+    const term = this.terminals.get(terminalId)
+    return term ? term.clients.size : 0
+  }
+
+  listAttachedClientIds(terminalId: string): string[] {
+    const term = this.terminals.get(terminalId)
+    if (!term) return []
+    const ids: string[] = []
+    for (const client of term.clients) {
+      const connectionId = (client as LiveWebSocket).connectionId
+      if (connectionId) ids.push(connectionId)
+    }
+    return ids
+  }
+
   private releaseBinding(terminalId: string): void {
     this.bindingAuthority.unbindTerminal(terminalId)
     const rec = this.terminals.get(terminalId)
@@ -1207,6 +1233,8 @@ export class TerminalRegistry extends EventEmitter {
     perf?: TerminalRecord['perf'],
   ): void {
     if (!data) return
+    // Legacy framing path. Broker cutover destination:
+    // - safeSendOutputFrames + safeSend backpressure guards -> broker scheduler + catastrophic breaker.
     for (let offset = 0; offset < data.length; offset += MAX_OUTPUT_FRAME_CHARS) {
       this.safeSend(
         client,
