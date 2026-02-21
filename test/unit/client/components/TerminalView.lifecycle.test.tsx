@@ -1322,6 +1322,103 @@ describe('TerminalView lifecycle updates', () => {
     expect(layout.content.status).toBe('creating')
   })
 
+  describe('non-blocking reconnect', () => {
+    function setupNonBlockingTerminal(connectionStatus: 'ready' | 'disconnected') {
+      const tabId = 'tab-non-blocking'
+      const paneId = 'pane-non-blocking'
+      const paneContent: TerminalPaneContent = {
+        kind: 'terminal',
+        createRequestId: 'req-non-blocking',
+        status: 'running',
+        mode: 'shell',
+        shell: 'system',
+        terminalId: 'term-non-blocking',
+      }
+
+      const root: PaneNode = { type: 'leaf', id: paneId, content: paneContent }
+      const store = configureStore({
+        reducer: {
+          tabs: tabsReducer,
+          panes: panesReducer,
+          settings: settingsReducer,
+          connection: connectionReducer,
+          turnCompletion: turnCompletionReducer,
+        },
+        preloadedState: {
+          tabs: {
+            tabs: [{
+              id: tabId,
+              mode: 'shell',
+              status: 'running',
+              title: 'Shell',
+              titleSetByUser: false,
+              terminalId: 'term-non-blocking',
+              createRequestId: 'req-non-blocking',
+            }],
+            activeTabId: tabId,
+          },
+          panes: {
+            layouts: { [tabId]: root },
+            activePane: { [tabId]: paneId },
+            paneTitles: {},
+          },
+          settings: { settings: defaultSettings, status: 'loaded' },
+          connection: {
+            status: connectionStatus,
+            error: null,
+          },
+          turnCompletion: { seq: 0, lastEvent: null, pendingEvents: [], attentionByTab: {} },
+        },
+      })
+
+      return { tabId, paneId, paneContent, store }
+    }
+
+    it('does not render a blocking reconnect spinner during attach replay', async () => {
+      const { tabId, paneId, paneContent, store } = setupNonBlockingTerminal('ready')
+
+      const { queryByText, queryByTestId } = render(
+        <Provider store={store}>
+          <TerminalView tabId={tabId} paneId={paneId} paneContent={paneContent} />
+        </Provider>
+      )
+
+      await waitFor(() => {
+        expect(wsMocks.send).toHaveBeenCalledWith({
+          type: 'terminal.attach',
+          terminalId: 'term-non-blocking',
+          sinceSeq: 0,
+        })
+      })
+
+      expect(queryByTestId('loader')).toBeNull()
+      expect(queryByText('Reconnecting...')).toBeNull()
+      expect(queryByText('Recovering terminal output...')).not.toBeNull()
+    })
+
+    it('shows inline offline status while disconnected without blocking overlay', async () => {
+      const { tabId, paneId, paneContent, store } = setupNonBlockingTerminal('disconnected')
+
+      const { queryByText, queryByTestId } = render(
+        <Provider store={store}>
+          <TerminalView tabId={tabId} paneId={paneId} paneContent={paneContent} />
+        </Provider>
+      )
+
+      await waitFor(() => {
+        expect(wsMocks.send).toHaveBeenCalledWith({
+          type: 'terminal.attach',
+          terminalId: 'term-non-blocking',
+          sinceSeq: 0,
+        })
+      })
+
+      expect(queryByTestId('loader')).toBeNull()
+      expect(queryByText('Reconnecting...')).toBeNull()
+      expect(queryByText('Offline: input will queue until reconnected.')).not.toBeNull()
+    })
+  })
+
   describe('v2 stream lifecycle', () => {
     async function renderTerminalHarness(opts?: { status?: 'creating' | 'running'; terminalId?: string }) {
       const tabId = 'tab-v2-stream'

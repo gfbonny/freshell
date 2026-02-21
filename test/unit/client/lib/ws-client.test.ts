@@ -170,6 +170,28 @@ describe('WsClient.connect', () => {
     expect(MockWebSocket.instances).toHaveLength(1)
   })
 
+  it('queues input while disconnected and flushes after ready', async () => {
+    const c = new WsClient('ws://example/ws')
+
+    c.send({ type: 'terminal.input', terminalId: 'term-1', data: 'pwd\n' })
+
+    const p = c.connect()
+    expect(MockWebSocket.instances).toHaveLength(1)
+    MockWebSocket.instances[0]._open()
+
+    const sentBeforeReady = MockWebSocket.instances[0].sent.map((entry) => JSON.parse(entry))
+    expect(sentBeforeReady).toHaveLength(1)
+    expect(sentBeforeReady[0].type).toBe('hello')
+
+    MockWebSocket.instances[0]._message({ type: 'ready' })
+    await p
+
+    const sentAfterReady = MockWebSocket.instances[0].sent.map((entry) => JSON.parse(entry))
+    expect(sentAfterReady.some((msg: any) =>
+      msg.type === 'terminal.input' && msg.terminalId === 'term-1' && msg.data === 'pwd\n',
+    )).toBe(true)
+  })
+
   it('disconnect clears pending reconnect timers', async () => {
     const c = new WsClient('ws://example/ws')
     const p = c.connect()

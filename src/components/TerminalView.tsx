@@ -14,6 +14,7 @@ import { initLayout, updatePaneContent, updatePaneTitle } from '@/store/panesSli
 import { updateSessionActivity } from '@/store/sessionActivitySlice'
 import { updateSettingsLocal } from '@/store/settingsSlice'
 import { recordTurnComplete, clearTabAttention, clearPaneAttention } from '@/store/turnCompletionSlice'
+import { isFatalConnectionErrorCode } from '@/store/connectionSlice'
 import { api } from '@/lib/api'
 import { getWsClient } from '@/lib/ws-client'
 import { getTerminalTheme } from '@/lib/terminal-themes'
@@ -134,6 +135,7 @@ function resolveMobileToolbarInput(keyId: Exclude<MobileToolbarKeyId, 'ctrl'>, c
 export default function TerminalView({ tabId, paneId, paneContent, hidden }: TerminalViewProps) {
   const dispatch = useAppDispatch()
   const isMobile = useMobile()
+  const connectionStatus = useAppSelector((s) => s.connection.status)
   const tab = useAppSelector((s) => s.tabs.tabs.find((t) => t.id === tabId))
   const activeTabId = useAppSelector((s) => s.tabs.activeTabId)
   const activePaneId = useAppSelector((s) => s.panes.activePane[tabId])
@@ -1452,7 +1454,13 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     return null
   }
 
-  const showSpinner = (terminalContent.status === 'creating' || isAttaching) && connectionErrorCode !== 4003
+  const hasFatalConnectionError = isFatalConnectionErrorCode(connectionErrorCode)
+  const showBlockingSpinner = terminalContent.status === 'creating' && !hasFatalConnectionError
+  const showInlineOfflineStatus = connectionStatus !== 'ready' && !hasFatalConnectionError
+  const showInlineRecoveringStatus = connectionStatus === 'ready' && isAttaching && terminalContent.status !== 'creating'
+  const inlineStatusMessage = showInlineOfflineStatus
+    ? 'Offline: input will queue until reconnected.'
+    : (showInlineRecoveringStatus ? 'Recovering terminal output...' : null)
 
   return (
     <div
@@ -1506,14 +1514,19 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           </div>
         </div>
       )}
-      {showSpinner && (
+      {showBlockingSpinner && (
         <div className="absolute inset-0 flex items-center justify-center bg-background/80">
           <div className="flex flex-col items-center gap-3">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">
-              {terminalContent.status === 'creating' ? 'Starting terminal...' : 'Reconnecting...'}
-            </span>
+            <span className="text-sm text-muted-foreground">Starting terminal...</span>
           </div>
+        </div>
+      )}
+      {inlineStatusMessage && (
+        <div className="pointer-events-none absolute right-2 top-2 z-10" role="status" aria-live="polite">
+          <span className="rounded bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow-sm ring-1 ring-border/60">
+            {inlineStatusMessage}
+          </span>
         </div>
       )}
       <ConnectionErrorOverlay />
