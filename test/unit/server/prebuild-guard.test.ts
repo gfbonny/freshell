@@ -1,8 +1,42 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import http from 'http'
-import { checkProdRunning } from '../../../scripts/prebuild-guard.js'
+import { checkProdRunning, parseEnv } from '../../../scripts/prebuild-guard.js'
 
 describe('prebuild-guard', () => {
+  describe('parseEnv', () => {
+    it('parses simple key=value pairs', () => {
+      expect(parseEnv('PORT=3001\nHOST=localhost')).toEqual({
+        PORT: '3001',
+        HOST: 'localhost',
+      })
+    })
+
+    it('strips double quotes from values', () => {
+      expect(parseEnv('PORT="3001"')).toEqual({ PORT: '3001' })
+    })
+
+    it('strips single quotes from values', () => {
+      expect(parseEnv("PORT='3001'")).toEqual({ PORT: '3001' })
+    })
+
+    it('does not strip mismatched quotes', () => {
+      expect(parseEnv('PORT="3001\'')).toEqual({ PORT: '"3001\'' })
+    })
+
+    it('skips blank lines and comments', () => {
+      const content = '# This is a comment\n\nPORT=3001\n  # Another comment\nHOST=localhost'
+      expect(parseEnv(content)).toEqual({ PORT: '3001', HOST: 'localhost' })
+    })
+
+    it('handles empty string', () => {
+      expect(parseEnv('')).toEqual({})
+    })
+
+    it('preserves unquoted values with internal quotes', () => {
+      expect(parseEnv('MSG=hello "world"')).toEqual({ MSG: 'hello "world"' })
+    })
+  })
+
   describe('checkProdRunning', () => {
     let server: http.Server
     let port: number

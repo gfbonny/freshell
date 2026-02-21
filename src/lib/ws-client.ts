@@ -175,7 +175,10 @@ export class WsClient {
 
         if (msg.type === 'error' && msg.code === 'NOT_AUTHENTICATED') {
           this.clearReadyTimeout()
-          finishReject(new Error('Authentication failed'))
+          this.intentionalClose = true
+          const err = new Error('Authentication failed')
+          ;(err as any).wsCloseCode = 4001
+          finishReject(err)
           return
         }
 

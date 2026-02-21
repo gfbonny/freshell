@@ -14,20 +14,27 @@ import { fileURLToPath } from 'url'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
 // Load .env file manually (dotenv not available at this stage)
+export function parseEnv(content: string): Record<string, string> {
+  const env: Record<string, string> = {}
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    const match = trimmed.match(/^([^=]+)=(.*)$/)
+    if (match) {
+      // Strip surrounding quotes (single or double) from values
+      const raw = match[2]
+      const unquoted = raw.replace(/^(['"])(.*)\1$/, '$2')
+      env[match[1]] = unquoted
+    }
+  }
+  return env
+}
+
 function loadEnv(): Record<string, string> {
   try {
     const envPath = resolve(__dirname, '..', '.env')
     const content = readFileSync(envPath, 'utf-8')
-    const env: Record<string, string> = {}
-    for (const line of content.split('\n')) {
-      const trimmed = line.trim()
-      if (!trimmed || trimmed.startsWith('#')) continue
-      const match = trimmed.match(/^([^=]+)=(.*)$/)
-      if (match) {
-        env[match[1]] = match[2]
-      }
-    }
-    return env
+    return parseEnv(content)
   } catch {
     return {}
   }
@@ -39,14 +46,12 @@ export interface ProdCheckResult {
 }
 
 export async function checkProdRunning(port: number): Promise<ProdCheckResult> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 2000)
   try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 2000)
-
     const res = await fetch(`http://127.0.0.1:${port}/api/health`, {
       signal: controller.signal,
     })
-    clearTimeout(timeout)
 
     if (!res.ok) {
       return { status: 'not-running' }
@@ -60,6 +65,8 @@ export async function checkProdRunning(port: number): Promise<ProdCheckResult> {
     return { status: 'not-running' }
   } catch {
     return { status: 'not-running' }
+  } finally {
+    clearTimeout(timeout)
   }
 }
 

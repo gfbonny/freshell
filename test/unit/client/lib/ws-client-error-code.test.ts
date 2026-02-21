@@ -89,6 +89,27 @@ describe('WsClient close code errors', () => {
     }
   })
 
+  it('4001 error includes wsCloseCode when server sends error message then close (real auth flow)', async () => {
+    const c = new WsClient('ws://example/ws')
+    const p = c.connect()
+
+    const ws = MockWebSocket.instances[0]
+    ws._open()
+    // Real server sends NOT_AUTHENTICATED error message first...
+    ws._message({ type: 'error', code: 'NOT_AUTHENTICATED', message: 'Not authenticated' })
+    // ...then closes with 4001
+    ws._close(4001, 'Not authenticated')
+
+    try {
+      await p
+      expect.fail('should have rejected')
+    } catch (err: any) {
+      expect(err).toBeInstanceOf(Error)
+      expect(err.message).toContain('Authentication failed')
+      expect(err.wsCloseCode).toBe(4001)
+    }
+  })
+
   it('non-close-code errors do not have wsCloseCode', async () => {
     const c = new WsClient('ws://example/ws')
     const p = c.connect()
