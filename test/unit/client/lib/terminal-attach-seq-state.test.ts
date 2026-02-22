@@ -86,6 +86,15 @@ describe('terminal-attach-seq-state', () => {
     expect(frame.state.pendingReplay).toBeNull()
   })
 
+  it('clears pending replay when a gap covers replay tail', () => {
+    let state = beginAttach(createAttachSeqState({ lastSeq: 0 }))
+    state = onAttachReady(state, { headSeq: 8, replayFromSeq: 6, replayToSeq: 8 })
+    state = onOutputGap(state, { fromSeq: 1, toSeq: 8 })
+    expect(state.lastSeq).toBe(8)
+    expect(state.pendingReplay).toBeNull()
+    expect(state.awaitingFreshSequence).toBe(false)
+  })
+
   it('allows single fresh restart at seq=1 while awaitingFreshSequence', () => {
     let state = createAttachSeqState({ lastSeq: 22, awaitingFreshSequence: true })
     const first = onOutputFrame(state, { seqStart: 1, seqEnd: 1 })

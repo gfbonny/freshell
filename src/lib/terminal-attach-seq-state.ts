@@ -1,11 +1,8 @@
 export type PendingReplay = { fromSeq: number; toSeq: number } | null
 
-export type OutputFrameDecision = {
-  accept: boolean
-  reason?: 'overlap'
-  freshReset: boolean
-  state: AttachSeqState
-}
+export type OutputFrameDecision =
+  | { accept: true; freshReset: boolean; state: AttachSeqState }
+  | { accept: false; reason: 'overlap'; freshReset: false }
 
 export type AttachSeqState = {
   lastSeq: number
@@ -90,13 +87,14 @@ export function onOutputFrame(
       state.awaitingFreshSequence
       && frame.seqStart === 1
       && state.lastSeq > 0
-    if (!freshReset) return { accept: false, reason: 'overlap', freshReset: false, state }
+    if (!freshReset) return { accept: false, reason: 'overlap', freshReset: false }
     // A fresh reset means we are treating this as a new stream root; any stale replay
     // window from the previous stream is intentionally discarded.
     const resetState = { ...state, lastSeq: 0, pendingReplay: null }
     // Bounded recursion: lastSeq resets to 0, so the follow-up call cannot hit
     // this overlap branch again for a seqStart=1 frame.
     const resetDecision = onOutputFrame(resetState, frame)
+    if (!resetDecision.accept) return resetDecision
     return { ...resetDecision, freshReset: true }
   }
 
