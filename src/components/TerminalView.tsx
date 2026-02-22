@@ -77,6 +77,8 @@ const MOBILE_KEY_REPEAT_INTERVAL_MS = 70
 const TAP_MULTI_INTERVAL_MS = 350
 const TAP_MAX_DISTANCE_PX = 24
 const TOUCH_SCROLL_PIXELS_PER_LINE = 18
+const LIGHT_THEME_MIN_CONTRAST_RATIO = 4.5
+const DEFAULT_MIN_CONTRAST_RATIO = 1
 
 const SEARCH_DECORATIONS = {
   matchBackground: '#515C6A',
@@ -84,6 +86,12 @@ const SEARCH_DECORATIONS = {
   activeMatchBackground: '#EEB04A',
   activeMatchColorOverviewRuler: '#EEB04A',
 } as const
+
+function resolveMinimumContrastRatio(theme: unknown): number {
+  if (typeof theme !== 'object' || theme === null) return DEFAULT_MIN_CONTRAST_RATIO
+  const isDark = (theme as { isDark?: unknown }).isDark
+  return isDark === false ? LIGHT_THEME_MIN_CONTRAST_RATIO : DEFAULT_MIN_CONTRAST_RATIO
+}
 
 function createNoopRuntime(): TerminalRuntime {
   return {
@@ -776,6 +784,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       termRef.current = null
     }
 
+    const resolvedTheme = getTerminalTheme(settings.terminal.theme, settings.theme)
     const term = new Terminal({
       allowProposedApi: true,
       convertEol: true,
@@ -784,7 +793,8 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       fontFamily: resolveTerminalFontFamily(settings.terminal.fontFamily),
       lineHeight: settings.terminal.lineHeight,
       scrollback: settings.terminal.scrollback,
-      theme: getTerminalTheme(settings.terminal.theme, settings.theme),
+      theme: resolvedTheme,
+      minimumContrastRatio: resolveMinimumContrastRatio(resolvedTheme),
       linkHandler: {
         activate: (_event: MouseEvent, uri: string) => {
           if (warnExternalLinksRef.current !== false) {
@@ -1110,12 +1120,14 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     if (!isTerminal) return
     const term = termRef.current
     if (!term) return
+    const resolvedTheme = getTerminalTheme(settings.terminal.theme, settings.theme)
     term.options.cursorBlink = settings.terminal.cursorBlink
     term.options.fontSize = settings.terminal.fontSize
     term.options.fontFamily = resolveTerminalFontFamily(settings.terminal.fontFamily)
     term.options.lineHeight = settings.terminal.lineHeight
     term.options.scrollback = settings.terminal.scrollback
-    term.options.theme = getTerminalTheme(settings.terminal.theme, settings.theme)
+    term.options.theme = resolvedTheme
+    term.options.minimumContrastRatio = resolveMinimumContrastRatio(resolvedTheme)
     if (!hidden) requestTerminalLayout({ fit: true, resize: true })
   }, [isTerminal, settings, hidden, requestTerminalLayout])
 

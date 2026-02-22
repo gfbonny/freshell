@@ -19,6 +19,10 @@ const wsMocks = vi.hoisted(() => ({
   onReconnect: vi.fn().mockReturnValue(() => {}),
 }))
 
+const terminalThemeMocks = vi.hoisted(() => ({
+  getTerminalTheme: vi.fn(() => ({})),
+}))
+
 const restoreMocks = vi.hoisted(() => ({
   consumeTerminalRestoreRequestId: vi.fn(() => false),
   addTerminalRestoreRequestId: vi.fn(),
@@ -34,7 +38,7 @@ vi.mock('@/lib/ws-client', () => ({
 }))
 
 vi.mock('@/lib/terminal-themes', () => ({
-  getTerminalTheme: () => ({}),
+  getTerminalTheme: terminalThemeMocks.getTerminalTheme,
 }))
 
 vi.mock('@/lib/terminal-restore', () => ({
@@ -107,6 +111,8 @@ describe('TerminalView lifecycle updates', () => {
     localStorage.clear()
     __resetTerminalCursorCacheForTests()
     wsMocks.send.mockClear()
+    terminalThemeMocks.getTerminalTheme.mockReset()
+    terminalThemeMocks.getTerminalTheme.mockReturnValue({})
     restoreMocks.consumeTerminalRestoreRequestId.mockReset()
     restoreMocks.consumeTerminalRestoreRequestId.mockReturnValue(false)
     terminalInstances.length = 0
@@ -139,6 +145,83 @@ describe('TerminalView lifecycle updates', () => {
     requestAnimationFrameSpy = null
     cancelAnimationFrameSpy = null
     reconnectHandler = null
+  })
+
+  function setupThemeTerminal() {
+    const tabId = 'tab-theme'
+    const paneId = 'pane-theme'
+
+    const paneContent: TerminalPaneContent = {
+      kind: 'terminal',
+      createRequestId: 'req-theme',
+      status: 'creating',
+      mode: 'claude',
+      shell: 'system',
+      initialCwd: '/tmp',
+    }
+
+    const root: PaneNode = { type: 'leaf', id: paneId, content: paneContent }
+
+    const store = configureStore({
+      reducer: {
+        tabs: tabsReducer,
+        panes: panesReducer,
+        settings: settingsReducer,
+        connection: connectionReducer,
+      },
+      preloadedState: {
+        tabs: {
+          tabs: [{
+            id: tabId,
+            mode: 'claude',
+            status: 'running',
+            title: 'Claude',
+            titleSetByUser: false,
+            createRequestId: 'req-theme',
+          }],
+          activeTabId: tabId,
+        },
+        panes: {
+          layouts: { [tabId]: root },
+          activePane: { [tabId]: paneId },
+          paneTitles: {},
+        },
+        settings: { settings: defaultSettings, status: 'loaded' },
+        connection: { status: 'connected', error: null, serverInstanceId: 'srv-local' },
+      },
+    })
+
+    return { store, tabId, paneId, paneContent }
+  }
+
+  it('enables minimum contrast ratio when terminal theme is light', async () => {
+    terminalThemeMocks.getTerminalTheme.mockReturnValue({ isDark: false })
+    const { store, tabId, paneId, paneContent } = setupThemeTerminal()
+
+    render(
+      <Provider store={store}>
+        <TerminalView tabId={tabId} paneId={paneId} paneContent={paneContent} />
+      </Provider>
+    )
+
+    await waitFor(() => {
+      expect(terminalInstances[0]?.options.minimumContrastRatio).toBe(4.5)
+    })
+  })
+
+  it('keeps default contrast behavior when terminal theme is dark', async () => {
+    terminalThemeMocks.getTerminalTheme.mockReturnValue({ isDark: true })
+    const { store, tabId, paneId, paneContent } = setupThemeTerminal()
+
+    render(
+      <Provider store={store}>
+        <TerminalView tabId={tabId} paneId={paneId} paneContent={paneContent} />
+      </Provider>
+    )
+
+    await waitFor(() => {
+      expect(terminalInstances[0]?.options.minimumContrastRatio).toBe(1)
+    })
   })
 
   it('preserves terminalId across sequential status updates', async () => {
