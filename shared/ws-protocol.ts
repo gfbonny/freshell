@@ -23,9 +23,12 @@ export const ErrorCode = z.enum([
   'INTERNAL_ERROR',
   'RATE_LIMITED',
   'UNAUTHORIZED',
+  'PROTOCOL_MISMATCH',
 ])
 
 export type ErrorCode = z.infer<typeof ErrorCode>
+
+export const WS_PROTOCOL_VERSION = 2 as const
 
 export const ShellSchema = z.enum(['system', 'cmd', 'powershell', 'wsl'])
 
@@ -131,9 +134,9 @@ export type Usage = z.infer<typeof UsageSchema>
 export const HelloSchema = z.object({
   type: z.literal('hello'),
   token: z.string().optional(),
+  protocolVersion: z.literal(WS_PROTOCOL_VERSION),
   capabilities: z.object({
     sessionsPatchV1: z.boolean().optional(),
-    terminalAttachChunkV1: z.boolean().optional(),
   }).optional(),
   client: z.object({
     mobile: z.boolean().optional(),
@@ -162,6 +165,7 @@ export const TerminalCreateSchema = z.object({
 export const TerminalAttachSchema = z.object({
   type: z.literal('terminal.attach'),
   terminalId: z.string().min(1),
+  sinceSeq: z.number().int().nonnegative().optional(),
 })
 
 export const TerminalDetachSchema = z.object({
@@ -356,32 +360,14 @@ export type TerminalCreatedMessage = {
   terminalId: string
   createdAt: number
   effectiveResumeSessionId?: string
-} & ({ snapshot: string; snapshotChunked?: never } | { snapshotChunked: true; snapshot?: never })
-
-export type TerminalAttachedMessage = {
-  type: 'terminal.attached'
-  terminalId: string
-  snapshot: string
 }
 
-export type TerminalAttachedStartMessage = {
-  type: 'terminal.attached.start'
+export type TerminalAttachReadyMessage = {
+  type: 'terminal.attach.ready'
   terminalId: string
-  totalCodeUnits: number
-  totalChunks: number
-}
-
-export type TerminalAttachedChunkMessage = {
-  type: 'terminal.attached.chunk'
-  terminalId: string
-  chunk: string
-}
-
-export type TerminalAttachedEndMessage = {
-  type: 'terminal.attached.end'
-  terminalId: string
-  totalCodeUnits: number
-  totalChunks: number
+  headSeq: number
+  replayFromSeq: number
+  replayToSeq: number
 }
 
 export type TerminalDetachedMessage = {
@@ -398,16 +384,17 @@ export type TerminalExitMessage = {
 export type TerminalOutputMessage = {
   type: 'terminal.output'
   terminalId: string
+  seqStart: number
+  seqEnd: number
   data: string
 }
 
-export type TerminalSnapshotMessage = {
-  // Reserved for compatibility with older/experimental clients that expect
-  // a standalone snapshot frame. Current server flow uses terminal.attached*
-  // and terminal.created snapshot payloads instead.
-  type: 'terminal.snapshot'
+export type TerminalOutputGapMessage = {
+  type: 'terminal.output.gap'
   terminalId: string
-  snapshot: string
+  fromSeq: number
+  toSeq: number
+  reason: 'queue_overflow' | 'replay_window_exceeded'
 }
 
 export type TerminalTitleUpdatedMessage = {
@@ -596,14 +583,11 @@ export type ServerMessage =
   | PongMessage
   | ErrorMessage
   | TerminalCreatedMessage
-  | TerminalAttachedMessage
-  | TerminalAttachedStartMessage
-  | TerminalAttachedChunkMessage
-  | TerminalAttachedEndMessage
+  | TerminalAttachReadyMessage
   | TerminalDetachedMessage
   | TerminalExitMessage
   | TerminalOutputMessage
-  | TerminalSnapshotMessage
+  | TerminalOutputGapMessage
   | TerminalTitleUpdatedMessage
   | TerminalSessionAssociatedMessage
   | TerminalListUpdatedMessage

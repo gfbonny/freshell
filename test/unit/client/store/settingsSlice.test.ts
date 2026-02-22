@@ -152,6 +152,10 @@ describe('settingsSlice', () => {
             ...newSettings.codingCli.providers,
           },
         },
+        editor: {
+          ...defaultSettings.editor,
+          ...newSettings.editor,
+        },
         freshclaude: {},
       })
     })

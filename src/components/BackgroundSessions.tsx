@@ -54,7 +54,7 @@ export default function BackgroundSessions() {
       if (msg.type === 'terminal.detached') {
         refresh()
       }
-      if (msg.type === 'terminal.attached') {
+      if (msg.type === 'terminal.attach.ready') {
         refresh()
       }
       if (msg.type === 'terminal.exit') {

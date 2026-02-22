@@ -148,6 +148,39 @@ describe('TerminalRegistry Lifecycle', () => {
     })
   })
 
+  describe('transport agnostic registry seam', () => {
+    it('emits terminal.output.raw for each PTY output chunk', () => {
+      const term = registry.create({ mode: 'shell' })
+      const pty = mockPtyProcess.instances[0]
+      const onOutput = vi.fn()
+
+      registry.on('terminal.output.raw', onOutput)
+      pty._emitData('hello')
+
+      expect(onOutput).toHaveBeenCalledWith(
+        expect.objectContaining({
+          terminalId: term.terminalId,
+          data: 'hello',
+          at: expect.any(Number),
+        }),
+      )
+    })
+
+    it('exposes attached client count and connection ids for broker metadata', () => {
+      const term = registry.create({ mode: 'shell' })
+      const clientA = createMockWebSocket()
+      const clientB = createMockWebSocket()
+      clientA.connectionId = 'conn-a'
+      clientB.connectionId = 'conn-b'
+
+      registry.attach(term.terminalId, clientA)
+      registry.attach(term.terminalId, clientB)
+
+      expect(registry.getAttachedClientCount(term.terminalId)).toBe(2)
+      expect(registry.listAttachedClientIds(term.terminalId)).toEqual(['conn-a', 'conn-b'])
+    })
+  })
+
   describe('Terminal created but never attached', () => {
     it('should track terminal in registry even without clients', () => {
       const term = registry.create({ mode: 'shell' })
