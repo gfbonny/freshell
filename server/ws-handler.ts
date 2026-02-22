@@ -348,7 +348,12 @@ export class WsHandler {
       if (preferred) return preferred
     }
 
-    return authenticated[0]
+    return authenticated.reduce<LiveWebSocket | undefined>((latest, conn) => {
+      if (!latest) return conn
+      const latestConnectedAt = latest.connectedAt ?? 0
+      const candidateConnectedAt = conn.connectedAt ?? 0
+      return candidateConnectedAt >= latestConnectedAt ? conn : latest
+    }, undefined)
   }
 
   public requestUiScreenshot(opts: {
