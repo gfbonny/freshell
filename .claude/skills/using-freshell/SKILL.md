@@ -87,6 +87,51 @@ Important command flags:
 - `wait-for`: `-t/--target`, `-p/--pattern`, `--stable`, `--exit`, `--prompt`, `-T/--timeout`
 - `run`: `-c/--capture`, `-d/--detach`, `-T/--timeout`, `-n/--name`, `--cwd`
 
+## System Differences from tmux
+
+- Transport/auth model: tmux commands talk to a local tmux server socket; Freshell CLI talks to an HTTP API (`FRESHELL_URL`) with token auth (`FRESHELL_TOKEN`).
+- UI model: tmux panes are terminal-only; Freshell panes can be terminal, browser, or editor.
+- Targeting model: tmux target syntax is session/window/pane style (for example `1:2.0`); Freshell primarily targets tab/pane IDs and resolves friendly forms via the layout API.
+- Remote model: tmux is usually local TTY-first; Freshell is browser-first and designed for LAN/remote multi-device access.
+- Semantics model: Freshell borrows tmux verbs, but many commands are higher-level workflows over HTTP state (layout store + terminal registry), not direct terminal multiplexer primitives.
+- AI/session features: Freshell includes coding-session indexing/search and terminal summarization; tmux has no built-in equivalent.
+
+## Command Deltas vs tmux
+
+Each row shows the closest tmux equivalent and the key behavioral delta.
+
+| Freshell command | Closest tmux command | Key differences from tmux |
+|---|---|---|
+| `new-tab` | `new-window` | Can create terminal, browser, or editor panes; supports `--claude`/`--codex` modes and `--resume`. |
+| `list-tabs` | `list-windows` | Returns tab records from Freshell layout API, not tmux window objects. |
+| `select-tab` | `select-window` | Selects by id/title through API resolution, not tmux target parsing. |
+| `kill-tab` | `kill-window` | Closes Freshell tab state via API; behavior is coupled to pane/layout store. |
+| `rename-tab` | `rename-window` | Renames tab metadata in layout store, not tmux window name metadata. |
+| `has-tab` | none | Existence probe helper; no direct tmux built-in analog. |
+| `next-tab` | `next-window` | Same intent, but operates on Freshell tab order. |
+| `prev-tab` | `previous-window` | Same intent, but operates on Freshell tab order. |
+| `split-pane` | `split-window` | Can spawn terminal/browser/editor panes; target resolution is API-based and defaults differ. |
+| `list-panes` | `list-panes` | Lists pane records from layout store (including non-terminal panes). |
+| `select-pane` | `select-pane` | Focuses pane via API, not direct tmux client focus command. |
+| `kill-pane` | `kill-pane` | Closes pane through layout API; pane tree updates are explicit app-state mutations. |
+| `resize-pane` | `resize-pane` | Uses `x/y` percentages and can resolve parent split from pane target. |
+| `swap-pane` | `swap-pane` | Swaps pane nodes in layout tree rather than tmux pane slots. |
+| `respawn-pane` | `respawn-pane` | Rebinds pane to a newly created terminal through registry + layout store. |
+| `attach` | `join-pane` (closest) | Attaches an existing terminal id into a pane; this is terminal-to-pane rebinding, not pane migration between tmux windows. |
+| `send-keys` | `send-keys` | Same intent; literal mode (`-l`) and key translation are implemented in CLI before API send. |
+| `capture-pane` | `capture-pane` | Similar intent, but output comes from Freshell terminal buffer snapshots exposed by API. |
+| `wait-for` | `wait-for` (name only) | Waits on terminal text/prompt/stability conditions; tmux `wait-for` is lock/signal oriented. |
+| `display` | `display-message` | Token set is Freshell tab/pane fields, not tmux format variables. |
+| `run` | none (composed from several tmux ops) | One-shot helper to create tab, run command, optionally capture and detach. |
+| `summarize` | none | Requests AI summary for terminal output. |
+| `list-terminals` | none | Lists Freshell terminal registry objects, independent of panes/tabs. |
+| `open-browser` | none | Creates/navigates browser pane; tmux has no browser pane type. |
+| `navigate` | none | Converts/updates a pane to browser content with URL navigation. |
+| `list-sessions` | none | Lists indexed coding-CLI sessions (Claude/Codex session history). |
+| `search-sessions` | none | Full-text-style search over indexed coding sessions. |
+| `health` | none | HTTP health/readiness endpoint probe. |
+| `lan-info` | none | Returns Freshell network exposure/LAN information. |
+
 ## Playbook: Open a File in an Editor Pane
 
 Open in a new tab:
