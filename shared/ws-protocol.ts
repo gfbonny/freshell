@@ -216,6 +216,19 @@ export const UiLayoutSyncSchema = z.object({
   timestamp: z.number(),
 })
 
+export const UiScreenshotResultSchema = z.object({
+  type: z.literal('ui.screenshot.result'),
+  requestId: z.string().min(1),
+  ok: z.boolean(),
+  mimeType: z.literal('image/png').optional(),
+  imageBase64: z.string().optional(),
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional(),
+  changedFocus: z.boolean().optional(),
+  restoredFocus: z.boolean().optional(),
+  error: z.string().optional(),
+})
+
 // Coding CLI session schemas
 export const CodingCliCreateSchema = z.object({
   type: z.literal('codingcli.create'),
@@ -327,6 +340,7 @@ export const ClientMessageSchema = z.discriminatedUnion('type', [
   TerminalListSchema,
   TerminalMetaListSchema,
   UiLayoutSyncSchema,
+  UiScreenshotResultSchema,
   CodingCliCreateSchema,
   CodingCliInputSchema,
   CodingCliKillSchema,

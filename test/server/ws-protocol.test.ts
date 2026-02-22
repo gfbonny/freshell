@@ -226,6 +226,7 @@ describe('ws protocol', () => {
   let server: http.Server | undefined
   let port: number
   let WsHandler: any
+  let handler: any
   let registry: FakeRegistry
 
   beforeAll(async () => {
@@ -242,7 +243,7 @@ describe('ws protocol', () => {
       res.end()
     })
     registry = new FakeRegistry()
-    new WsHandler(server, registry as any)
+    handler = new WsHandler(server, registry as any)
     const info = await listen(server)
     port = info.port
   }, HOOK_TIMEOUT_MS)
@@ -905,5 +906,90 @@ describe('ws protocol', () => {
     expect(rateLimited).toHaveLength(0)
 
     ws.close()
+  })
+
+  it('dispatches screenshot request and resolves when ui.screenshot.result arrives', async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`)
+    await new Promise<void>((resolve) => ws.on('open', () => resolve()))
+    ws.send(JSON.stringify({ type: 'hello', token: 'testtoken-testtoken', protocolVersion: WS_PROTOCOL_VERSION }))
+    await waitForMessage(ws, (m) => m.type === 'ready')
+
+    const pending = handler.requestUiScreenshot({ scope: 'view', timeoutMs: 2000 })
+    const req = await waitForMessage(
+      ws,
+      (m) => m.type === 'ui.command' && m.command === 'screenshot.capture',
+    )
+
+    ws.send(JSON.stringify({
+      type: 'ui.screenshot.result',
+      requestId: req.payload.requestId,
+      ok: true,
+      mimeType: 'image/png',
+      imageBase64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2M7nQAAAAASUVORK5CYII=',
+      width: 1,
+      height: 1,
+    }))
+
+    await expect(pending).resolves.toMatchObject({
+      ok: true,
+      mimeType: 'image/png',
+      width: 1,
+      height: 1,
+    })
+    await closeWebSocket(ws)
+  })
+
+  it('accepts screenshot results above 1MB payload without ws protocol rejection', async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`)
+    await new Promise<void>((resolve) => ws.on('open', () => resolve()))
+    ws.send(JSON.stringify({ type: 'hello', token: 'testtoken-testtoken', protocolVersion: WS_PROTOCOL_VERSION }))
+    await waitForMessage(ws, (m) => m.type === 'ready')
+
+    const bigImage = 'A'.repeat(1_100_000)
+    const pending = handler.requestUiScreenshot({ scope: 'view', timeoutMs: 2000 })
+    const req = await waitForMessage(
+      ws,
+      (m) => m.type === 'ui.command' && m.command === 'screenshot.capture',
+    )
+
+    ws.send(JSON.stringify({
+      type: 'ui.screenshot.result',
+      requestId: req.payload.requestId,
+      ok: true,
+      mimeType: 'image/png',
+      imageBase64: bigImage,
+      width: 1200,
+      height: 800,
+    }))
+
+    await expect(pending).resolves.toMatchObject({ ok: true, width: 1200, height: 800 })
+    await closeWebSocket(ws)
+  })
+
+  it('rejects screenshot payload above MAX_SCREENSHOT_BASE64_BYTES', async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`)
+    await new Promise<void>((resolve) => ws.on('open', () => resolve()))
+    ws.send(JSON.stringify({ type: 'hello', token: 'testtoken-testtoken', protocolVersion: WS_PROTOCOL_VERSION }))
+    await waitForMessage(ws, (m) => m.type === 'ready')
+
+    const tooLargeImage = 'B'.repeat(12 * 1024 * 1024 + 1)
+    const pending = handler.requestUiScreenshot({ scope: 'view', timeoutMs: 2000 })
+    const req = await waitForMessage(
+      ws,
+      (m) => m.type === 'ui.command' && m.command === 'screenshot.capture',
+    )
+
+    ws.send(JSON.stringify({
+      type: 'ui.screenshot.result',
+      requestId: req.payload.requestId,
+      ok: true,
+      mimeType: 'image/png',
+      imageBase64: tooLargeImage,
+      width: 1200,
+      height: 800,
+    }))
+
+    await expect(pending).rejects.toThrow('Screenshot payload too large')
+    await closeWebSocket(ws)
   })
 })

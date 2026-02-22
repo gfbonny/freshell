@@ -49,6 +49,7 @@ import {
   SdkAttachSchema,
   SdkSetModelSchema,
   SdkSetPermissionModeSchema,
+  UiScreenshotResultSchema,
   WS_PROTOCOL_VERSION,
 } from '../shared/ws-protocol.js'
 import { UiLayoutSyncSchema } from './agent-api/layout-schema.js'
@@ -58,6 +59,9 @@ const MAX_CONNECTIONS = Number(process.env.MAX_CONNECTIONS || 50)
 const HELLO_TIMEOUT_MS = Number(process.env.HELLO_TIMEOUT_MS || 5_000)
 const PING_INTERVAL_MS = Number(process.env.PING_INTERVAL_MS || 30_000)
 const MAX_WS_BUFFERED_AMOUNT = Number(process.env.MAX_WS_BUFFERED_AMOUNT || 2 * 1024 * 1024)
+const WS_MAX_PAYLOAD_BYTES = Number(process.env.WS_MAX_PAYLOAD_BYTES || 16 * 1024 * 1024)
+const MAX_SCREENSHOT_BASE64_BYTES = Number(process.env.MAX_SCREENSHOT_BASE64_BYTES || 12 * 1024 * 1024)
+const DEFAULT_WS_MESSAGE_BYTES = Number(process.env.DEFAULT_WS_MESSAGE_BYTES || 1 * 1024 * 1024)
 // Max payload size per WebSocket message for mobile browser compatibility (500KB)
 const MAX_CHUNK_BYTES = Number(process.env.MAX_WS_CHUNK_BYTES || 500 * 1024)
 // Drain-aware sending: wait for buffer to drop below threshold between chunks
@@ -147,6 +151,7 @@ const ClientMessageSchema = z.discriminatedUnion('type', [
   SdkSetModelSchema,
   SdkSetPermissionModeSchema,
   UiLayoutSyncSchema,
+  UiScreenshotResultSchema,
 ])
 
 type ClientState = {
@@ -176,6 +181,13 @@ type HandshakeSnapshot = {
 
 type HandshakeSnapshotProvider = () => Promise<HandshakeSnapshot>
 
+type PendingScreenshot = {
+  resolve: (result: z.infer<typeof UiScreenshotResultSchema>) => void
+  reject: (err: Error) => void
+  timeout: NodeJS.Timeout
+  connectionId?: string
+}
+
 export class WsHandler {
   private wss: WebSocketServer
   private connections = new Set<LiveWebSocket>()
@@ -188,6 +200,7 @@ export class WsHandler {
   private tabsRegistryStore?: TabsRegistryStore
   private layoutStore?: LayoutStore
   private terminalStreamBroker: TerminalStreamBroker
+  private screenshotRequests = new Map<string, PendingScreenshot>()
   private readonly serverInstanceId: string
   private sessionRepairListeners?: {
     scanned: (result: SessionScanResult) => void
@@ -219,7 +232,7 @@ export class WsHandler {
     this.wss = new WebSocketServer({
       server,
       path: '/ws',
-      maxPayload: 1_000_000,
+      maxPayload: WS_MAX_PAYLOAD_BYTES,
     })
 
     const originalClose = server.close.bind(server)
@@ -319,6 +332,61 @@ export class WsHandler {
 
   connectionCount() {
     return this.connections.size
+  }
+
+  private findTargetUiSocket(preferredConnectionId?: string): LiveWebSocket | undefined {
+    const authenticated = [...this.connections].filter((conn) => {
+      if (conn.readyState !== WebSocket.OPEN) return false
+      return !!this.clientStates.get(conn)?.authenticated
+    })
+    if (!authenticated.length) return undefined
+
+    if (preferredConnectionId) {
+      const preferred = authenticated.find((conn) => conn.connectionId === preferredConnectionId)
+      if (preferred) return preferred
+    }
+
+    return authenticated[0]
+  }
+
+  public requestUiScreenshot(opts: {
+    scope: 'pane' | 'tab' | 'view'
+    tabId?: string
+    paneId?: string
+    timeoutMs?: number
+  }): Promise<z.infer<typeof UiScreenshotResultSchema>> {
+    const timeoutMs = opts.timeoutMs ?? 10_000
+    const preferredConnectionId = this.layoutStore?.getSourceConnectionId() || undefined
+    const targetWs = this.findTargetUiSocket(preferredConnectionId)
+    if (!targetWs) {
+      return Promise.reject(new Error('No UI client connected for screenshot'))
+    }
+
+    const requestId = randomUUID()
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.screenshotRequests.delete(requestId)
+        reject(new Error('Timed out waiting for UI screenshot response'))
+      }, timeoutMs)
+
+      this.screenshotRequests.set(requestId, {
+        resolve,
+        reject,
+        timeout,
+        connectionId: targetWs.connectionId,
+      })
+
+      this.send(targetWs, {
+        type: 'ui.command',
+        command: 'screenshot.capture',
+        payload: {
+          requestId,
+          scope: opts.scope,
+          tabId: opts.tabId,
+          paneId: opts.paneId,
+        },
+      })
+    })
   }
 
   private onConnection(ws: LiveWebSocket, req: http.IncomingMessage) {
@@ -421,6 +489,13 @@ export class WsHandler {
       off()
     }
     state.sdkSubscriptions.clear()
+
+    for (const [requestId, pending] of this.screenshotRequests) {
+      if (pending.connectionId !== ws.connectionId) continue
+      clearTimeout(pending.timeout)
+      this.screenshotRequests.delete(requestId)
+      pending.reject(new Error('UI connection closed before screenshot response'))
+    }
 
     const durationMs = ws.connectedAt ? Date.now() - ws.connectedAt : undefined
     const reasonText = reason ? reason.toString() : undefined
@@ -669,11 +744,14 @@ export class WsHandler {
     )
     let messageType: string | undefined
     let payloadBytes: number | undefined
-    if (perfConfig.enabled) {
-      if (Buffer.isBuffer(data)) payloadBytes = data.length
-      else if (Array.isArray(data)) payloadBytes = data.reduce((sum, item) => sum + item.length, 0)
-      else if (data instanceof ArrayBuffer) payloadBytes = data.byteLength
-    }
+    const rawBytes = Buffer.isBuffer(data)
+      ? data.length
+      : Array.isArray(data)
+        ? data.reduce((sum, item) => sum + item.length, 0)
+        : data instanceof ArrayBuffer
+          ? data.byteLength
+          : Buffer.byteLength(String(data))
+    if (perfConfig.enabled) payloadBytes = rawBytes
 
     try {
       let msg: any
@@ -701,6 +779,11 @@ export class WsHandler {
 
       const m = parsed.data
       messageType = m.type
+
+      if (rawBytes > DEFAULT_WS_MESSAGE_BYTES && m.type !== 'ui.screenshot.result') {
+        ws.close(1009, 'Message too large')
+        return
+      }
 
       if (m.type === 'ping') {
         // Respond to confirm liveness.
@@ -752,6 +835,23 @@ export class WsHandler {
       }
 
       switch (m.type) {
+      case 'ui.screenshot.result': {
+        const pending = this.screenshotRequests.get(m.requestId)
+        if (!pending) return
+        if (pending.connectionId && pending.connectionId !== ws.connectionId) return
+
+        if (typeof m.imageBase64 === 'string' && m.imageBase64.length > MAX_SCREENSHOT_BASE64_BYTES) {
+          clearTimeout(pending.timeout)
+          this.screenshotRequests.delete(m.requestId)
+          pending.reject(new Error('Screenshot payload too large'))
+          return
+        }
+
+        clearTimeout(pending.timeout)
+        this.screenshotRequests.delete(m.requestId)
+        pending.resolve(m)
+        return
+      }
       case 'ui.layout.sync': {
         if (this.layoutStore) {
           this.layoutStore.updateFromUi(m, ws.connectionId || 'unknown')
@@ -1566,6 +1666,12 @@ export class WsHandler {
     }
 
     this.terminalStreamBroker.close()
+
+    for (const [requestId, pending] of this.screenshotRequests) {
+      clearTimeout(pending.timeout)
+      pending.reject(new Error('WebSocket server closed before screenshot response'))
+      this.screenshotRequests.delete(requestId)
+    }
 
     // Close all client connections
     for (const ws of this.connections) {
