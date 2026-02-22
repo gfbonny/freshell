@@ -125,6 +125,14 @@ Allowed selectors:
 
 No tmux `session:window.pane` compatibility parser.
 
+### 5.4 Selector Support by Command
+
+- Any command argument documented as `--target` or `--tab` accepts relevant selectors
+  from this section unless the command explicitly narrows target type.
+- `pane-index:<n>` is valid only when a tab selector is also provided (`--tab ...`).
+- Class for dual-plane commands is determined after selector resolution:
+  `terminal:` / `session:` -> server-direct (`P` / `S`), `pane:` / `pane-index:` -> hybrid (`H`).
+
 ---
 
 ## 6. Command Routing Classes
@@ -134,7 +142,7 @@ No tmux `session:window.pane` compatibility parser.
 Require online owner device:
 
 - `new-tab`, `kill-tab`, `rename-tab`, `select-tab`
-- `split-pane`, `kill-pane`, `resize-pane`, `swap-pane`, `select-pane`
+- `split-pane --browser|--editor`, `kill-pane`, `resize-pane`, `swap-pane`, `select-pane`
 - `open-browser`, `navigate`, `open-editor`
 
 If target owner offline: `DEVICE_OFFLINE`.
@@ -146,7 +154,7 @@ Never routed through owner device:
 - `send-keys --target terminal:...`
 - `capture-pane --target terminal:...`
 - `wait-for --target terminal:...`
-- `list-terminals`, `respawn-terminal`, `kill-terminal`, `attach-terminal`
+- `list-terminals`, `respawn-terminal`, `kill-terminal`
 
 These remain deterministic when no browser is connected.
 `wait-for` uses a shared server `WaitManager` and stream events; it never relies on
@@ -162,17 +170,53 @@ client polling loops.
 
 Example: `split-pane --shell`.
 
-Execution order:
+Hybrid command forms include:
 
-1. Owner RPC applies layout mutation and reserves new pane ID.
-2. Server spawns/attaches process/session.
+- `split-pane --shell` (or default terminal split form)
+- `respawn-pane --target pane:...`
+- `attach-terminal --target terminal:... --to pane:...`
+- `send-keys` / `capture-pane` / `wait-for` when target is `pane:...` or `pane-index:...`
+
+Execution order depends on hybrid subtype:
+
+Mutation hybrids (`split-pane --shell`, `attach-terminal`, `respawn-pane`):
+
+1. Owner RPC applies/validates layout mutation and reserves or validates pane reference.
+2. Server spawns/attaches/respawns process or terminal binding.
 3. Owner RPC finalizes pane content reference (`terminalId` or `sessionRef`).
+
+Resolution hybrids (`send-keys` / `capture-pane` / `wait-for` with pane selectors):
+
+1. Owner RPC resolves pane selector to stable process/session reference.
+2. Server executes process/session operation on resolved reference (no layout mutation).
 
 Failure handling:
 
-- Step 1 fails: no side effects.
-- Step 2 fails: owner receives compensating mutation to remove orphan pane.
-- Step 3 fails: operation returns `INCONSISTENT_STATE`; server retains process and emits remediation guidance.
+- Mutation hybrid step 1 fails: no side effects.
+- Mutation hybrid step 2 fails: owner receives compensating mutation to remove orphan pane.
+- Mutation hybrid step 3 fails: operation returns `INCONSISTENT_STATE`; server retains process and emits remediation guidance.
+- Resolution hybrid step 1 fails: return `DEVICE_OFFLINE`, `NOT_FOUND`, or `INVALID_TARGET`.
+- Resolution hybrid step 2 fails: return server operation error; no layout side effects.
+
+### 6.5 Routing Matrix (Authoritative)
+
+| command form | class | owner online required | notes |
+|---|---|---|---|
+| `new-tab` / `kill-tab` / `rename-tab` / `select-tab` | L | yes | layout-only mutation |
+| `split-pane --browser|--editor` | L | yes | layout-only pane creation |
+| `split-pane --shell` (or default terminal split) | H | yes | owner reserve/finalize + server create/attach |
+| `send-keys --target terminal:...` | P | no | server-direct PTY input |
+| `send-keys --target pane:...|pane-index:...` | H | yes | owner resolves pane -> terminal, then server input |
+| `capture-pane --target terminal:...` | P | no | server buffer read |
+| `capture-pane --target pane:...|pane-index:...` | H | yes | owner resolves pane -> terminal, then server read |
+| `wait-for --target terminal:...` | P | no | server `WaitManager` on PTY stream |
+| `wait-for --target session:...` | S | no | server `WaitManager` on session stream |
+| `wait-for --target pane:...|pane-index:...` | H | yes | owner resolves pane ref, then server wait |
+| `attach-terminal --target terminal:... --to pane:...` | H | yes | owner layout mutation binding pane contentRef |
+| `respawn-terminal --target terminal:...` | P | no | server process lifecycle |
+| `respawn-pane --target pane:...|pane-index:...` | H | yes | owner resolution + server respawn + owner finalize |
+| `sdk.create/send/interrupt/kill/attach` | S | no | server session authority |
+| `codingcli.create/input/kill` | S | no | server session authority |
 
 ---
 
@@ -185,9 +229,9 @@ This proposal is tmux-like, not byte-for-byte tmux emulation.
 | create window/session | `new-tab` | L |
 | list windows | `list-tabs` | live owner or cache if `--allow-stale` |
 | split pane | `split-pane --direction ...` | L/H |
-| send keys | `send-keys` | P |
-| capture output | `capture-pane` | P |
-| wait for completion | `wait-for` | P/S |
+| send keys | `send-keys` | P (`terminal:` target) / H (`pane:` target) |
+| capture output | `capture-pane` | P (`terminal:` target) / H (`pane:` target) |
+| wait for completion | `wait-for` | P (`terminal:`), S (`session:`), H (`pane:`) |
 | kill pane/window | `kill-pane` / `kill-tab` | L |
 
 Explicitly not supported:
@@ -203,8 +247,9 @@ Explicitly not supported:
 
 Target forms:
 
-- preferred: `--target terminal:<id>` (server-direct)
-- allowed: `--target pane:<id>` (requires owner-online resolution of pane->terminal mapping)
+- `--target terminal:<id>` (Class P, server-direct)
+- `--target pane:<id>|pane-index:<n>` (Class H, requires owner-online pane->terminal resolution)
+- `pane-index:<n>` requires `--tab` selector context
 
 Behavior:
 
@@ -213,10 +258,15 @@ Behavior:
 - `-l` means literal mode
 
 If pane target owner offline: `DEVICE_OFFLINE`.
+If resolved pane content is not terminal-backed: `INVALID_TARGET`.
 
 ### 8.2 `capture-pane`
 
-Target forms mirror `send-keys`.
+Target forms mirror `send-keys`:
+
+- `terminal:` target -> Class P
+- `pane:` / `pane-index:` target -> Class H
+- `pane-index:<n>` requires `--tab` selector context
 
 Semantics:
 
@@ -230,7 +280,7 @@ return `UNSUPPORTED_CAPTURE_MODE` instead of silently changing meaning.
 
 ### 8.3 `wait-for`
 
-Targets terminal or SDK session references.
+Targets `terminal:`, `session:`, or pane selectors (`pane:` / `pane-index:`).
 
 Predicates:
 
@@ -246,6 +296,7 @@ Combination rule:
 
 - multiple predicates are **AND** conditions
 - no predicates provided is `INVALID_ARGUMENT`
+- `--stable` is non-latching and must be true at completion time
 
 Execution model (performance-critical):
 
@@ -255,7 +306,8 @@ Execution model (performance-critical):
 - Each wait records `startSeq`, `lastSeqChecked`, and a small carry buffer for
   cross-chunk pattern boundaries.
 - Matching evaluates only incremental chunks `> lastSeqChecked`.
-- Each predicate latches true when satisfied.
+- Pattern/exit/prompt predicates latch true when satisfied.
+- `stable` is evaluated as a level condition and resets on every new output event.
 - Command succeeds when all requested predicates are true.
 - Timeout returns `TIMEOUT` with predicate progress.
 
@@ -272,6 +324,15 @@ Timer/scheduler contract:
   not ad-hoc per-chunk polling loops.
 - Wait evaluation runs with per-tick CPU budget; overflow work is deferred by
   `setImmediate`/equivalent to protect event loop responsiveness.
+
+`--stable` contract:
+
+- `--stable N` means: no output events for `N` continuous seconds on target stream.
+- Stable timer resets whenever new output is observed.
+- `--stable` observes stream activity from wait registration time forward
+  (`--from` affects pattern scan window only).
+- With `--exit`, success requires exit observed and stable window satisfied after
+  the later of (exit event time, last output time).
 
 Resource limits and load-shedding:
 
@@ -291,14 +352,20 @@ Prompt heuristic contract:
 - explicitly best-effort
 - never sole correctness guarantee for destructive operations
 - should be treated as advisory signal unless combined with stronger predicates
+- baseline heuristic: shell-like prompt token at end-of-line after ANSI-stripping
+  (`$`, `#`, `>`, `%`); implementation may extend but must document false-positive risk
 
 ### 8.4 `attach-terminal`
 
-`attach-terminal --target terminal:<id> --to pane:<id>`:
+`attach-terminal --target terminal:<id> --to pane:<id>|pane-index:<n>`:
 
 - owner RPC updates pane mapping to referenced terminal
 - no process transfer; only pane binding change
 - requires owner online
+- `pane-index:<n>` requires `--tab` selector context
+- class is `H` (layout mutation + process reference rebind)
+- request must include `expectedRevision` and `idempotencyKey`
+- revision mismatch returns `REVISION_CONFLICT` with `currentRevision`
 
 ### 8.5 `navigate`
 
@@ -313,7 +380,20 @@ Prompt heuristic contract:
 Two explicit forms:
 
 - `respawn-terminal --target terminal:<id>` (P)
-- `respawn-pane --target pane:<id>` (H: owner resolves pane, server respawns bound process, owner updates refs)
+- `respawn-pane --target pane:<id>|pane-index:<n>` (H: owner resolves pane, server respawns bound process, owner updates refs)
+
+### 8.7 `display`
+
+`display` is a pure read command; it never mutates layout/process state.
+
+Format grammar:
+
+- `-p FORMAT` is a token template rendered once.
+- Supported tokens: `%deviceId`, `%tabId`, `%tabTitle`, `%paneId`, `%paneKind`,
+  `%terminalId`, `%sessionRef`, `%ownerOnline`, `%workspaceRevision`.
+- `%%` escapes to literal `%`.
+- Unknown tokens return `INVALID_ARGUMENT`.
+- Missing values render as empty string.
 
 ---
 
@@ -355,7 +435,8 @@ Error payload includes `stage: relay|owner`.
 ### 9.4 Delivery Contract
 
 - at-most-once relay delivery
-- idempotency keys required for create/split/attach/respawn
+- idempotency keys required for owner-routed mutating commands (`new-tab`,
+  `split-pane --shell`, `attach-terminal`, `respawn-pane`)
 - no queued replay after reconnect
 
 ---
@@ -395,7 +476,6 @@ Tab minimum fields:
 - `status`
 - `createdAt`
 - `updatedAt`
-- `layoutRevision`
 
 Pane minimum fields:
 
@@ -406,7 +486,12 @@ Pane minimum fields:
 - `status`
 - `contentRef` (`terminalId` or `sessionRef` where applicable)
 - `updatedAt`
-- `layoutRevision`
+
+Owner workspace metadata minimum fields:
+
+- `ownerDeviceId`
+- `workspaceRevision`
+- `updatedAt`
 
 ### 11.2 Process/Session Entities (Authoritative on Server)
 
@@ -428,10 +513,12 @@ SDK/CodingCLI session fields:
 
 ### 11.3 Revision Rules
 
-- Revision scope: per owner workspace (single monotonic counter per `ownerDeviceId`).
-- Every layout mutation increments revision by 1.
+- Revision scope is per owner workspace (`workspaceRevision` monotonic per `ownerDeviceId`).
+- Tab/pane entities do not maintain independent revision counters.
+- Every successful layout mutation increments `workspaceRevision` by 1.
 - RPC mutation must provide `expectedRevision`.
-- Mismatch returns `REVISION_CONFLICT` with `currentRevision`.
+- Mismatch returns `REVISION_CONFLICT` with `currentRevision` (`workspaceRevision`).
+- Successful mutation responses include `appliedRevision`.
 - Initial revision after migration: `1`.
 
 ---
@@ -444,6 +531,8 @@ SDK/CodingCLI session fields:
 - CLI exchanges bootstrap auth for short-lived device session token via `POST /api/device-sessions`.
 - Device token TTL: 15 minutes; renewable via refresh endpoint.
 - Device token scopes include device-bound layout write scope.
+- CLI mutating commands auto-refresh device token when expiry is near; refresh failure
+  returns `UNAUTHORIZED` with re-login guidance.
 
 ### 12.2 Credential Storage
 
@@ -472,6 +561,13 @@ Server writes JSONL at `~/.freshell/audit/remote-control.jsonl`:
 - `stage`
 - `timestamp`
 
+### 12.5 CLI Auth Command Contract
+
+- `freshell auth login`: exchange bootstrap credentials for device session token.
+- `freshell auth status`: show token expiry and active device binding.
+- `freshell auth refresh`: proactively renew device token.
+- `freshell auth logout`: remove local credential file and invalidate refresh token.
+
 ---
 
 ## 13. Migration and Cutover
@@ -484,7 +580,7 @@ On first cutover startup, each device:
 
 1. loads local tabs/panes
 2. stamps missing `ownerDeviceId` with local `deviceId`
-3. initializes `layoutRevision = 1`
+3. initializes `workspaceRevision = 1`
 4. writes migrated local state
 5. publishes `layout.snapshot.updated` to server
 
@@ -535,46 +631,57 @@ CLI contract:
 
 ## 15. Command Surface (Cutover)
 
+Selector note:
+
+- `--target` and `--tab` accept selector forms from section 5.2 unless narrowed.
+- `pane-index:<n>` requires `--tab ...`.
+
 ```bash
-# Device and presence
+# Device, presence, and auth
 freshell list-devices
 freshell device-status --device DEVICE
+freshell auth login [--auth-token TOKEN|--from-env AUTH_TOKEN]
+freshell auth status
+freshell auth refresh
+freshell auth logout
 
 # Layout (Class L/H)
 freshell new-tab [--device DEVICE] [-n NAME] [--shell SHELL] [--cwd DIR]
 freshell list-tabs [--device DEVICE] [--allow-stale]
-freshell select-tab --device DEVICE --target tab:ID
-freshell kill-tab --device DEVICE --target tab:ID
-freshell rename-tab --device DEVICE --target tab:ID NAME
+freshell select-tab --device DEVICE --target tab:ID|tab-name:NAME|tab-index:N
+freshell kill-tab --device DEVICE --target tab:ID|tab-name:NAME|tab-index:N
+freshell rename-tab --device DEVICE --target tab:ID|tab-name:NAME|tab-index:N NAME
 
-freshell split-pane --device DEVICE --target pane:ID --direction horizontal|vertical [--shell SHELL|--browser URL|--editor FILE]
-freshell list-panes [--device DEVICE] [--tab tab:ID] [--allow-stale]
-freshell select-pane --device DEVICE --target pane:ID
-freshell kill-pane --device DEVICE --target pane:ID
-freshell resize-pane --device DEVICE --target pane:ID [-x WIDTH] [-y HEIGHT]
-freshell swap-pane --device DEVICE --source pane:SRC --target pane:DST
+freshell split-pane --device DEVICE --target pane:ID|pane-index:N [--tab tab:ID|tab-name:NAME|tab-index:N] --direction horizontal|vertical [--shell SHELL|--browser URL|--editor FILE]
+freshell list-panes [--device DEVICE] [--tab tab:ID|tab-name:NAME|tab-index:N] [--allow-stale]
+freshell select-pane --device DEVICE --target pane:ID|pane-index:N [--tab tab:ID|tab-name:NAME|tab-index:N]
+freshell kill-pane --device DEVICE --target pane:ID|pane-index:N [--tab tab:ID|tab-name:NAME|tab-index:N]
+freshell resize-pane --device DEVICE --target pane:ID|pane-index:N [--tab tab:ID|tab-name:NAME|tab-index:N] [-x WIDTH] [-y HEIGHT]
+freshell swap-pane --device DEVICE --source pane:SRC|pane-index:SRC_IDX --target pane:DST|pane-index:DST_IDX [--tab tab:ID|tab-name:NAME|tab-index:N]
 
-freshell open-browser --device DEVICE --target pane:ID URL
-freshell navigate --device DEVICE --target pane:ID URL
-freshell open-editor --device DEVICE --target pane:ID FILE
+freshell open-browser --device DEVICE --target pane:ID|pane-index:N [--tab tab:ID|tab-name:NAME|tab-index:N] URL
+freshell navigate --device DEVICE --target pane:ID|pane-index:N [--tab tab:ID|tab-name:NAME|tab-index:N] URL
+freshell open-editor --device DEVICE --target pane:ID|pane-index:N [--tab tab:ID|tab-name:NAME|tab-index:N] FILE
 
-# Terminal process (Class P)
+# Terminal process (Class P/H by target type)
 freshell list-terminals
-freshell send-keys --target terminal:ID [-l] [KEYS...]
-freshell capture-pane --target terminal:ID [-S START] [-J] [-e]
-freshell wait-for --target terminal:ID [--from now|tail:N] [-p PATTERN] [--literal|--regex] [--stable N] [--exit] [--prompt] [-T TIMEOUT]
+freshell send-keys --target terminal:ID|pane:ID|pane-index:N [--tab tab:ID|tab-name:NAME|tab-index:N] [--device DEVICE] [-l] [KEYS...]
+freshell capture-pane --target terminal:ID|pane:ID|pane-index:N [--tab tab:ID|tab-name:NAME|tab-index:N] [--device DEVICE] [-S START] [-J] [-e]
+freshell wait-for --target terminal:ID|pane:ID|pane-index:N [--tab tab:ID|tab-name:NAME|tab-index:N] [--device DEVICE] [--from now|tail:N] [-p PATTERN] [--literal|--regex] [--stable N] [--exit] [--prompt] [-T TIMEOUT]
 freshell respawn-terminal --target terminal:ID
+freshell respawn-pane --target pane:ID|pane-index:N [--tab tab:ID|tab-name:NAME|tab-index:N] --device DEVICE --expected-revision N --idempotency-key KEY
 freshell kill-terminal --target terminal:ID
-freshell attach-terminal --target terminal:ID --to pane:ID --device DEVICE
+freshell attach-terminal --target terminal:ID --to pane:ID|pane-index:N [--tab tab:ID|tab-name:NAME|tab-index:N] --device DEVICE --expected-revision N --idempotency-key KEY
 
 # SDK/CodingCLI sessions (Class S)
+freshell session-create --provider sdk|codingcli [--cwd DIR] [--profile PROFILE]
 freshell session-list [--provider PROVIDER]
 freshell session-send --target session:PROVIDER:ID TEXT
 freshell session-wait --target session:PROVIDER:ID [--from now|tail:N] [-p PATTERN] [--literal|--regex] [--stable N] [-T TIMEOUT]
 freshell session-kill --target session:PROVIDER:ID
 
 # Utility
-freshell display --device DEVICE -p FORMAT [--target pane:ID]
+freshell display --device DEVICE -p FORMAT [--target pane:ID|pane-index:N] [--tab tab:ID|tab-name:NAME|tab-index:N]
 freshell health
 freshell lan-info
 ```
@@ -591,10 +698,10 @@ All items required before merge:
 4. Presence + `DEVICE_OFFLINE` behavior enforced for Class L/H commands.
 5. No server-side layout surrogate execution and no replay queue.
 6. Explicit selector parser implemented; ambiguous shorthand removed.
-7. `send-keys` / `capture-pane` / `wait-for` server-direct terminal path implemented.
-8. SDK/CodingCLI command path integrated and documented.
-9. Revision conflict handling implemented with `expectedRevision` and `currentRevision`.
-10. Security token flow and credential permission checks implemented.
+7. `send-keys` / `capture-pane` / `wait-for` route by resolved target (`terminal/session` server-direct, `pane` hybrid owner-resolved).
+8. SDK/CodingCLI command path integrated and documented (including `session-create` surface).
+9. Revision conflict handling implemented with workspace-level `expectedRevision` and `currentRevision`.
+10. Security token flow, auth command lifecycle, and credential permission checks implemented.
 11. Migration implemented for owner metadata and revision initialization.
 12. Capability gate enabled; legacy clients rejected.
 13. Unit/integration/e2e coverage updated for routing, offline behavior, and hybrid rollback.
