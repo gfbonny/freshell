@@ -72,17 +72,20 @@ export function onOutputFrame(
   const overlapsExisting = frame.seqStart <= state.lastSeq
   const offersNewData = frame.seqEnd > state.lastSeq
   // We treat any overlap with pendingReplay as replay-context data. Server stream-v2
-  // currently emits per-sequence frames, so partial-range replays do not duplicate
-  // already-rendered bytes in practice.
+  // currently emits per-sequence frames, so partial-range replays that would duplicate
+  // already-rendered bytes are not expected in practice. This assumption is load-bearing
+  // for overlap acceptance inside pending replay windows.
   const inPendingReplay = Boolean(
     state.pendingReplay
       && frame.seqEnd >= state.pendingReplay.fromSeq
       && frame.seqStart <= state.pendingReplay.toSeq,
   )
+  const allowsReplayAdvance = inPendingReplay && offersNewData
+  const isDuplicateOrStaleOverlap = overlapsExisting && !allowsReplayAdvance
 
   // Replay windows can legally overlap the current high-water mark. However, if a frame
   // is entirely at-or-below lastSeq, it is a duplicate and should still be dropped.
-  if (overlapsExisting && (!inPendingReplay || !offersNewData)) {
+  if (isDuplicateOrStaleOverlap) {
     const freshReset =
       state.awaitingFreshSequence
       && frame.seqStart === 1
