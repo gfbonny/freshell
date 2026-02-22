@@ -182,14 +182,14 @@ export function createAgentApiRouter({ layoutStore, registry, wsHandler }: { lay
     }
 
     const rawStable = req.query.stable || req.query.s
-    const stableSeconds = typeof rawStable === 'string' ? Number(rawStable) : undefined
+    const stableSeconds = typeof rawStable === 'string' ? Number(rawStable) : Number.NaN
     let stableMs = Number.isFinite(stableSeconds) ? stableSeconds * 1000 : undefined
 
     const waitExit = truthy(req.query.exit)
     const waitPrompt = truthy(req.query.prompt)
 
     const rawTimeout = req.query.T || req.query.timeout
-    const timeoutSeconds = typeof rawTimeout === 'string' ? Number(rawTimeout) : undefined
+    const timeoutSeconds = typeof rawTimeout === 'string' ? Number(rawTimeout) : Number.NaN
     const timeoutMs = Number.isFinite(timeoutSeconds) ? timeoutSeconds * 1000 : 30000
 
     let usedFallback = false

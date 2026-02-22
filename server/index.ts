@@ -130,7 +130,6 @@ async function main() {
   const registry = new TerminalRegistry(settings)
   const terminalMetadata = new TerminalMetadataService()
   const layoutStore = new LayoutStore()
-  const terminalMetadata = new TerminalMetadataService()
 
   const sessionRepairService = getSessionRepairService()
   const serverInstanceId = await loadOrCreateServerInstanceId()

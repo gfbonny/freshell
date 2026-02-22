@@ -209,6 +209,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   const requestIdRef = useRef<string>(terminalContent?.createRequestId || '')
   const terminalIdRef = useRef<string | undefined>(terminalContent?.terminalId)
   const lastSeqRef = useRef(0)
+  const awaitingFreshSequenceRef = useRef(false)
   const contentRef = useRef<TerminalPaneContent | null>(terminalContent)
 
   // Keep refs in sync with props
@@ -1125,6 +1126,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
 
     function attach(tid: string) {
       setIsAttaching(true)
+      awaitingFreshSequenceRef.current = true
       const persistedSeq = loadTerminalCursor(tid)
       const sinceSeq = Math.max(lastSeqRef.current, persistedSeq)
       lastSeqRef.current = sinceSeq
@@ -1165,22 +1167,35 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
             return
           }
           if (msg.seqStart <= lastSeqRef.current) {
-            if (import.meta.env.DEV) {
-              log.warn('Ignoring overlapping terminal.output sequence range', {
-                paneId: paneIdRef.current,
-                terminalId: tid,
-                seqStart: msg.seqStart,
-                seqEnd: msg.seqEnd,
-                lastSeq: lastSeqRef.current,
-              })
+            // If a terminal sequence restarted (for example after a server restart) while we had
+            // a persisted cursor for the same terminalId, accept the fresh stream from sequence 1.
+            const shouldResetSequence =
+              awaitingFreshSequenceRef.current
+              && msg.seqStart === 1
+              && lastSeqRef.current > 0
+
+            if (shouldResetSequence) {
+              lastSeqRef.current = 0
+              clearTerminalCursor(tid)
+            } else {
+              if (import.meta.env.DEV) {
+                log.warn('Ignoring overlapping terminal.output sequence range', {
+                  paneId: paneIdRef.current,
+                  terminalId: tid,
+                  seqStart: msg.seqStart,
+                  seqEnd: msg.seqEnd,
+                  lastSeq: lastSeqRef.current,
+                })
+              }
+              return
             }
-            return
           }
           const raw = msg.data || ''
           const mode = contentRef.current?.mode || 'shell'
           handleTerminalOutput(raw, mode, tid)
           lastSeqRef.current = msg.seqEnd
           saveTerminalCursor(tid, lastSeqRef.current)
+          awaitingFreshSequenceRef.current = false
         }
 
         if (msg.type === 'terminal.output.gap' && msg.terminalId === tid) {
@@ -1195,6 +1210,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           lastSeqRef.current = Math.max(lastSeqRef.current, msg.toSeq)
           saveTerminalCursor(tid, lastSeqRef.current)
           setIsAttaching(false)
+          awaitingFreshSequenceRef.current = false
         }
 
         if (msg.type === 'terminal.attach.ready' && msg.terminalId === tid) {
@@ -1229,6 +1245,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           // Creator is already attached server-side for this terminal through v2 broker.
           ws.send({ type: 'terminal.resize', terminalId: newId, cols: term.cols, rows: term.rows })
           setIsAttaching(true)
+          awaitingFreshSequenceRef.current = true
         }
 
         if (msg.type === 'terminal.exit' && msg.terminalId === tid) {
@@ -1240,6 +1257,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           // would otherwise reset the ref from the Redux state on re-render.
           terminalIdRef.current = undefined
           lastSeqRef.current = 0
+          awaitingFreshSequenceRef.current = false
           updateContent({ terminalId: undefined, status: 'exited' })
           const exitTab = tabRef.current
           if (exitTab) {
@@ -1347,6 +1365,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
             clearTerminalCursor(currentTerminalId)
             terminalIdRef.current = undefined
             lastSeqRef.current = 0
+            awaitingFreshSequenceRef.current = false
             updateContent({ terminalId: undefined, createRequestId: newRequestId, status: 'creating' })
             // Also clear the tab's terminalId to keep it in sync.
             // This prevents openSessionTab from using the stale terminalId for dedup.

@@ -373,7 +373,7 @@ async function main() {
       return
     }
     case 'send-keys': {
-      let target = (getFlag(flags, 't', 'target', 'pane') as string | undefined) || args[0]
+      let target: string | undefined = (getFlag(flags, 't', 'target', 'pane') as string | undefined) || args[0]
       const literal = isTruthy(getFlag(flags, 'l', 'literal'))
       const keyArgs = target ? args.slice(1) : args
       if (!target) {

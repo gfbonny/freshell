@@ -160,6 +160,8 @@ export const TerminalCreateSchema = z.object({
   cwd: z.string().optional(),
   resumeSessionId: z.string().optional(),
   restore: z.boolean().optional(),
+  tabId: z.string().min(1).optional(),
+  paneId: z.string().min(1).optional(),
 })
 
 export const TerminalAttachSchema = z.object({
@@ -199,6 +201,19 @@ export const TerminalListSchema = z.object({
 export const TerminalMetaListSchema = z.object({
   type: z.literal('terminal.meta.list'),
   requestId: z.string().min(1),
+})
+
+export const UiLayoutSyncSchema = z.object({
+  type: z.literal('ui.layout.sync'),
+  tabs: z.array(z.object({
+    id: z.string(),
+    title: z.string().optional(),
+  })),
+  activeTabId: z.string().nullable().optional(),
+  layouts: z.record(z.string(), z.unknown()),
+  activePane: z.record(z.string(), z.string()),
+  paneTitles: z.record(z.string(), z.record(z.string(), z.string())).optional(),
+  timestamp: z.number(),
 })
 
 // Coding CLI session schemas
@@ -311,6 +326,7 @@ export const ClientMessageSchema = z.discriminatedUnion('type', [
   TerminalKillSchema,
   TerminalListSchema,
   TerminalMetaListSchema,
+  UiLayoutSyncSchema,
   CodingCliCreateSchema,
   CodingCliInputSchema,
   CodingCliKillSchema,

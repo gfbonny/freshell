@@ -1564,7 +1564,7 @@ describe('TerminalView lifecycle updates', () => {
 
       const { terminalId } = await renderTerminalHarness({ status: 'running', terminalId: 'term-v2-max-cursor' })
 
-      messageHandler!({ type: 'terminal.output', terminalId, seqStart: 1, seqEnd: 3, data: 'abc' })
+      messageHandler!({ type: 'terminal.output', terminalId, seqStart: 9, seqEnd: 10, data: 'ij' })
       wsMocks.send.mockClear()
 
       reconnectHandler?.()
@@ -1572,7 +1572,31 @@ describe('TerminalView lifecycle updates', () => {
       expect(wsMocks.send).toHaveBeenCalledWith({
         type: 'terminal.attach',
         terminalId,
-        sinceSeq: 8,
+        sinceSeq: 10,
+      })
+    })
+
+    it('resets stale persisted sequence when a fresh stream restarts at sequence 1', async () => {
+      localStorage.setItem(TERMINAL_CURSOR_STORAGE_KEY, JSON.stringify({
+        'term-v2-seq-reset': {
+          seq: 12,
+          updatedAt: Date.now(),
+        },
+      }))
+      __resetTerminalCursorCacheForTests()
+
+      const { terminalId, term } = await renderTerminalHarness({ status: 'running', terminalId: 'term-v2-seq-reset' })
+
+      messageHandler!({ type: 'terminal.output', terminalId, seqStart: 1, seqEnd: 3, data: 'abc' })
+      const writes = term.write.mock.calls.map(([data]: [string]) => data)
+      expect(writes).toContain('abc')
+
+      wsMocks.send.mockClear()
+      reconnectHandler?.()
+      expect(wsMocks.send).toHaveBeenCalledWith({
+        type: 'terminal.attach',
+        terminalId,
+        sinceSeq: 3,
       })
     })
 
