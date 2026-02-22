@@ -15,7 +15,7 @@ vi.mock('../../../server/logger', () => ({
   },
 }))
 
-// Mock configStore
+// Mock configStore (still needed as fallback for any transitive imports)
 const mockGetSettings = vi.fn()
 vi.mock('../../../server/config-store', () => ({
   configStore: {
@@ -59,7 +59,7 @@ vi.mock('child_process', async (importOriginal) => {
 })
 
 // Import after mocks are set up
-const { filesRouter } = await import('../../../server/files-router')
+const { createFilesRouter } = await import('../../../server/files-router')
 
 /** Returns a mock ChildProcess that stays alive (exit with code 0 after next tick) */
 function mockChildProcess() {
@@ -76,7 +76,11 @@ function mockChildProcess() {
 function createApp() {
   const app = express()
   app.use(express.json())
-  app.use('/api/files', filesRouter)
+  app.use('/api/files', createFilesRouter({
+    configStore: { getSettings: () => mockGetSettings(), snapshot: vi.fn() },
+    codingCliIndexer: { getProjects: () => [] },
+    registry: { list: () => [] },
+  }))
   return app
 }
 
