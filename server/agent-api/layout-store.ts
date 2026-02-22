@@ -21,6 +21,10 @@ export class LayoutStore {
     this.sourceConnectionId = connectionId
   }
 
+  getSourceConnectionId() {
+    return this.sourceConnectionId
+  }
+
   getActiveTabId() {
     return this.snapshot?.activeTabId || null
   }

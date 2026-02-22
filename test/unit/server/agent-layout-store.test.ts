@@ -26,4 +26,10 @@ describe('LayoutStore (read)', () => {
     expect(panes[0].id).toBe('pane_1')
     expect(panes[0].terminalId).toBe('term_1')
   })
+
+  it('tracks and exposes layout source connection id', () => {
+    const store = new LayoutStore()
+    store.updateFromUi(snapshot as any, 'conn-abc')
+    expect(store.getSourceConnectionId()).toBe('conn-abc')
+  })
 })

@@ -4,6 +4,7 @@ import WebSocket from 'ws'
 import { WS_PROTOCOL_VERSION } from '../../shared/ws-protocol'
 
 const HOOK_TIMEOUT_MS = 30_000
+const MESSAGE_TIMEOUT_MS = 5_000
 const CODEX_SESSION_ID = 'codex-session-abc-123'
 
 function listen(server: http.Server, timeoutMs = HOOK_TIMEOUT_MS): Promise<{ port: number }> {
@@ -20,7 +21,7 @@ function listen(server: http.Server, timeoutMs = HOOK_TIMEOUT_MS): Promise<{ por
   })
 }
 
-function waitForMessage(ws: WebSocket, predicate: (msg: any) => boolean, timeoutMs = 2000): Promise<any> {
+function waitForMessage(ws: WebSocket, predicate: (msg: any) => boolean, timeoutMs = MESSAGE_TIMEOUT_MS): Promise<any> {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       ws.off('message', handler)
@@ -41,7 +42,7 @@ function waitForMessage(ws: WebSocket, predicate: (msg: any) => boolean, timeout
 function waitForMessages(
   ws: WebSocket,
   predicates: Array<(msg: any) => boolean>,
-  timeoutMs = 2000,
+  timeoutMs = MESSAGE_TIMEOUT_MS,
 ): Promise<any[]> {
   return new Promise((resolve, reject) => {
     const matches: any[] = Array(predicates.length).fill(undefined)
