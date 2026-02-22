@@ -31,8 +31,9 @@ export function onAttachReady(
 ): AttachSeqState {
   const hasReplayWindow = ready.replayFromSeq > 0
     && ready.replayFromSeq <= ready.replayToSeq
+  const replayAlreadyCovered = hasReplayWindow && ready.replayToSeq <= state.lastSeq
 
-  if (hasReplayWindow) {
+  if (hasReplayWindow && !replayAlreadyCovered) {
     // Keep awaitingFreshSequence true until replay/live output is actually accepted.
     // attach.ready arrives before replay frames, so clearing it here is premature.
     return {
@@ -90,6 +91,8 @@ export function onOutputFrame(
     // A fresh reset means we are treating this as a new stream root; any stale replay
     // window from the previous stream is intentionally discarded.
     const resetState = { ...state, lastSeq: 0, pendingReplay: null }
+    // Bounded recursion: lastSeq resets to 0, so the follow-up call cannot hit
+    // this overlap branch again for a seqStart=1 frame.
     const resetDecision = onOutputFrame(resetState, frame)
     return { ...resetDecision, freshReset: true }
   }

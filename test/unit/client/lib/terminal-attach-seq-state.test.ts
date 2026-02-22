@@ -31,6 +31,14 @@ describe('terminal-attach-seq-state', () => {
     expect(ready.awaitingFreshSequence).toBe(false)
   })
 
+  it('skips replay window already covered by local cursor', () => {
+    const state = beginAttach(createAttachSeqState({ lastSeq: 10 }))
+    const ready = onAttachReady(state, { headSeq: 10, replayFromSeq: 6, replayToSeq: 8 })
+    expect(ready.pendingReplay).toBeNull()
+    expect(ready.lastSeq).toBe(10)
+    expect(ready.awaitingFreshSequence).toBe(false)
+  })
+
   it('accepts replay frames after ready when replay starts above 1', () => {
     let state = beginAttach(createAttachSeqState({ lastSeq: 0 }))
     state = onAttachReady(state, { headSeq: 8, replayFromSeq: 6, replayToSeq: 8 })
