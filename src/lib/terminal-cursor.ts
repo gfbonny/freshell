@@ -42,7 +42,7 @@ function sanitizeMap(raw: unknown): CursorMap {
   const out: CursorMap = {}
 
   for (const [terminalId, value] of Object.entries(input)) {
-    if (!terminalId || typeof terminalId !== 'string') continue
+    if (!terminalId) continue
     if (!value || typeof value !== 'object') continue
 
     const candidate = value as Record<string, unknown>
@@ -74,6 +74,21 @@ function pruneCursorMap(map: CursorMap, now: number): CursorMap {
   }
 
   return out
+}
+
+function areCursorMapsEqual(a: CursorMap, b: CursorMap): boolean {
+  const aKeys = Object.keys(a)
+  const bKeys = Object.keys(b)
+  if (aKeys.length !== bKeys.length) return false
+
+  for (const key of aKeys) {
+    const aEntry = a[key]
+    const bEntry = b[key]
+    if (!aEntry || !bEntry) return false
+    if (aEntry.seq !== bEntry.seq || aEntry.updatedAt !== bEntry.updatedAt) return false
+  }
+
+  return true
 }
 
 function persistMap(map: CursorMap): void {
@@ -128,7 +143,7 @@ function ensureLoaded(): CursorMap {
   lastPruneAt = now
   cache = pruned
 
-  const changed = JSON.stringify(parsed) !== JSON.stringify(pruned)
+  const changed = !areCursorMapsEqual(parsed, pruned)
   if (changed) {
     persistMap(pruned)
   }
