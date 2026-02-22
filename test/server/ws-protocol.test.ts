@@ -973,7 +973,9 @@ describe('ws protocol', () => {
     await waitForMessage(ws, (m) => m.type === 'ready')
 
     const tooLargeImage = 'B'.repeat(12 * 1024 * 1024 + 1)
-    const pending = handler.requestUiScreenshot({ scope: 'view', timeoutMs: 2000 })
+    // Large payload parsing can take longer under full-suite concurrency; keep
+    // timeout aligned with other screenshot protocol tests to avoid flakiness.
+    const pending = handler.requestUiScreenshot({ scope: 'view', timeoutMs: 10_000 })
     const req = await waitForMessage(
       ws,
       (m) => m.type === 'ui.command' && m.command === 'screenshot.capture',

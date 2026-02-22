@@ -2,11 +2,15 @@ import { describe, it, expect } from 'vitest'
 import { spawn } from 'child_process'
 import path from 'path'
 import { createRequire } from 'module'
+import fs from 'node:fs/promises'
 import express from 'express'
 import http from 'http'
 import { createAgentApiRouter } from '../../server/agent-api/router'
 
-function startTestServer(layoutStoreOverrides: Partial<Record<string, any>> = {}) {
+function startTestServer(
+  layoutStoreOverrides: Partial<Record<string, any>> = {},
+  options: { wsHandler?: any } = {},
+) {
   const app = express()
   app.use(express.json())
   app.use('/api', createAgentApiRouter({
@@ -17,6 +21,7 @@ function startTestServer(layoutStoreOverrides: Partial<Record<string, any>> = {}
       ...layoutStoreOverrides,
     },
     registry: { create: () => ({ terminalId: 'term_1' }) },
+    wsHandler: options.wsHandler,
   }))
 
   const server = http.createServer(app)
@@ -98,6 +103,62 @@ describe('cli e2e flow', () => {
 
       expect(output).toBe('tab_2')
     } finally {
+      await close()
+    }
+  })
+
+  it('runs screenshot-view end-to-end with required name', async () => {
+    const tinyPngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO6r7gkAAAAASUVORK5CYII='
+    const { url, close } = await startTestServer({}, {
+      wsHandler: {
+        requestUiScreenshot: async () => ({
+          ok: true,
+          mimeType: 'image/png',
+          imageBase64: tinyPngBase64,
+          width: 1,
+          height: 1,
+          changedFocus: false,
+          restoredFocus: false,
+        }),
+      },
+    })
+
+    let screenshotPath: string | undefined
+    try {
+      const require = createRequire(import.meta.url)
+      const tsxRoot = path.dirname(require.resolve('tsx/package.json'))
+      const tsxPath = path.join(tsxRoot, 'dist', 'cli.mjs')
+      const cliPath = path.resolve(__dirname, '../../server/cli/index.ts')
+      const proc = spawn(process.execPath, [tsxPath, cliPath, 'screenshot-view', '--name', 'cli-e2e-shot', '--overwrite'], {
+        env: { ...process.env, FRESHELL_URL: url, FRESHELL_TOKEN: 'test-token' },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+
+      const output = await new Promise<string>((resolve, reject) => {
+        let data = ''
+        let err = ''
+        proc.stdout.on('data', (chunk) => { data += chunk.toString() })
+        proc.stderr.on('data', (chunk) => { err += chunk.toString() })
+        proc.on('error', reject)
+        proc.on('close', (code) => {
+          if (code !== 0) return reject(new Error(`cli exited ${code}: ${err}`))
+          resolve(data)
+        })
+      })
+
+      const parsed = JSON.parse(output) as { status: string; data: { path: string; scope: string } }
+      expect(parsed.status).toBe('ok')
+      expect(parsed.data.scope).toBe('view')
+      expect(parsed.data.path.endsWith('cli-e2e-shot.png')).toBe(true)
+      screenshotPath = parsed.data.path
+
+      const stat = await fs.stat(screenshotPath)
+      expect(stat.isFile()).toBe(true)
+      expect(stat.size).toBeGreaterThan(0)
+    } finally {
+      if (screenshotPath) {
+        await fs.unlink(screenshotPath).catch(() => undefined)
+      }
       await close()
     }
   })

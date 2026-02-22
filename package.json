@@ -58,6 +58,7 @@
     "express": "^4.19.2",
     "express-rate-limit": "^7.4.0",
     "glob": "^13.0.0",
+    "html2canvas": "^1.4.1",
     "is-port-reachable": "^4.0.0",
     "lean-qr": "^2.7.1",
     "lucide-react": "^0.469.0",

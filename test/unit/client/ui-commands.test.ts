@@ -1,7 +1,16 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { handleUiCommand } from '../../../src/lib/ui-commands'
+import { captureUiScreenshot } from '../../../src/lib/ui-screenshot'
+
+vi.mock('../../../src/lib/ui-screenshot', () => ({
+  captureUiScreenshot: vi.fn(),
+}))
 
 describe('handleUiCommand', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
   it('handles tab.create', () => {
     const actions: any[] = []
     const dispatch = (action: any) => {
@@ -69,5 +78,44 @@ describe('handleUiCommand', () => {
 
     expect(actions[0].type).toBe('panes/resizePanes')
     expect(actions[1].type).toBe('panes/swapPanes')
+  })
+
+  it('delegates screenshot.capture and sends ui.screenshot.result', async () => {
+    const dispatch = vi.fn()
+    const send = vi.fn()
+    const getState = vi.fn(() => ({}) as any)
+
+    vi.mocked(captureUiScreenshot).mockResolvedValue({
+      ok: true,
+      changedFocus: false,
+      restoredFocus: false,
+      mimeType: 'image/png',
+      imageBase64: 'aGVsbG8=',
+      width: 100,
+      height: 50,
+    })
+
+    handleUiCommand(
+      {
+        type: 'ui.command',
+        command: 'screenshot.capture',
+        payload: { requestId: 'req-1', scope: 'view' },
+      },
+      { dispatch: dispatch as any, getState, send },
+    )
+
+    await Promise.resolve()
+
+    expect(captureUiScreenshot).toHaveBeenCalledWith(
+      { scope: 'view', paneId: undefined, tabId: undefined },
+      expect.objectContaining({ dispatch, getState }),
+    )
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'ui.screenshot.result',
+      requestId: 'req-1',
+      ok: true,
+      changedFocus: false,
+      restoredFocus: false,
+    }))
   })
 })

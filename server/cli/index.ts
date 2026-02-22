@@ -24,6 +24,9 @@ const aliases: Record<string, string> = {
   'prev-window': 'prev-tab',
   'split-window': 'split-pane',
   'display-message': 'display',
+  'screenshot-pane': 'screenshot',
+  'screenshot-tab': 'screenshot',
+  'screenshot-view': 'screenshot',
 }
 
 const getFlag = (flags: Flags, ...names: string[]) => {
@@ -411,6 +414,64 @@ async function main() {
       if (isTruthy(getFlag(flags, 'e'))) params.set('e', 'true')
       const output = await client.get(`/api/panes/${encodeURIComponent(resolved.pane.id)}/capture?${params.toString()}`)
       writeText(String(output))
+      return
+    }
+    case 'screenshot': {
+      const defaultScope = parsed.command === 'screenshot-pane' ? 'pane'
+        : parsed.command === 'screenshot-tab' ? 'tab'
+          : parsed.command === 'screenshot-view' ? 'view'
+            : undefined
+      const scopeRaw = ((getFlag(flags, 'scope') as string | undefined) || defaultScope)
+      if (scopeRaw !== 'pane' && scopeRaw !== 'tab' && scopeRaw !== 'view') {
+        writeError('scope must be pane, tab, or view')
+        process.exitCode = 1
+        return
+      }
+
+      const name = getFlag(flags, 'n', 'name') as string | undefined
+      if (!name) {
+        writeError('name required')
+        process.exitCode = 1
+        return
+      }
+
+      const pathInput = getFlag(flags, 'path') as string | undefined
+      const overwrite = isTruthy(getFlag(flags, 'overwrite'))
+      let paneId: string | undefined
+      let tabId: string | undefined
+
+      if (scopeRaw === 'pane') {
+        const target = (getFlag(flags, 't', 'target', 'pane') as string | undefined) || args[0]
+        const resolved = await resolvePaneTarget(client, target)
+        if (!resolved.pane?.id) {
+          writeError(resolved.message || 'pane not found')
+          process.exitCode = 1
+          return
+        }
+        if (resolved.message) writeError(resolved.message)
+        paneId = resolved.pane.id
+        tabId = resolved.tab?.id
+      } else if (scopeRaw === 'tab') {
+        const target = (getFlag(flags, 't', 'target', 'tab') as string | undefined) || args[0]
+        const resolved = await resolveTabTarget(client, target)
+        if (!resolved.tab?.id) {
+          writeError(resolved.message || 'tab not found')
+          process.exitCode = 1
+          return
+        }
+        if (resolved.message) writeError(resolved.message)
+        tabId = resolved.tab.id
+      }
+
+      const res = await client.post('/api/screenshots', {
+        scope: scopeRaw,
+        name,
+        path: pathInput,
+        overwrite,
+        tabId,
+        paneId,
+      })
+      writeJson(res)
       return
     }
     case 'wait-for': {

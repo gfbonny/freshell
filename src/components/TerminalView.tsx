@@ -21,6 +21,7 @@ import { getTerminalTheme } from '@/lib/terminal-themes'
 import { getResumeSessionIdFromRef } from '@/components/terminal-view-utils'
 import { copyText, readText } from '@/lib/clipboard'
 import { registerTerminalActions } from '@/lib/pane-action-registry'
+import { registerTerminalCaptureHandler } from '@/lib/screenshot-capture-env'
 import { consumeTerminalRestoreRequestId, addTerminalRestoreRequestId } from '@/lib/terminal-restore'
 import { isTerminalPasteShortcut } from '@/lib/terminal-input-policy'
 import { clearTerminalCursor, loadTerminalCursor, saveTerminalCursor } from '@/lib/terminal-cursor'
@@ -101,6 +102,8 @@ function createNoopRuntime(): TerminalRuntime {
     onDidChangeResults: () => ({ dispose: () => {} }),
     dispose: () => {},
     webglActive: () => false,
+    suspendWebgl: () => false,
+    resumeWebgl: () => {},
   }
 }
 
@@ -889,6 +892,12 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       hasSelection: () => term.getSelection().length > 0,
       openSearch: () => setSearchOpen(true),
     })
+    const unregisterCaptureHandler = registerTerminalCaptureHandler(paneId, {
+      suspendWebgl: () => runtimeRef.current?.suspendWebgl() ?? false,
+      resumeWebgl: () => {
+        runtimeRef.current?.resumeWebgl()
+      },
+    })
 
     requestTerminalLayout({ fit: true, focus: true })
 
@@ -983,6 +992,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       filePathLinkDisposable?.dispose()
       ro.disconnect()
       unregisterActions()
+      unregisterCaptureHandler()
       searchResultsDisposable.dispose()
       if (writeQueueRef.current === writeQueue) {
         writeQueue.clear()

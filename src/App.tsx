@@ -458,7 +458,11 @@ export default function App() {
           dispatch(setSettings(applyLocalTerminalFontFamily(msg.settings as AppSettings)))
         }
         if (msg.type === 'ui.command') {
-          handleUiCommand(msg as Record<string, unknown>, dispatch)
+          handleUiCommand(msg as Record<string, unknown>, {
+            dispatch,
+            getState: store.getState,
+            send: (payload) => ws.send(payload),
+          })
         }
         if (msg.type === 'terminal.meta.list.response') {
           const requestId = typeof msg.requestId === 'string' ? msg.requestId : ''
