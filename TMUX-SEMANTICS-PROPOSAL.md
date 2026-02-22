@@ -2,447 +2,583 @@
 
 ## 1. Goal
 
-Provide a `freshell` CLI that AI agents can drive from Bash with tmux-like ergonomics,
-while using Freshell's native multi-device model.
+Provide a `freshell` CLI that agents can drive from Bash with tmux-like ergonomics,
+while preserving Freshell's multi-device model.
 
-This proposal is a **unified cutover**. There is no phased rollout and no backward
-compatibility layer.
-
----
-
-## 2. Final Architecture Decisions (Locked)
-
-The following decisions are final and drive every API and protocol choice in this doc:
-
-- **Client-owned state**: each device is the source of truth for its own pane/tab/layout state.
-- **Server as relay/cache**: server forwards commands/events between devices and keeps last-known snapshots, but does not become global authority for live per-device layout.
-- **Remote control = RPC to owner device**: operations like "open pane on dandesktop" are sent to that owner device and applied there.
-- **Offline behavior**: if the owner device is offline, return explicit error `DEVICE_OFFLINE`.
-- **No deferred queueing / surrogate execution**: no server-side queued replay, no server-side substitute owner behavior.
-- **Accepted consequence**: deterministic remote mutation is available only while the owner device is online.
-- **Rollout direction**: unified cutover, no phased backward-compat path.
+This document is a **unified cutover** design. There is no phased rollout and no
+backward-compatibility path.
 
 ---
 
-## 3. Conceptual Model
+## 2. Locked Product Decisions
 
-### 3.1 tmux to Freshell Translation
+The following decisions are fixed:
 
-| tmux concept | Freshell equivalent | Notes |
-|---|---|---|
-| Server | Freshell server | Relay/cache + auth + discovery |
-| Session | Device workspace | Not global; owned by a connected device |
-| Window | Tab | Owned by one device |
-| Pane | Pane | Owned by one device |
-| Client | Browser/CLI process | Can control local or remote owner via RPC |
-
-### 3.2 Ownership Model
-
-Every tab and pane has an immutable `ownerDeviceId`.
-
-- Local commands mutate local owned entities directly.
-- Remote commands route to the entity owner.
-- Ownership transfer is explicit (not implicit side effect).
-
-### 3.3 State Classes
-
-- **Authoritative live state**: maintained in owner device runtime.
-- **Relay/cache state**: last-known snapshot in server for discovery and stale reads.
-- **Historical/registry state**: existing registry artifacts for search and history.
+- **Client-owned layout state**: each device is the source of truth for its own tab/pane/layout state.
+- **Server as relay/cache for layout**: server forwards commands/events between devices and stores last-known snapshots; it is not global authority for live per-device layout.
+- **Remote control = owner-device RPC**: layout mutations targeting another device are sent to that owner device and applied there.
+- **Offline behavior**: if owner device is offline, default to explicit `DEVICE_OFFLINE`.
+- **No deferred queueing / surrogate execution**: no server-side queued replay; no server-side substitute owner behavior.
+- **Accepted consequence**: deterministic remote layout mutation exists only while owner device is online.
+- **Unified cutover**: no legacy parser/shim compatibility mode.
 
 ---
 
-## 4. Addressing and Targeting
+## 3. Authority Boundaries (Critical)
 
-Ambiguous target parsing is not allowed.
+The previous draft mixed ownership domains. This cutover defines them explicitly.
 
-### 4.1 Device Selector
+### 3.1 Domain A: Layout Authority (Device-Owned)
 
-- `--device <device-id>`: explicit owner device target.
-- Omitted `--device` means "local device only" for mutating commands.
+Owned by one device (`ownerDeviceId`) and mutated only by that owner device runtime:
 
-### 4.2 Entity Selectors
+- tab list/order
+- pane tree structure (split/close/swap/resize)
+- active tab and active pane pointers
+- pane metadata that is UI-owned (titles, browser URL, editor path)
+- mapping from pane IDs to content types and process/session references
 
-Use explicit selector prefixes:
+### 3.2 Domain B: Terminal Process Authority (Server-Owned)
+
+Authoritative on server, independent of browser presence:
+
+- PTY spawn/kill/resize/input
+- terminal output stream
+- terminal ring buffer / capture source
+- terminal exit status and lifecycle events
+
+### 3.3 Domain C: SDK/CodingCLI Session Authority (Server-Owned)
+
+Authoritative on server:
+
+- `sdk.create/send/interrupt/kill/attach`
+- `codingcli.create/input/kill`
+- provider session state and event stream
+
+### 3.4 Hard Invariant
+
+- Layout mutations are owner-device RPC.
+- Process/session operations are server-direct.
+- Hybrid operations do both, in that order, with rollback rules.
+
+This preserves your client-owned layout requirement without breaking PTY/session
+correctness.
+
+---
+
+## 4. Device Identity and Presence
+
+### 4.1 Device Types
+
+- `browser`: interactive UI device.
+- `cli`: headless control device used by `freshell` CLI.
+
+Both are first-class devices for layout ownership.
+
+### 4.2 CLI Local Device Model
+
+`freshell` must have stable local identity.
+
+- Device ID stored at `~/.freshell/cli-device.json`.
+- On first run, generate `deviceId` and `deviceLabel` (hostname + username + suffix).
+- Omitted `--device` means this CLI device.
+- Tabs created by CLI default to `ownerDeviceId = <cli deviceId>`.
+
+This resolves the "local device" ambiguity.
+
+### 4.3 Presence Contract
+
+- Presence comes from active WS connection + heartbeat.
+- Server marks device offline after `presenceTtlMs` expiration.
+- RPC routing to offline owner returns `DEVICE_OFFLINE` immediately.
+- No offline replay queue.
+
+---
+
+## 5. Targeting Model
+
+Ambiguous shorthand is removed.
+
+### 5.1 Device Selector
+
+- `--device <device-id>`: target specific owner device.
+- Missing `--device`: current CLI device.
+
+### 5.2 Entity Selectors
+
+Allowed selectors:
 
 - `tab:<tab-id>`
 - `tab-name:<name>`
-- `tab-index:<n>` (index in owner device tab order)
+- `tab-index:<n>`
 - `pane:<pane-id>`
-- `pane-index:<n>` (index in specified tab)
+- `pane-index:<n>` (requires explicit tab selector)
+- `terminal:<terminal-id>`
+- `session:<provider>:<session-id>`
 
-### 4.3 Resolution Rules
+### 5.3 Resolution Rules
 
 1. Parse selector type.
-2. Resolve against owner device state (live if online; cached only for reads).
-3. If resolution yields 0 or >1 results, return `AMBIGUOUS_TARGET` or `NOT_FOUND`.
+2. Resolve against owner live state for layout selectors.
+3. Resolve against server live registries for `terminal:` / `session:` selectors.
+4. Multiple matches are hard errors (`AMBIGUOUS_TARGET`).
 
-No tmux `session:window.pane` parsing. No shorthand numeric heuristics.
+No tmux `session:window.pane` compatibility parser.
 
 ---
 
-## 5. Command Semantics
+## 6. Command Routing Classes
 
-## 5.1 Core tmux-like Commands
+### 6.1 Class L: Layout Mutations (Owner RPC)
 
-| tmux command | freshell command | cutover behavior |
+Require online owner device:
+
+- `new-tab`, `kill-tab`, `rename-tab`, `select-tab`
+- `split-pane`, `kill-pane`, `resize-pane`, `swap-pane`, `select-pane`
+- `open-browser`, `navigate`, `open-editor`
+
+If target owner offline: `DEVICE_OFFLINE`.
+
+### 6.2 Class P: Terminal Process Ops (Server-Direct)
+
+Never routed through owner device:
+
+- `send-keys --target terminal:...`
+- `capture-pane --target terminal:...`
+- `wait-for --target terminal:...`
+- `list-terminals`, `respawn-terminal`, `kill-terminal`, `attach-terminal`
+
+These remain deterministic when no browser is connected.
+
+### 6.3 Class S: SDK/CodingCLI Ops (Server-Direct)
+
+- `sdk.create/send/interrupt/kill/attach`
+- `codingcli.create/input/kill`
+- CLI aliases (`session-send`, `session-wait`, etc.)
+
+### 6.4 Class H: Hybrid Ops (Layout + Process)
+
+Example: `split-pane --shell`.
+
+Execution order:
+
+1. Owner RPC applies layout mutation and reserves new pane ID.
+2. Server spawns/attaches process/session.
+3. Owner RPC finalizes pane content reference (`terminalId` or `sessionRef`).
+
+Failure handling:
+
+- Step 1 fails: no side effects.
+- Step 2 fails: owner receives compensating mutation to remove orphan pane.
+- Step 3 fails: operation returns `INCONSISTENT_STATE`; server retains process and emits remediation guidance.
+
+---
+
+## 7. tmux Mapping (Constrained)
+
+This proposal is tmux-like, not byte-for-byte tmux emulation.
+
+| tmux intent | freshell command | route |
 |---|---|---|
-| `new-session` / `new-window` | `freshell new-tab` | Creates tab on local device, or remote owner via `--device` RPC |
-| `list-sessions` / `list-windows` | `freshell list-tabs` | Lists tabs for selected device; can show stale cache metadata |
-| `kill-session` / `kill-window` | `freshell kill-tab` | Must execute on owner device |
-| `split-window` | `freshell split-pane` | Must execute on owner device; direction flag must be honored |
-| `list-panes` | `freshell list-panes` | Device-scoped pane list |
-| `select-pane` | `freshell select-pane` | Sets active pane on owner device |
-| `kill-pane` | `freshell kill-pane` | Owner-executed mutation |
-| `send-keys` | `freshell send-keys` | Owner-executed; writes to target terminal |
-| `capture-pane` | `freshell capture-pane` | Read path from owner live buffer if online, else stale cache only when explicitly requested |
+| create window/session | `new-tab` | L |
+| list windows | `list-tabs` | live owner or cache if `--allow-stale` |
+| split pane | `split-pane --direction ...` | L/H |
+| send keys | `send-keys` | P |
+| capture output | `capture-pane` | P |
+| wait for completion | `wait-for` | P/S |
+| kill pane/window | `kill-pane` / `kill-tab` | L |
 
-### 5.1.1 Mutating Commands
+Explicitly not supported:
 
-All mutating commands require deterministic owner routing:
-
-- `new-tab`
-- `kill-tab`
-- `split-pane`
-- `kill-pane`
-- `resize-pane`
-- `swap-pane`
-- `select-tab`
-- `select-pane`
-- `send-keys`
-- `attach`
-- `respawn-pane`
-- `navigate`
-- `open-browser`
-
-If owner device is offline: fail fast with `DEVICE_OFFLINE`.
-
-### 5.1.2 Read Commands
-
-Read commands support two modes:
-
-- default: require live owner response.
-- `--allow-stale`: return server cached snapshot if owner offline; include freshness metadata.
-
-### 5.1.3 `send-keys`
-
-`send-keys` keeps tmux-like key-token semantics:
-
-- ordered left-to-right token processing
-- key token translation (`Enter`, `C-c`, arrows, etc.)
-- `-l` for literal mode
-
-Execution always occurs on the owner device process that owns the pane.
-
-### 5.1.4 `capture-pane`
-
-Define strict v1 semantics:
-
-- Capture source is owner terminal ring buffer.
-- `-S N` means "tail from line offset N relative to end" after server-side normalization.
-- `-J` joins wrapped soft-lines only if wrap metadata exists; otherwise returns normalized hard lines.
-- `-e` includes ANSI; default strips ANSI.
-
-If owner offline and `--allow-stale` not set: `DEVICE_OFFLINE`.
-
-### 5.1.5 `wait-for`
-
-`wait-for` is an owner-executed operation:
-
-- `-p/--pattern`: regex over normalized stream
-- `--stable N`: no output for N seconds
-- `--exit`: process exit
-- `--prompt`: best-effort heuristic
-- `-T`: timeout seconds
-
-Return machine-readable reason fields:
-
-- `matched`
-- `stabilized`
-- `exited`
-- `timed_out`
-- `device_offline`
+- tmux target grammar (`session:window.pane`)
+- transparent tmux wrapper shim
 
 ---
 
-## 6. Device RPC Protocol (Primary Control Plane)
+## 8. Critical Command Semantics
 
-Remote control is implemented as request/response RPC over WS relay.
+### 8.1 `send-keys`
 
-### 6.1 Message Types
+Target forms:
 
-- `device.rpc.request`
-- `device.rpc.response`
+- preferred: `--target terminal:<id>` (server-direct)
+- allowed: `--target pane:<id>` (requires owner-online resolution of pane->terminal mapping)
+
+Behavior:
+
+- left-to-right token processing
+- key token translation (`Enter`, `C-c`, arrows, etc.)
+- `-l` means literal mode
+
+If pane target owner offline: `DEVICE_OFFLINE`.
+
+### 8.2 `capture-pane`
+
+Target forms mirror `send-keys`.
+
+Semantics:
+
+- `-S <line>` follows tmux-style line indexing against retained history
+- `-S -` means full retained history
+- `-J` joins wrapped soft-lines only when wrap metadata is available
+- `-e` includes ANSI; default strips ANSI
+
+If requested semantics cannot be satisfied exactly (e.g. missing wrap metadata),
+return `UNSUPPORTED_CAPTURE_MODE` instead of silently changing meaning.
+
+### 8.3 `wait-for`
+
+Targets terminal or SDK session references.
+
+Predicates:
+
+- `--pattern <regex>`
+- `--stable <seconds>`
+- `--exit`
+- `--prompt` (terminal mode only; heuristic)
+
+Combination rule:
+
+- multiple predicates are **AND** conditions
+- no predicates provided is `INVALID_ARGUMENT`
+
+Evaluation model:
+
+- server-side streaming subscription (no client polling loop)
+- each predicate latches true when satisfied
+- command succeeds when all requested predicates are true
+- timeout returns `TIMEOUT` with predicate progress
+
+Prompt heuristic contract:
+
+- explicitly best-effort
+- never sole correctness guarantee for destructive operations
+
+### 8.4 `attach-terminal`
+
+`attach-terminal --target terminal:<id> --to pane:<id>`:
+
+- owner RPC updates pane mapping to referenced terminal
+- no process transfer; only pane binding change
+- requires owner online
+
+### 8.5 `navigate`
+
+`navigate --target pane:<id> <url>`:
+
+- layout/UI metadata mutation owned by pane owner device
+- routed via owner RPC
+- validates URL before apply
+
+### 8.6 `respawn`
+
+Two explicit forms:
+
+- `respawn-terminal --target terminal:<id>` (P)
+- `respawn-pane --target pane:<id>` (H: owner resolves pane, server respawns bound process, owner updates refs)
+
+---
+
+## 9. RPC Protocol (Layout Plane)
+
+### 9.1 Messages
+
+- `layout.rpc.request`
+- `layout.rpc.ack`
+- `layout.rpc.result`
 - `device.presence`
-- `device.snapshot.updated`
-- `device.event`
+- `layout.snapshot.updated`
 
-### 6.2 Request Envelope
+### 9.2 Request Envelope
 
 ```json
 {
-  "type": "device.rpc.request",
+  "type": "layout.rpc.request",
   "requestId": "req_123",
-  "callerDeviceId": "laptop",
+  "callerDeviceId": "cli_dev_1",
   "targetDeviceId": "dandesktop",
   "command": "split-pane",
   "args": {
     "target": "pane:p_abc",
     "direction": "horizontal"
   },
+  "expectedRevision": 42,
   "idempotencyKey": "idem_123"
 }
 ```
 
-### 6.3 Response Envelope
+### 9.3 Timeout/Error Stages
 
-```json
-{
-  "type": "device.rpc.response",
-  "requestId": "req_123",
-  "ok": false,
-  "error": {
-    "code": "DEVICE_OFFLINE",
-    "message": "Target device is offline"
-  }
-}
-```
+- `RPC_TIMEOUT`: relay-level failure before owner ack (delivery stage).
+- `OWNER_TIMEOUT`: owner acked but did not complete before deadline (execution stage).
 
-### 6.4 Delivery Contract
+Error payload includes `stage: relay|owner`.
 
-- At-most-once relay delivery.
-- Idempotency keys required for create/split/attach/respawn operations.
-- No queued replay when target reconnects.
+### 9.4 Delivery Contract
 
-### 6.5 Timeouts
-
-- Relay timeout: `RPC_TIMEOUT`.
-- Owner does not acknowledge in time: `OWNER_TIMEOUT`.
-- Caller receives explicit terminal error; no deferred completion.
+- at-most-once relay delivery
+- idempotency keys required for create/split/attach/respawn
+- no queued replay after reconnect
 
 ---
 
-## 7. Server Role: Relay + Cache (Not Global SoT)
+## 10. Cache and Read Semantics
 
-Server responsibilities:
+Server cache is last-known snapshot only.
 
-- authenticate callers
-- track device presence
-- route RPC requests/responses
-- persist last-known snapshots per device
-- expose cached discovery endpoints
+### 10.1 Read Modes
 
-Server non-responsibilities:
+- default: live owner required for layout reads
+- `--allow-stale`: permit cached layout snapshot
 
-- no authoritative live mutation of per-device layout
-- no queueing pending mutations for offline devices
-- no substitute owner execution
+### 10.2 Freshness Fields
 
-### 7.1 Snapshot Cache Shape
+Any cache-backed result includes:
 
-Each cached snapshot contains:
-
-- `deviceId`
-- `snapshotVersion`
+- `source: "cache" | "live"`
 - `capturedAt`
-- `tabs[]` and pane trees
-- `activeTabId` and active pane map
-- `stale` (derived)
+- `ownerOnline`
+- `ownerLastSeenAt`
 
-### 7.2 Freshness Metadata
-
-Any cache-backed response includes:
-
-- `source: live|cache`
-- `capturedAt`
-- `ownerOnline: boolean`
+Process/session reads (`terminal:` / `session:`) are live server reads and do not
+require owner presence.
 
 ---
 
-## 8. Data Model
+## 11. Data Model
 
-## 8.1 Required Fields
+### 11.1 Layout Entities (Authoritative on Owner Device)
 
-Tab:
+Tab minimum fields:
 
 - `id`
 - `ownerDeviceId`
 - `title`
+- `status`
 - `createdAt`
-- `revision`
+- `updatedAt`
+- `layoutRevision`
 
-Pane:
+Pane minimum fields:
 
 - `id`
-- `ownerDeviceId`
 - `tabId`
-- `kind`
-- `revision`
+- `ownerDeviceId`
+- `kind` (`terminal|browser|editor|claude-chat|picker`)
+- `status`
+- `contentRef` (`terminalId` or `sessionRef` where applicable)
+- `updatedAt`
+- `layoutRevision`
 
-### 8.2 Revisions and Concurrency
+### 11.2 Process/Session Entities (Authoritative on Server)
 
-Owner device applies a monotonic revision per owned workspace.
+Terminal fields:
 
-- Mutations include expected revision.
-- Mismatch returns `REVISION_CONFLICT` with current revision.
-- Caller may re-read and retry.
+- `terminalId`
+- `mode`
+- `status`
+- `createdAt`
+- `lastActivityAt`
+- `bufferRef`
 
-CRDT/OT is out of scope for cutover.
+SDK/CodingCLI session fields:
 
----
+- `provider`
+- `sessionId`
+- `status`
+- `updatedAt`
 
-## 9. CLI Design
+### 11.3 Revision Rules
 
-### 9.1 Principles
-
-- Automation-first: stable machine parse (`--json`).
-- Explicit owner routing.
-- Explicit errors; no hidden fallbacks.
-
-### 9.2 Examples
-
-```bash
-# Local device mutation
-freshell new-tab -n "dev"
-
-# Remote mutation routed to owner device
-freshell split-pane --device dandesktop -t pane:p_abc --direction horizontal
-
-# Explicit offline failure behavior
-freshell kill-pane --device dandesktop -t pane:p_abc
-# -> exits non-zero with DEVICE_OFFLINE if owner is offline
-
-# Read with stale allowed
-freshell list-tabs --device dandesktop --allow-stale --json
-```
-
-### 9.3 Command Reference (Cutover)
-
-```bash
-# Device
-freshell list-devices
-freshell device-status --device DEVICE
-
-# Tabs
-freshell new-tab [--device DEVICE] [-n NAME] [--shell SHELL] [--cwd DIR]
-freshell list-tabs [--device DEVICE] [--allow-stale]
-freshell select-tab --device DEVICE -t tab:ID
-freshell kill-tab --device DEVICE -t tab:ID
-freshell rename-tab --device DEVICE -t tab:ID NAME
-
-# Panes
-freshell split-pane --device DEVICE -t pane:ID --direction horizontal|vertical
-freshell list-panes [--device DEVICE] [-t tab:ID] [--allow-stale]
-freshell select-pane --device DEVICE -t pane:ID
-freshell kill-pane --device DEVICE -t pane:ID
-freshell resize-pane --device DEVICE -t pane:ID [-x WIDTH] [-y HEIGHT]
-freshell swap-pane --device DEVICE -s pane:SRC -t pane:DST
-
-# I/O
-freshell send-keys --device DEVICE -t pane:ID [-l] [KEYS...]
-freshell capture-pane --device DEVICE -t pane:ID [-S LINES] [-J] [-e] [--allow-stale]
-freshell wait-for --device DEVICE -t pane:ID [-p PATTERN] [--stable N] [--exit] [--prompt] [-T TIMEOUT]
-
-# Browser/editor
-freshell open-browser --device DEVICE -t pane:ID URL
-freshell navigate --device DEVICE -t pane:ID URL
-freshell split-pane --device DEVICE -t pane:ID --browser URL --direction horizontal|vertical
-freshell split-pane --device DEVICE -t pane:ID --editor FILE --direction horizontal|vertical
-
-# Utility
-freshell display --device DEVICE -p FORMAT -t pane:ID
-freshell health
-freshell lan-info
-```
+- Revision scope: per owner workspace (single monotonic counter per `ownerDeviceId`).
+- Every layout mutation increments revision by 1.
+- RPC mutation must provide `expectedRevision`.
+- Mismatch returns `REVISION_CONFLICT` with `currentRevision`.
+- Initial revision after migration: `1`.
 
 ---
 
-## 10. Error Model
+## 12. Security Model
 
-Required error codes:
+### 12.1 Token Flow
 
-- `DEVICE_OFFLINE`
-- `OWNER_TIMEOUT`
-- `RPC_TIMEOUT`
-- `NOT_FOUND`
-- `AMBIGUOUS_TARGET`
-- `INVALID_TARGET`
-- `REVISION_CONFLICT`
-- `UNAUTHORIZED`
-- `UNSUPPORTED`
-- `INTERNAL_ERROR`
+- `AUTH_TOKEN` remains bootstrap auth for server access.
+- CLI exchanges bootstrap auth for short-lived device session token via `POST /api/device-sessions`.
+- Device token TTL: 15 minutes; renewable via refresh endpoint.
+- Device token scopes include device-bound layout write scope.
 
-CLI requirements:
+### 12.2 Credential Storage
 
-- non-zero exit code on any error
-- `--json` error body includes `code`, `message`, `details`
+- CLI credential path: `~/.freshell/cli-auth.json`.
+- File mode must be `0600`; refuse startup if broader.
+- Child process env must never include long-lived auth tokens.
 
----
+### 12.3 Authorization Rules
 
-## 11. Security Model
+For cross-device layout mutation:
 
-### 11.1 Token Handling
+- same authenticated principal required
+- caller must have remote-control scope for target device
+- deny by default without explicit permission
 
-- Do not inject long-lived server auth token into spawned shell env.
-- Use scoped control tokens for CLI/RPC sessions.
-- Store local credentials with strict file permissions.
+### 12.4 Audit Log
 
-### 11.2 Authorization
-
-Server enforces caller policy for cross-device operations:
-
-- same user namespace required
-- optional explicit allowlist per device
-- audit log for remote mutation attempts
-
-### 11.3 Audit Events
-
-Minimum audit fields:
+Server writes JSONL at `~/.freshell/audit/remote-control.jsonl`:
 
 - `requestId`
 - `callerDeviceId`
 - `targetDeviceId`
 - `command`
 - `result`
+- `errorCode`
+- `stage`
 - `timestamp`
 
 ---
 
-## 12. Unified Cutover Checklist
+## 13. Migration and Cutover
 
-All items are required before landing:
+Unified cutover still requires deterministic migration.
 
-1. Device ownership fields added to tab/pane models.
-2. Owner-device RPC protocol implemented (`request`, `response`, presence).
-3. Server relay/cache behavior implemented without surrogate mutation paths.
-4. `DEVICE_OFFLINE` behavior implemented and tested across all mutating commands.
-5. Explicit target parsing implemented; ambiguous shorthand removed.
-6. No compatibility shim, no session/window legacy parser, no deferred queue.
-7. CLI `--json` success/error schema finalized and documented.
-8. Security changes landed (no long-lived token injection into child env).
-9. Unit tests for target parsing, routing, error codes, revision conflicts.
-10. Integration tests for live remote mutate and offline failure.
-11. E2E tests for agent-critical flows (`send-keys`, `wait-for`, `capture-pane`).
-12. Docs and examples updated to cutover semantics only.
+### 13.1 Client-Side Layout Migration
+
+On first cutover startup, each device:
+
+1. loads local tabs/panes
+2. stamps missing `ownerDeviceId` with local `deviceId`
+3. initializes `layoutRevision = 1`
+4. writes migrated local state
+5. publishes `layout.snapshot.updated` to server
+
+### 13.2 Server Migration
+
+- Existing cached snapshots without owner metadata are rejected after cutover.
+- Server accepts only `layoutOwnershipV1` clients.
+- Legacy clients are denied with explicit version error.
+
+### 13.3 Capability Gate
+
+`hello.capabilities` must include:
+
+- `layoutOwnershipV1: true`
+- `layoutRpcV1: true`
+- `devicePresenceV1: true`
+
+No compatibility path for old capability sets.
 
 ---
 
-## 13. Non-Goals
+## 14. Error Model
 
-- No backward compatibility with tmux target syntax.
-- No server-authoritative global layout state.
-- No queued/deferred remote execution.
-- No CRDT/OT collaborative merge model in cutover scope.
+Canonical errors:
+
+- `DEVICE_OFFLINE`
+- `RPC_TIMEOUT`
+- `OWNER_TIMEOUT`
+- `REVISION_CONFLICT`
+- `NOT_FOUND`
+- `AMBIGUOUS_TARGET`
+- `INVALID_TARGET`
+- `INVALID_ARGUMENT`
+- `UNAUTHORIZED`
+- `UNSUPPORTED_CAPTURE_MODE`
+- `TIMEOUT`
+- `INCONSISTENT_STATE`
+- `INTERNAL_ERROR`
+
+CLI contract:
+
+- non-zero exit on error
+- `--json` output includes `code`, `message`, `details`, and (when relevant) `stage`
 
 ---
 
-## 14. Rationale
+## 15. Command Surface (Cutover)
 
-This model optimizes for correctness of ownership boundaries and predictable failure
-semantics:
+```bash
+# Device and presence
+freshell list-devices
+freshell device-status --device DEVICE
 
-- A device always controls its own live workspace state.
-- Remote mutation is deterministic when and only when owner is online.
-- Offline behavior is explicit and immediate, never hidden behind replay queues.
-- The server remains simple and reliable as relay/cache/auth infrastructure.
+# Layout (Class L/H)
+freshell new-tab [--device DEVICE] [-n NAME] [--shell SHELL] [--cwd DIR]
+freshell list-tabs [--device DEVICE] [--allow-stale]
+freshell select-tab --device DEVICE --target tab:ID
+freshell kill-tab --device DEVICE --target tab:ID
+freshell rename-tab --device DEVICE --target tab:ID NAME
+
+freshell split-pane --device DEVICE --target pane:ID --direction horizontal|vertical [--shell SHELL|--browser URL|--editor FILE]
+freshell list-panes [--device DEVICE] [--tab tab:ID] [--allow-stale]
+freshell select-pane --device DEVICE --target pane:ID
+freshell kill-pane --device DEVICE --target pane:ID
+freshell resize-pane --device DEVICE --target pane:ID [-x WIDTH] [-y HEIGHT]
+freshell swap-pane --device DEVICE --source pane:SRC --target pane:DST
+
+freshell open-browser --device DEVICE --target pane:ID URL
+freshell navigate --device DEVICE --target pane:ID URL
+freshell open-editor --device DEVICE --target pane:ID FILE
+
+# Terminal process (Class P)
+freshell list-terminals
+freshell send-keys --target terminal:ID [-l] [KEYS...]
+freshell capture-pane --target terminal:ID [-S START] [-J] [-e]
+freshell wait-for --target terminal:ID [-p PATTERN] [--stable N] [--exit] [--prompt] [-T TIMEOUT]
+freshell respawn-terminal --target terminal:ID
+freshell kill-terminal --target terminal:ID
+freshell attach-terminal --target terminal:ID --to pane:ID --device DEVICE
+
+# SDK/CodingCLI sessions (Class S)
+freshell session-list [--provider PROVIDER]
+freshell session-send --target session:PROVIDER:ID TEXT
+freshell session-wait --target session:PROVIDER:ID [-p PATTERN] [-T TIMEOUT]
+freshell session-kill --target session:PROVIDER:ID
+
+# Utility
+freshell display --device DEVICE -p FORMAT [--target pane:ID]
+freshell health
+freshell lan-info
+```
+
+---
+
+## 16. Unified Cutover Acceptance Checklist
+
+All items required before merge:
+
+1. Authority boundaries implemented (layout owner-routed; process/session server-direct).
+2. CLI stable device identity implemented (`~/.freshell/cli-device.json`).
+3. Layout RPC protocol implemented with relay/owner stage errors.
+4. Presence + `DEVICE_OFFLINE` behavior enforced for Class L/H commands.
+5. No server-side layout surrogate execution and no replay queue.
+6. Explicit selector parser implemented; ambiguous shorthand removed.
+7. `send-keys` / `capture-pane` / `wait-for` server-direct terminal path implemented.
+8. SDK/CodingCLI command path integrated and documented.
+9. Revision conflict handling implemented with `expectedRevision` and `currentRevision`.
+10. Security token flow and credential permission checks implemented.
+11. Migration implemented for owner metadata and revision initialization.
+12. Capability gate enabled; legacy clients rejected.
+13. Unit/integration/e2e coverage updated for routing, offline behavior, and hybrid rollback.
+14. Docs reflect only cutover semantics; no phased/back-compat language remains.
+
+---
+
+## 17. Non-Goals
+
+- tmux command parser compatibility shim
+- server-authoritative global live layout state
+- offline queue/replay for remote layout mutation
+- CRDT/OT collaborative layout merge in this cutover
+
+---
+
+## 18. Rationale
+
+This design keeps your core constraint intact (device-owned layout authority) while
+resolving operational contradictions:
+
+- Browser/device ownership governs layout semantics.
+- Server-owned PTY and SDK authorities preserve reliability for agent automation.
+- Remote layout mutation remains explicit and fail-fast (`DEVICE_OFFLINE`) when owner
+  is unavailable.
+- The CLI has a first-class device identity, so "local" is deterministic.
 
