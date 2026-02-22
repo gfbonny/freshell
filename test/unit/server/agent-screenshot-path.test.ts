@@ -45,6 +45,12 @@ describe('resolveScreenshotOutputPath', () => {
     ).rejects.toThrow(/path separators/i)
   })
 
+  it('rejects names containing null bytes', async () => {
+    await expect(
+      resolveScreenshotOutputPath({ name: 'bad\0name', pathInput: os.tmpdir() }),
+    ).rejects.toThrow(/name must not contain null bytes/i)
+  })
+
   it('rejects empty path values', async () => {
     await expect(
       resolveScreenshotOutputPath({ name: 'pane-a', pathInput: '   ' }),

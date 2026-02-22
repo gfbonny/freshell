@@ -24,6 +24,10 @@ function normalizeScreenshotBaseName(name: string): string {
     throw new Error('invalid screenshot name')
   }
 
+  if (trimmed.includes('\0')) {
+    throw new Error('name must not contain null bytes')
+  }
+
   return ensurePngExtension(trimmed)
 }
 
