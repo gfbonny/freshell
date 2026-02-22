@@ -23,6 +23,8 @@ export function onAttachReady(
   ready: { replayFromSeq: number; replayToSeq: number },
 ): AttachSeqState {
   if (ready.replayFromSeq <= ready.replayToSeq) {
+    // Keep awaitingFreshSequence true until replay/live output is actually accepted.
+    // attach.ready arrives before replay frames, so clearing it here is premature.
     return {
       ...state,
       pendingReplay: { fromSeq: ready.replayFromSeq, toSeq: ready.replayToSeq },
@@ -57,18 +59,23 @@ export function onOutputFrame(
   frame: { seqStart: number; seqEnd: number },
 ): { accept: boolean; reason?: 'overlap'; state: AttachSeqState } {
   const overlapsExisting = frame.seqStart <= state.lastSeq
+  const offersNewData = frame.seqEnd > state.lastSeq
   const inPendingReplay = Boolean(
     state.pendingReplay
       && frame.seqEnd >= state.pendingReplay.fromSeq
       && frame.seqStart <= state.pendingReplay.toSeq,
   )
 
-  if (overlapsExisting && !inPendingReplay) {
+  // Replay windows can legally overlap the current high-water mark. However, if a frame
+  // is entirely at-or-below lastSeq, it is a duplicate and should still be dropped.
+  if (overlapsExisting && (!inPendingReplay || !offersNewData)) {
     const freshReset =
       state.awaitingFreshSequence
       && frame.seqStart === 1
       && state.lastSeq > 0
     if (!freshReset) return { accept: false, reason: 'overlap', state }
+    // A fresh reset means we are treating this as a new stream root; any stale replay
+    // window from the previous stream is intentionally discarded.
     const resetState = { ...state, lastSeq: 0, pendingReplay: null }
     return onOutputFrame(resetState, frame)
   }

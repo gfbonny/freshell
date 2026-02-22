@@ -30,6 +30,19 @@ describe('terminal-attach-seq-state', () => {
     expect(d8.state.lastSeq).toBe(8)
   })
 
+  it('drops duplicate frames already consumed inside a pending replay window', () => {
+    let state = beginAttach(createAttachSeqState({ lastSeq: 0 }))
+    state = onAttachReady(state, { replayFromSeq: 6, replayToSeq: 8 })
+
+    const first = onOutputFrame(state, { seqStart: 6, seqEnd: 6 })
+    expect(first.accept).toBe(true)
+    state = first.state
+
+    const duplicate = onOutputFrame(state, { seqStart: 6, seqEnd: 6 })
+    expect(duplicate.accept).toBe(false)
+    expect(duplicate.reason).toBe('overlap')
+  })
+
   it('drops overlap outside pending replay window', () => {
     const state = createAttachSeqState({ lastSeq: 8 })
     const decision = onOutputFrame(state, { seqStart: 7, seqEnd: 8 })
