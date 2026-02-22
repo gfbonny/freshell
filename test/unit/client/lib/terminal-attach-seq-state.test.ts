@@ -10,22 +10,22 @@ import {
 describe('terminal-attach-seq-state', () => {
   it('does not pre-advance lastSeq when replay window is pending', () => {
     const state = beginAttach(createAttachSeqState({ lastSeq: 0 }))
-    const ready = onAttachReady(state, { replayFromSeq: 6, replayToSeq: 8 })
+    const ready = onAttachReady(state, { headSeq: 8, replayFromSeq: 6, replayToSeq: 8 })
     expect(ready.lastSeq).toBe(0)
     expect(ready.pendingReplay).toEqual({ fromSeq: 6, toSeq: 8 })
   })
 
   it('treats replay 0..0 as no replay window', () => {
     const state = beginAttach(createAttachSeqState({ lastSeq: 4 }))
-    const ready = onAttachReady(state, { replayFromSeq: 0, replayToSeq: 0 })
+    const ready = onAttachReady(state, { headSeq: 7, replayFromSeq: 0, replayToSeq: 0 })
     expect(ready.pendingReplay).toBeNull()
-    expect(ready.lastSeq).toBe(4)
+    expect(ready.lastSeq).toBe(7)
     expect(ready.awaitingFreshSequence).toBe(false)
   })
 
   it('takes the no-replay branch when replayFromSeq is above replayToSeq', () => {
     const state = beginAttach(createAttachSeqState({ lastSeq: 4 }))
-    const ready = onAttachReady(state, { replayFromSeq: 8, replayToSeq: 7 })
+    const ready = onAttachReady(state, { headSeq: 7, replayFromSeq: 8, replayToSeq: 7 })
     expect(ready.pendingReplay).toBeNull()
     expect(ready.lastSeq).toBe(7)
     expect(ready.awaitingFreshSequence).toBe(false)
@@ -33,7 +33,7 @@ describe('terminal-attach-seq-state', () => {
 
   it('accepts replay frames after ready when replay starts above 1', () => {
     let state = beginAttach(createAttachSeqState({ lastSeq: 0 }))
-    state = onAttachReady(state, { replayFromSeq: 6, replayToSeq: 8 })
+    state = onAttachReady(state, { headSeq: 8, replayFromSeq: 6, replayToSeq: 8 })
     const d6 = onOutputFrame(state, { seqStart: 6, seqEnd: 6 })
     expect(d6.accept).toBe(true)
     expect(d6.freshReset).toBe(false)
@@ -49,7 +49,7 @@ describe('terminal-attach-seq-state', () => {
 
   it('drops duplicate frames already consumed inside a pending replay window', () => {
     let state = beginAttach(createAttachSeqState({ lastSeq: 0 }))
-    state = onAttachReady(state, { replayFromSeq: 6, replayToSeq: 8 })
+    state = onAttachReady(state, { headSeq: 8, replayFromSeq: 6, replayToSeq: 8 })
 
     const first = onOutputFrame(state, { seqStart: 6, seqEnd: 6 })
     expect(first.accept).toBe(true)
@@ -69,7 +69,7 @@ describe('terminal-attach-seq-state', () => {
 
   it('advances through replay_window_exceeded gap and preserves forward progress', () => {
     let state = beginAttach(createAttachSeqState({ lastSeq: 0 }))
-    state = onAttachReady(state, { replayFromSeq: 6, replayToSeq: 8 })
+    state = onAttachReady(state, { headSeq: 8, replayFromSeq: 6, replayToSeq: 8 })
     state = onOutputGap(state, { fromSeq: 1, toSeq: 5 })
     const frame = onOutputFrame(state, { seqStart: 6, seqEnd: 8 })
     expect(frame.accept).toBe(true)

@@ -1848,8 +1848,8 @@ describe('TerminalView lifecycle updates', () => {
           type: 'terminal.attach.ready',
           terminalId: 'term-v2-created',
           headSeq: 7,
-          replayFromSeq: 8,
-          replayToSeq: 7,
+          replayFromSeq: 0,
+          replayToSeq: 0,
         })
       })
 

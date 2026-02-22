@@ -27,7 +27,7 @@ export function beginAttach(state: AttachSeqState): AttachSeqState {
 
 export function onAttachReady(
   state: AttachSeqState,
-  ready: { replayFromSeq: number; replayToSeq: number },
+  ready: { headSeq: number; replayFromSeq: number; replayToSeq: number },
 ): AttachSeqState {
   const hasReplayWindow = ready.replayFromSeq > 0
     && ready.replayFromSeq <= ready.replayToSeq
@@ -42,7 +42,7 @@ export function onAttachReady(
   }
   return {
     ...state,
-    lastSeq: Math.max(state.lastSeq, ready.replayToSeq),
+    lastSeq: Math.max(state.lastSeq, ready.headSeq),
     awaitingFreshSequence: false,
     pendingReplay: null,
   }

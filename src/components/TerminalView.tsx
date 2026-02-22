@@ -1275,6 +1275,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
 
         if (msg.type === 'terminal.attach.ready' && msg.terminalId === tid) {
           const nextSeqState = onAttachReady(seqStateRef.current, {
+            headSeq: msg.headSeq,
             replayFromSeq: msg.replayFromSeq,
             replayToSeq: msg.replayToSeq,
           })
