@@ -197,10 +197,6 @@ async function main() {
     }),
   )
 
-  registry.on('terminal.idle.warning', (payload: { terminalId: string; killMinutes: number; warnMinutes: number; lastActivityAt: number }) => {
-    wsHandler.broadcast({ type: 'terminal.idle.warning', ...payload })
-  })
-
   registry.on('terminal.created', (record: TerminalRecord) => {
     void terminalMetadata.seedFromTerminal(record)
       .then((upsert) => {

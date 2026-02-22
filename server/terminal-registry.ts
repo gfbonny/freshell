@@ -13,6 +13,7 @@ import { convertWindowsPathToWslPath, isReachableDirectorySync } from './path-ut
 import { isValidClaudeSessionId } from './claude-session-id.js'
 import type { CodingCliProviderName } from './coding-cli/types.js'
 import { SessionBindingAuthority, type BindResult } from './session-binding-authority.js'
+import type { TerminalOutputRawEvent } from './terminal-stream/registry-events.js'
 
 const MAX_WS_BUFFERED_AMOUNT = Number(process.env.MAX_WS_BUFFERED_AMOUNT || 2 * 1024 * 1024)
 const DEFAULT_MAX_SCROLLBACK_CHARS = Number(process.env.MAX_SCROLLBACK_CHARS || 64 * 1024)
@@ -179,8 +180,9 @@ export type TerminalRecord = {
   cols: number
   rows: number
   clients: Set<WebSocket>
+  suppressedOutputClients: Set<WebSocket>
   pendingSnapshotClients: Map<WebSocket, PendingSnapshotQueue>
-  warnedIdle?: boolean
+
   buffer: ChunkRingBuffer
   pty: pty.IPty
   perf?: {
@@ -698,6 +700,8 @@ export class TerminalRegistry extends EventEmitter {
   private maxExitedTerminals: number
   private scrollbackMaxChars: number
   private maxPendingSnapshotChars: number
+  // Legacy transport batching path. Broker cutover destination:
+  // - outputBuffers/flush timers/mobile batching -> broker client-output queue.
   private outputBuffers = new Map<WebSocket, PendingOutput>()
 
   constructor(settings?: AppSettings, maxTerminals?: number, maxExitedTerminals?: number) {
@@ -805,12 +809,6 @@ export class TerminalRegistry extends EventEmitter {
     if (!settings) return
     const killMinutes = settings.safety.autoKillIdleMinutes
     if (!killMinutes || killMinutes <= 0) return
-    const rawWarnMinutes = settings.safety.warnBeforeKillMinutes
-    const warnMinutes =
-      typeof rawWarnMinutes === 'number' && Number.isFinite(rawWarnMinutes) && rawWarnMinutes > 0 && rawWarnMinutes < killMinutes
-        ? rawWarnMinutes
-        : 0
-
     const now = Date.now()
 
     for (const term of this.terminals.values()) {
@@ -820,19 +818,6 @@ export class TerminalRegistry extends EventEmitter {
       const idleMs = now - term.lastActivityAt
       const idleMinutes = idleMs / 60000
 
-      if (warnMinutes > 0) {
-        const warnAtMinutes = killMinutes - warnMinutes
-        if (idleMinutes >= warnAtMinutes && idleMinutes < killMinutes && !term.warnedIdle) {
-          term.warnedIdle = true
-          this.emit('terminal.idle.warning', {
-            terminalId: term.terminalId,
-            killMinutes,
-            warnMinutes,
-            lastActivityAt: term.lastActivityAt,
-          })
-        }
-      }
-
       if (idleMinutes >= killMinutes) {
         logger.info({ terminalId: term.terminalId }, 'Auto-killing idle detached terminal')
         this.kill(term.terminalId)
@@ -840,7 +825,7 @@ export class TerminalRegistry extends EventEmitter {
     }
   }
 
-  // Exposed for unit tests to validate idle warning/kill behavior without relying on timers.
+  // Exposed for unit tests to validate idle kill behavior without relying on timers.
   async enforceIdleKillsForTest(): Promise<void> {
     await this.enforceIdleKills()
   }
@@ -942,8 +927,9 @@ export class TerminalRegistry extends EventEmitter {
       cols,
       rows,
       clients: new Set(),
+      suppressedOutputClients: new Set(),
       pendingSnapshotClients: new Map(),
-      warnedIdle: false,
+
       buffer: new ChunkRingBuffer(this.scrollbackMaxChars),
       pty: ptyProc,
       perf: perfConfig.enabled
@@ -966,8 +952,12 @@ export class TerminalRegistry extends EventEmitter {
     ptyProc.onData((data) => {
       const now = Date.now()
       record.lastActivityAt = now
-      record.warnedIdle = false
       record.buffer.append(data)
+      this.emit('terminal.output.raw', {
+        terminalId,
+        data,
+        at: now,
+      } satisfies TerminalOutputRawEvent)
       if (record.perf) {
         record.perf.outBytes += data.length
         record.perf.outChunks += 1
@@ -1001,6 +991,9 @@ export class TerminalRegistry extends EventEmitter {
         }
       }
       for (const client of record.clients) {
+        if (record.suppressedOutputClients.has(client)) continue
+        // Legacy snapshot ordering path. Broker cutover destination:
+        // - pendingSnapshotClients ordering -> broker attach-staging queue.
         const pending = record.pendingSnapshotClients.get(client)
         if (pending) {
           const nextChars = pending.queuedChars + data.length
@@ -1038,6 +1031,7 @@ export class TerminalRegistry extends EventEmitter {
         this.safeSend(client, { type: 'terminal.exit', terminalId, exitCode: e.exitCode }, { terminalId, perf: record.perf })
       }
       record.clients.clear()
+      record.suppressedOutputClients.clear()
       record.pendingSnapshotClients.clear()
       this.releaseBinding(terminalId)
       this.emit('terminal.exit', { terminalId, exitCode: e.exitCode })
@@ -1058,12 +1052,12 @@ export class TerminalRegistry extends EventEmitter {
     return record
   }
 
-  attach(terminalId: string, client: WebSocket, opts?: { pendingSnapshot?: boolean }): TerminalRecord | null {
+  attach(terminalId: string, client: WebSocket, opts?: { pendingSnapshot?: boolean; suppressOutput?: boolean }): TerminalRecord | null {
     const term = this.terminals.get(terminalId)
     if (!term) return null
     term.clients.add(client)
-    term.warnedIdle = false
     if (opts?.pendingSnapshot) term.pendingSnapshotClients.set(client, { chunks: [], queuedChars: 0 })
+    if (opts?.suppressOutput) term.suppressedOutputClients.add(client)
     return term
   }
 
@@ -1084,6 +1078,7 @@ export class TerminalRegistry extends EventEmitter {
     this.flushOutputBuffer(client)
     this.clearOutputBuffer(client)
     term.clients.delete(client)
+    term.suppressedOutputClients.delete(client)
     term.pendingSnapshotClients.delete(client)
     return true
   }
@@ -1093,7 +1088,6 @@ export class TerminalRegistry extends EventEmitter {
     if (!term || term.status !== 'running') return false
     const now = Date.now()
     term.lastActivityAt = now
-    term.warnedIdle = false
     if (term.perf) {
       term.perf.inBytes += data.length
       term.perf.inChunks += 1
@@ -1140,6 +1134,7 @@ export class TerminalRegistry extends EventEmitter {
       this.safeSend(client, { type: 'terminal.exit', terminalId, exitCode: term.exitCode })
     }
     term.clients.clear()
+    term.suppressedOutputClients.clear()
     term.pendingSnapshotClients.clear()
     this.releaseBinding(terminalId)
     this.emit('terminal.exit', { terminalId, exitCode: term.exitCode })
@@ -1183,6 +1178,22 @@ export class TerminalRegistry extends EventEmitter {
 
   get(terminalId: string): TerminalRecord | undefined {
     return this.terminals.get(terminalId)
+  }
+
+  getAttachedClientCount(terminalId: string): number {
+    const term = this.terminals.get(terminalId)
+    return term ? term.clients.size : 0
+  }
+
+  listAttachedClientIds(terminalId: string): string[] {
+    const term = this.terminals.get(terminalId)
+    if (!term) return []
+    const ids: string[] = []
+    for (const client of term.clients) {
+      const connectionId = (client as LiveWebSocket).connectionId
+      if (connectionId) ids.push(connectionId)
+    }
+    return ids
   }
 
   private releaseBinding(terminalId: string): void {
@@ -1240,6 +1251,8 @@ export class TerminalRegistry extends EventEmitter {
     perf?: TerminalRecord['perf'],
   ): void {
     if (!data) return
+    // Legacy framing path. Broker cutover destination:
+    // - safeSendOutputFrames + safeSend backpressure guards -> broker scheduler + catastrophic breaker.
     for (let offset = 0; offset < data.length; offset += MAX_OUTPUT_FRAME_CHARS) {
       this.safeSend(
         client,

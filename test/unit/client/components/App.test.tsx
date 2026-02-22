@@ -8,7 +8,6 @@ import tabsReducer from '@/store/tabsSlice'
 import connectionReducer from '@/store/connectionSlice'
 import sessionsReducer from '@/store/sessionsSlice'
 import panesReducer from '@/store/panesSlice'
-import idleWarningsReducer from '@/store/idleWarningsSlice'
 import { networkReducer, setNetworkStatus, type NetworkStatusResponse } from '@/store/networkSlice'
 
 // Ensure DOM is clean even if another test file forgot cleanup.
@@ -123,7 +122,6 @@ function createTestStore() {
       connection: connectionReducer,
       sessions: sessionsReducer,
       panes: panesReducer,
-      idleWarnings: idleWarningsReducer,
       network: networkReducer,
     },
     middleware: (getDefault) =>
@@ -156,9 +154,6 @@ function createTestStore() {
       panes: {
         layouts: {},
         activePane: {},
-      },
-      idleWarnings: {
-        warnings: {},
       },
       network: {
         status: null,
@@ -476,7 +471,7 @@ describe('App Component - Version Status', () => {
   })
 })
 
-describe('App Component - Idle Warnings', () => {
+describe('App Component - WS Notifications', () => {
   let messageHandler: ((msg: any) => void) | null = null
 
   beforeEach(() => {
@@ -497,26 +492,6 @@ describe('App Component - Idle Warnings', () => {
   afterEach(() => {
     cleanup()
     messageHandler = null
-  })
-
-  it('shows an indicator when the server warns an idle terminal will auto-kill soon', async () => {
-    renderApp()
-
-    await waitFor(() => {
-      expect(messageHandler).not.toBeNull()
-    })
-
-    messageHandler!({
-      type: 'terminal.idle.warning',
-      terminalId: 'term-idle',
-      killMinutes: 10,
-      warnMinutes: 3,
-      lastActivityAt: Date.now(),
-    })
-
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /auto-kill soon/i })).toBeInTheDocument()
-    })
   })
 
   it('shows and dismisses config fallback warning when server reports corrupted config', async () => {
