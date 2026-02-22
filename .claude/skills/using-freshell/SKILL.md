@@ -23,6 +23,70 @@ $FSH health
 
 Use absolute paths for `--cwd` and `--editor`.
 
+## Supported Commands
+
+This list reflects the commands currently implemented in `server/cli/index.ts`.
+
+Tab commands:
+- `new-tab`: Create a tab with a terminal (default), browser pane, or editor pane.
+- `list-tabs`: List tabs and each tab's active pane.
+- `select-tab`: Activate a tab by id/title/target.
+- `kill-tab`: Close a tab.
+- `rename-tab`: Rename a tab.
+- `has-tab`: Check whether a tab target exists.
+- `next-tab`: Select the next tab.
+- `prev-tab`: Select the previous tab.
+
+Pane/layout commands:
+- `split-pane`: Split a pane horizontally/vertically and create a new terminal/browser/editor pane.
+- `list-panes`: List panes globally or for one tab.
+- `select-pane`: Focus a pane.
+- `kill-pane`: Close a pane.
+- `resize-pane`: Resize a pane (or its parent split) with `x`/`y` percentages.
+- `swap-pane`: Swap two panes in the same tab layout.
+- `respawn-pane`: Replace a pane with a freshly spawned terminal.
+- `attach`: Attach an existing terminal id into a pane.
+
+Terminal interaction commands:
+- `send-keys`: Send key sequences or literal text to a pane's terminal.
+- `capture-pane`: Read terminal buffer text with optional slicing/join/ANSI retention.
+- `wait-for`: Poll until pattern match, prompt, exit, or stable output.
+- `display`: Render a format string with tab/pane context tokens.
+- `run`: Create a tab, run a command, optionally capture output, optionally detach.
+- `summarize`: Request AI summary for the pane's terminal.
+- `list-terminals`: List server-side terminals and status.
+
+Browser/navigation commands:
+- `open-browser`: Create a new browser tab and navigate to URL.
+- `navigate`: Navigate an existing pane to URL (converts pane to browser content).
+
+Session commands:
+- `list-sessions`: Return indexed coding-CLI sessions.
+- `search-sessions`: Search indexed sessions by query string.
+
+Service/diagnostic commands:
+- `health`: Check server health/readiness.
+- `lan-info`: Show LAN binding and network access info.
+
+tmux-style aliases supported by this CLI:
+- `new-window`, `new-session` -> `new-tab`
+- `list-windows` -> `list-tabs`
+- `select-window` -> `select-tab`
+- `kill-window` -> `kill-tab`
+- `rename-window` -> `rename-tab`
+- `next-window` -> `next-tab`
+- `previous-window`, `prev-window` -> `prev-tab`
+- `split-window` -> `split-pane`
+- `display-message` -> `display`
+
+Important command flags:
+- `new-tab`: `--claude`, `--codex`, `--mode`, `--shell`, `--cwd`, `--browser`, `--editor`, `--resume`, `--prompt`
+- `split-pane`: `-t/--target`, `-v/--vertical`, `--mode`, `--shell`, `--cwd`, `--browser`, `--editor`
+- `send-keys`: `-t/--target`, `-l/--literal`
+- `capture-pane`: `-t/--target`, `-S`, `-J`, `-e`
+- `wait-for`: `-t/--target`, `-p/--pattern`, `--stable`, `--exit`, `--prompt`, `-T/--timeout`
+- `run`: `-c/--capture`, `-d/--detach`, `-T/--timeout`, `-n/--name`, `--cwd`
+
 ## Playbook: Open a File in an Editor Pane
 
 Open in a new tab:
