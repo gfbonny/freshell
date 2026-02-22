@@ -7,6 +7,12 @@ import {
   onOutputGap,
 } from '@/lib/terminal-attach-seq-state'
 
+function expectAcceptedFrame(decision: ReturnType<typeof onOutputFrame>) {
+  expect(decision.accept).toBe(true)
+  if (!decision.accept) throw new Error('expected accepted frame decision')
+  return decision
+}
+
 describe('terminal-attach-seq-state', () => {
   it('does not pre-advance lastSeq when replay window is pending', () => {
     const state = beginAttach(createAttachSeqState({ lastSeq: 0 }))
@@ -42,15 +48,12 @@ describe('terminal-attach-seq-state', () => {
   it('accepts replay frames after ready when replay starts above 1', () => {
     let state = beginAttach(createAttachSeqState({ lastSeq: 0 }))
     state = onAttachReady(state, { headSeq: 8, replayFromSeq: 6, replayToSeq: 8 })
-    const d6 = onOutputFrame(state, { seqStart: 6, seqEnd: 6 })
-    expect(d6.accept).toBe(true)
+    const d6 = expectAcceptedFrame(onOutputFrame(state, { seqStart: 6, seqEnd: 6 }))
     expect(d6.freshReset).toBe(false)
     state = d6.state
-    const d7 = onOutputFrame(state, { seqStart: 7, seqEnd: 7 })
-    expect(d7.accept).toBe(true)
+    const d7 = expectAcceptedFrame(onOutputFrame(state, { seqStart: 7, seqEnd: 7 }))
     state = d7.state
-    const d8 = onOutputFrame(state, { seqStart: 8, seqEnd: 8 })
-    expect(d8.accept).toBe(true)
+    const d8 = expectAcceptedFrame(onOutputFrame(state, { seqStart: 8, seqEnd: 8 }))
     expect(d8.state.pendingReplay).toBeNull()
     expect(d8.state.lastSeq).toBe(8)
   })
@@ -59,8 +62,7 @@ describe('terminal-attach-seq-state', () => {
     let state = beginAttach(createAttachSeqState({ lastSeq: 0 }))
     state = onAttachReady(state, { headSeq: 8, replayFromSeq: 6, replayToSeq: 8 })
 
-    const first = onOutputFrame(state, { seqStart: 6, seqEnd: 6 })
-    expect(first.accept).toBe(true)
+    const first = expectAcceptedFrame(onOutputFrame(state, { seqStart: 6, seqEnd: 6 }))
     state = first.state
 
     const duplicate = onOutputFrame(state, { seqStart: 6, seqEnd: 6 })
@@ -79,8 +81,7 @@ describe('terminal-attach-seq-state', () => {
     let state = beginAttach(createAttachSeqState({ lastSeq: 0 }))
     state = onAttachReady(state, { headSeq: 8, replayFromSeq: 6, replayToSeq: 8 })
     state = onOutputGap(state, { fromSeq: 1, toSeq: 5 })
-    const frame = onOutputFrame(state, { seqStart: 6, seqEnd: 8 })
-    expect(frame.accept).toBe(true)
+    const frame = expectAcceptedFrame(onOutputFrame(state, { seqStart: 6, seqEnd: 8 }))
     expect(frame.freshReset).toBe(false)
     expect(frame.state.lastSeq).toBe(8)
     expect(frame.state.pendingReplay).toBeNull()
@@ -97,8 +98,7 @@ describe('terminal-attach-seq-state', () => {
 
   it('allows single fresh restart at seq=1 while awaitingFreshSequence', () => {
     let state = createAttachSeqState({ lastSeq: 22, awaitingFreshSequence: true })
-    const first = onOutputFrame(state, { seqStart: 1, seqEnd: 1 })
-    expect(first.accept).toBe(true)
+    const first = expectAcceptedFrame(onOutputFrame(state, { seqStart: 1, seqEnd: 1 }))
     expect(first.freshReset).toBe(true)
     expect(first.state.lastSeq).toBe(1)
     state = first.state
