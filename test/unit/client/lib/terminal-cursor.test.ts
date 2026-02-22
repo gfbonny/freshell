@@ -92,4 +92,21 @@ describe('terminal-cursor', () => {
 
     setItemSpy.mockRestore()
   })
+
+  it('flushes immediately when clearing a cursor with pending debounced writes', () => {
+    vi.useFakeTimers()
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem')
+
+    saveTerminalCursor('term-clear', 7)
+    expect(setItemSpy).not.toHaveBeenCalled()
+
+    clearTerminalCursor('term-clear')
+    expect(setItemSpy).toHaveBeenCalledTimes(1)
+    expect(loadTerminalCursor('term-clear')).toBe(0)
+
+    vi.advanceTimersByTime(250)
+    expect(setItemSpy).toHaveBeenCalledTimes(1)
+
+    setItemSpy.mockRestore()
+  })
 })

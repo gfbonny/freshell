@@ -166,8 +166,6 @@ export function saveTerminalCursor(terminalId: string, seq: number): void {
   const now = Date.now()
   const existing = map[terminalId]
   const nextSeq = Math.max(existing?.seq ?? 0, normalizedSeq)
-  if (existing && existing.seq === nextSeq) return
-
   map[terminalId] = { seq: nextSeq, updatedAt: now }
 
   const shouldPrune = Object.keys(map).length > MAX_ENTRIES
@@ -187,13 +185,12 @@ export function clearTerminalCursor(terminalId: string): void {
   const map = ensureLoaded()
   if (!map[terminalId]) return
   delete map[terminalId]
-  cache = map
   if (persistTimer) {
     clearTimeout(persistTimer)
     persistTimer = null
   }
   pendingPersist = false
-  persistMap(cache)
+  persistMap(map)
 }
 
 export function getCursorMapSize(): number {
