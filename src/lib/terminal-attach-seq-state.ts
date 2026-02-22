@@ -63,6 +63,9 @@ export function onOutputFrame(
 ): { accept: boolean; reason?: 'overlap'; state: AttachSeqState } {
   const overlapsExisting = frame.seqStart <= state.lastSeq
   const offersNewData = frame.seqEnd > state.lastSeq
+  // We treat any overlap with pendingReplay as replay-context data. Server stream-v2
+  // currently emits per-sequence frames, so partial-range replays do not duplicate
+  // already-rendered bytes in practice.
   const inPendingReplay = Boolean(
     state.pendingReplay
       && frame.seqEnd >= state.pendingReplay.fromSeq

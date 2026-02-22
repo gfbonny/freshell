@@ -218,7 +218,6 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   // CRITICAL: Use refs to avoid callback/effect dependency on changing content
   const requestIdRef = useRef<string>(terminalContent?.createRequestId || '')
   const terminalIdRef = useRef<string | undefined>(terminalContent?.terminalId)
-  const lastSeqRef = useRef(0)
   const seqStateRef = useRef<AttachSeqState>(createAttachSeqState())
   const needsViewportHydrationRef = useRef(true)
   const pendingDeferredHydrationRef = useRef(false)
@@ -230,7 +229,6 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     options?: { terminalId?: string; persistCursor?: boolean },
   ) => {
     seqStateRef.current = nextState
-    lastSeqRef.current = nextState.lastSeq
     if (options?.persistCursor && options.terminalId && nextState.lastSeq > 0) {
       saveTerminalCursor(options.terminalId, nextState.lastSeq)
     }
