@@ -49,7 +49,7 @@ import {
   SdkSetPermissionModeSchema,
 } from '../shared/ws-protocol.js'
 
-const MAX_CONNECTIONS = Number(process.env.MAX_CONNECTIONS || 10)
+const MAX_CONNECTIONS = Number(process.env.MAX_CONNECTIONS || 50)
 const HELLO_TIMEOUT_MS = Number(process.env.HELLO_TIMEOUT_MS || 5_000)
 const PING_INTERVAL_MS = Number(process.env.PING_INTERVAL_MS || 30_000)
 const MAX_WS_BUFFERED_AMOUNT = Number(process.env.MAX_WS_BUFFERED_AMOUNT || 2 * 1024 * 1024)
@@ -58,6 +58,10 @@ const MAX_CHUNK_BYTES = Number(process.env.MAX_WS_CHUNK_BYTES || 500 * 1024)
 const ATTACH_CHUNK_BYTES = Number(process.env.MAX_WS_ATTACH_CHUNK_BYTES || process.env.MAX_WS_CHUNK_BYTES || 500 * 1024)
 const MIN_ATTACH_CHUNK_BYTES = 16 * 1024
 const ATTACH_FRAME_SEND_TIMEOUT_MS = Number(process.env.WS_ATTACH_FRAME_SEND_TIMEOUT_MS || 30_000)
+// Drain-aware sending: wait for buffer to drop below threshold between chunks
+const DRAIN_THRESHOLD_BYTES = Number(process.env.WS_DRAIN_THRESHOLD_BYTES || 512 * 1024) // 512KB
+const DRAIN_TIMEOUT_MS = Number(process.env.WS_DRAIN_TIMEOUT_MS || 30_000) // 30s
+const DRAIN_POLL_INTERVAL_MS = 50
 // Rate limit: max terminal.create requests per client within a sliding window
 const TERMINAL_CREATE_RATE_LIMIT = Number(process.env.TERMINAL_CREATE_RATE_LIMIT || 10)
 const TERMINAL_CREATE_RATE_WINDOW_MS = Number(process.env.TERMINAL_CREATE_RATE_WINDOW_MS || 10_000)
@@ -425,24 +429,26 @@ export class WsHandler {
     const remoteAddr = (req.socket.remoteAddress as string | undefined) || undefined
     const userAgent = req.headers['user-agent'] as string | undefined
 
-    // Trust loopback connections (e.g., Vite dev proxy) regardless of Origin header.
-    // In dev mode, Vite proxies WebSocket requests from remote clients but the connection
-    // arrives from localhost. The original client's Origin header is preserved but may not
-    // match the Host header due to changeOrigin, so we skip origin validation for loopback.
+    // Origin validation is advisory-only — the auth token in the hello message
+    // is the real security gate.  We log mismatches for diagnostics but never
+    // reject connections based on Origin, because:
+    // - VPNs may strip or rewrite the Origin header
+    // - Some mobile browsers omit Origin on WebSocket upgrades
+    // - In dev mode Vite's changeOrigin proxy masked this entirely
     const isLoopback = isLoopbackAddress(remoteAddr)
 
     if (!isLoopback) {
-      // Remote connections must have a valid Origin
-      if (!origin) {
-        ws.close(CLOSE_CODES.NOT_AUTHENTICATED, 'Origin required')
-        return
-      }
       const host = req.headers.host as string | undefined
-      const hostOrigins = host ? [`http://${host}`, `https://${host}`] : []
-      const allowed = isOriginAllowed(origin) || hostOrigins.includes(origin)
-      if (!allowed) {
-        ws.close(CLOSE_CODES.NOT_AUTHENTICATED, 'Origin not allowed')
-        return
+      if (!origin) {
+        log.warn({ event: 'ws_origin_missing', remoteAddr, host, userAgent },
+          'WebSocket connection without Origin header (VPN or mobile browser) — allowing, auth token required')
+      } else {
+        const hostOrigins = host ? [`http://${host}`, `https://${host}`] : []
+        const allowed = isOriginAllowed(origin) || hostOrigins.includes(origin)
+        if (!allowed) {
+          log.warn({ event: 'ws_origin_mismatch', origin, host, remoteAddr, userAgent },
+            'WebSocket Origin does not match Host — allowing, auth token required')
+        }
       }
     }
 
@@ -653,6 +659,43 @@ export class WsHandler {
       requestId: params.requestId,
       terminalId: params.terminalId,
       timestamp: nowIso(),
+    })
+  }
+
+  /**
+   * Wait for ws.bufferedAmount to drop below threshold.
+   * Returns true if drained, false if timed out, connection closed, or cancelled.
+   * Uses polling because the ws library does not emit 'drain' on WebSocket instances.
+   * Optional shouldCancel predicate enables early exit (e.g. when a newer generation supersedes).
+   */
+  private waitForDrain(
+    ws: LiveWebSocket,
+    thresholdBytes: number,
+    timeoutMs: number,
+    shouldCancel?: () => boolean,
+  ): Promise<boolean> {
+    if (ws.readyState !== WebSocket.OPEN) return Promise.resolve(false)
+    if ((ws.bufferedAmount ?? 0) <= thresholdBytes) return Promise.resolve(true)
+    if (shouldCancel?.()) return Promise.resolve(false)
+
+    return new Promise<boolean>((resolve) => {
+      let settled = false
+      const settle = (result: boolean) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        clearInterval(poller)
+        ws.off('close', onClose)
+        resolve(result)
+      }
+      const onClose = () => settle(false)
+      const timer = setTimeout(() => settle(false), timeoutMs)
+      const poller = setInterval(() => {
+        if (shouldCancel?.()) { settle(false); return }
+        if (ws.readyState !== WebSocket.OPEN) { settle(false); return }
+        if ((ws.bufferedAmount ?? 0) <= thresholdBytes) settle(true)
+      }, DRAIN_POLL_INTERVAL_MS)
+      ws.on('close', onClose)
     })
   }
 
@@ -877,8 +920,8 @@ export class WsHandler {
         this.safeSend(ws, { type: 'settings.updated', settings: snapshot.settings })
       }
       if (snapshot.projects) {
-        await this.sendChunkedSessions(ws, snapshot.projects)
-        state.sessionsSnapshotSent = true
+        const allSent = await this.sendChunkedSessions(ws, snapshot.projects)
+        state.sessionsSnapshotSent = allSent
       }
       if (typeof snapshot.perfLogging === 'boolean') {
         this.safeSend(ws, { type: 'perf.logging', enabled: snapshot.perfLogging })
@@ -894,16 +937,18 @@ export class WsHandler {
   /**
    * Send chunked sessions to a single WebSocket client with interleave protection.
    * Uses a generation counter to cancel in-flight sends when a new update arrives.
+   * Returns true if all chunks were sent, false if sending was interrupted.
    */
-  private async sendChunkedSessions(ws: LiveWebSocket, projects: ProjectGroup[]): Promise<void> {
+  private async sendChunkedSessions(ws: LiveWebSocket, projects: ProjectGroup[]): Promise<boolean> {
     // Increment generation to cancel any in-flight sends for this connection
     const generation = (ws.sessionUpdateGeneration = (ws.sessionUpdateGeneration || 0) + 1)
+    const isSuperseded = () => ws.sessionUpdateGeneration !== generation
     const chunks = chunkProjects(projects, MAX_CHUNK_BYTES)
 
     for (let i = 0; i < chunks.length; i++) {
       // Bail out if connection closed or a newer update has started
-      if (ws.readyState !== WebSocket.OPEN) return
-      if (ws.sessionUpdateGeneration !== generation) return
+      if (ws.readyState !== WebSocket.OPEN) return false
+      if (isSuperseded()) return false
 
       const isFirst = i === 0
       let msg: { type: 'sessions.updated'; projects: ProjectGroup[]; clear?: true; append?: true }
@@ -921,12 +966,18 @@ export class WsHandler {
 
       this.safeSend(ws, msg)
 
-      // Yield to event loop between chunks to allow other processing
-      // This helps prevent blocking and allows the buffer to flush
+      // Wait for buffer to drain before sending next chunk
       if (i < chunks.length - 1) {
-        await new Promise<void>((resolve) => setImmediate(resolve))
+        const buffered = ws.bufferedAmount as number | undefined
+        if (typeof buffered === 'number' && buffered > DRAIN_THRESHOLD_BYTES) {
+          if (!await this.waitForDrain(ws, DRAIN_THRESHOLD_BYTES, DRAIN_TIMEOUT_MS, isSuperseded)) return false
+        } else {
+          await new Promise<void>((resolve) => setImmediate(resolve))
+        }
       }
     }
+    // Verify connection survived the final send (safeSend can trigger backpressure close)
+    return ws.readyState === WebSocket.OPEN && !isSuperseded()
   }
   private async onMessage(ws: LiveWebSocket, state: ClientState, data: WebSocket.RawData) {
     const endMessageTimer = startPerfTimer(
@@ -1713,7 +1764,13 @@ export class WsHandler {
       const state = this.clientStates.get(ws)
       if (!state?.authenticated) continue
       if (state.supportsSessionsPatchV1 && state.sessionsSnapshotSent) continue
-      void this.sendChunkedSessions(ws, projects)
+      // Update sessionsSnapshotSent on success so patch-capable clients
+      // can transition to patch mode after a successful full snapshot.
+      void this.sendChunkedSessions(ws, projects).then((allSent) => {
+        if (allSent && state.supportsSessionsPatchV1) {
+          state.sessionsSnapshotSent = true
+        }
+      })
     }
   }
 

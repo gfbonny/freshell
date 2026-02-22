@@ -57,5 +57,78 @@ describe('diffProjects', () => {
     expect(diff.removeProjectPaths).toEqual([])
     expect(diff.upsertProjects).toEqual([])
   })
-})
 
+  it('does not upsert when tokenUsage object instances differ but values are identical', () => {
+    const prev: ProjectGroup[] = [
+      pg('/p1', [{
+        provider: 'claude',
+        sessionId: 's1',
+        projectPath: '/p1',
+        updatedAt: 1,
+        tokenUsage: {
+          inputTokens: 10,
+          outputTokens: 20,
+          cachedTokens: 30,
+          totalTokens: 60,
+          compactPercent: 25,
+        },
+      }]),
+    ]
+    const next: ProjectGroup[] = [
+      pg('/p1', [{
+        provider: 'claude',
+        sessionId: 's1',
+        projectPath: '/p1',
+        updatedAt: 1,
+        tokenUsage: {
+          inputTokens: 10,
+          outputTokens: 20,
+          cachedTokens: 30,
+          totalTokens: 60,
+          compactPercent: 25,
+        },
+      }]),
+    ]
+
+    expect(prev[0].sessions[0].tokenUsage).not.toBe(next[0].sessions[0].tokenUsage)
+
+    const diff = diffProjects(prev, next)
+    expect(diff.removeProjectPaths).toEqual([])
+    expect(diff.upsertProjects).toEqual([])
+  })
+
+  it('upserts when tokenUsage values change', () => {
+    const prev: ProjectGroup[] = [
+      pg('/p1', [{
+        provider: 'claude',
+        sessionId: 's1',
+        projectPath: '/p1',
+        updatedAt: 1,
+        tokenUsage: {
+          inputTokens: 10,
+          outputTokens: 20,
+          cachedTokens: 30,
+          totalTokens: 60,
+        },
+      }]),
+    ]
+    const next: ProjectGroup[] = [
+      pg('/p1', [{
+        provider: 'claude',
+        sessionId: 's1',
+        projectPath: '/p1',
+        updatedAt: 1,
+        tokenUsage: {
+          inputTokens: 11,
+          outputTokens: 20,
+          cachedTokens: 30,
+          totalTokens: 61,
+        },
+      }]),
+    ]
+
+    const diff = diffProjects(prev, next)
+    expect(diff.removeProjectPaths).toEqual([])
+    expect(diff.upsertProjects).toEqual(next)
+  })
+})

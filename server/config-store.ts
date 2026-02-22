@@ -60,12 +60,13 @@ export type AppSettings = {
   }
   panes: {
     defaultNewPane: 'ask' | 'shell' | 'browser' | 'editor'
+    iconsOnTabs: boolean
     snapThreshold: number // 0-8, % of container's smallest dimension; 0 = off
     tabAttentionStyle: 'highlight' | 'pulse' | 'darken' | 'none'
     attentionDismiss: 'click' | 'type'
   }
   sidebar: {
-    sortMode: 'recency' | 'activity' | 'project'
+    sortMode: 'recency' | 'recency-pinned' | 'activity' | 'project'
     showProjectBadges: boolean
     showSubagents: boolean
     showNoninteractiveSessions: boolean
@@ -85,6 +86,10 @@ export type AppSettings = {
       cwd?: string
     }>>
   }
+  editor: {
+    externalEditor: 'auto' | 'cursor' | 'code' | 'custom'
+    customEditorCommand?: string
+  }
   freshclaude?: {
     defaultModel?: string
     defaultPermissionMode?: string
@@ -92,6 +97,14 @@ export type AppSettings = {
   }
   network: NetworkSettings
 }
+
+type DeepPartial<T> = T extends readonly (infer U)[]
+  ? U[]
+  : T extends object
+    ? { [K in keyof T]?: DeepPartial<T[K]> }
+    : T
+
+export type AppSettingsPatch = DeepPartial<AppSettings>
 
 export type SessionOverride = {
   titleOverride?: string
@@ -146,6 +159,7 @@ export const defaultSettings: AppSettings = {
   },
   panes: {
     defaultNewPane: 'ask',
+    iconsOnTabs: true,
     snapThreshold: 2,
     tabAttentionStyle: 'highlight',
     attentionDismiss: 'click',
@@ -166,6 +180,9 @@ export const defaultSettings: AppSettings = {
       },
       codex: {},
     },
+  },
+  editor: {
+    externalEditor: 'auto',
   },
   freshclaude: {},
   network: {
@@ -365,7 +382,7 @@ async function readConfigFile(): Promise<{ config: UserConfig | null; error?: Co
   }
 }
 
-function mergeSettings(base: AppSettings, patch: Partial<AppSettings>): AppSettings {
+function mergeSettings(base: AppSettings, patch: AppSettingsPatch): AppSettings {
   const baseLogging = base.logging ?? defaultSettings.logging
   const terminalPatch: Partial<AppSettings['terminal']> = patch.terminal ?? {}
   const terminalUpdates = {
@@ -400,6 +417,7 @@ function mergeSettings(base: AppSettings, patch: Partial<AppSettings>): AppSetti
         ...(patch.codingCli?.providers || {}),
       },
     },
+    editor: { ...base.editor, ...(patch.editor || {}) },
     freshclaude: { ...base.freshclaude, ...(patch.freshclaude || {}) },
     network: {
       ...base.network,
@@ -487,7 +505,7 @@ export class ConfigStore {
     return cfg.settings
   }
 
-  async patchSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
+  async patchSettings(patch: AppSettingsPatch): Promise<AppSettings> {
     return this.writeMutex.acquire(async () => {
       const cfg = await this.load()
       const updated: UserConfig = {

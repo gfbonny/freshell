@@ -4,6 +4,7 @@ export type TerminalActions = {
   selectAll: () => void
   clearScrollback: () => void
   reset: () => void
+  scrollToBottom: () => void
   hasSelection: () => boolean
   openSearch: () => void
 }
@@ -17,7 +18,7 @@ export type EditorActions = {
   togglePreview: () => void
   copyPath: () => Promise<void> | void
   revealInExplorer: () => Promise<void> | void
-  openWithSystemViewer: () => Promise<void> | void
+  openInEditor: () => Promise<void> | void
 }
 
 export type BrowserActions = {

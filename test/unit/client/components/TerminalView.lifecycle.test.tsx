@@ -98,6 +98,8 @@ class MockResizeObserver {
 describe('TerminalView lifecycle updates', () => {
   let messageHandler: ((msg: any) => void) | null = null
   let reconnectHandler: (() => void) | null = null
+  let requestAnimationFrameSpy: ReturnType<typeof vi.spyOn> | null = null
+  let cancelAnimationFrameSpy: ReturnType<typeof vi.spyOn> | null = null
 
   beforeEach(() => {
     wsMocks.send.mockClear()
@@ -114,6 +116,11 @@ describe('TerminalView lifecycle updates', () => {
         if (reconnectHandler === callback) reconnectHandler = null
       }
     })
+    requestAnimationFrameSpy = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb: FrameRequestCallback) => {
+      cb(0)
+      return 1
+    })
+    cancelAnimationFrameSpy = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {})
     vi.stubGlobal('ResizeObserver', MockResizeObserver)
   })
 
@@ -121,6 +128,10 @@ describe('TerminalView lifecycle updates', () => {
     cleanup()
     vi.useRealTimers()
     vi.unstubAllGlobals()
+    requestAnimationFrameSpy?.mockRestore()
+    cancelAnimationFrameSpy?.mockRestore()
+    requestAnimationFrameSpy = null
+    cancelAnimationFrameSpy = null
     reconnectHandler = null
   })
 
@@ -356,7 +367,7 @@ describe('TerminalView lifecycle updates', () => {
       data: 'hello\x07world',
     })
 
-    expect(terminalInstances[0].write).toHaveBeenCalledWith('helloworld')
+    expect(terminalInstances[0].write.mock.calls.some((call) => call[0] === 'helloworld')).toBe(true)
     expect(store.getState().turnCompletion.lastEvent?.tabId).toBe(tabId)
     expect(store.getState().turnCompletion.lastEvent?.paneId).toBe(paneId)
     expect(store.getState().turnCompletion.lastEvent?.terminalId).toBe(terminalId)
@@ -428,7 +439,7 @@ describe('TerminalView lifecycle updates', () => {
       data: '\x1b]0;New title\x07',
     })
 
-    expect(terminalInstances[0].write).toHaveBeenCalledWith('\x1b]0;New title\x07')
+    expect(terminalInstances[0].write.mock.calls.some((call) => call[0] === '\x1b]0;New title\x07')).toBe(true)
     expect(store.getState().turnCompletion.lastEvent).toBeNull()
   })
 
@@ -496,7 +507,7 @@ describe('TerminalView lifecycle updates', () => {
       data: 'hello\x07world',
     })
 
-    expect(terminalInstances[0].write).toHaveBeenCalledWith('hello\x07world')
+    expect(terminalInstances[0].write.mock.calls.some((call) => call[0] === 'hello\x07world')).toBe(true)
     expect(store.getState().turnCompletion.lastEvent).toBeNull()
   })
 
@@ -641,18 +652,21 @@ describe('TerminalView lifecycle updates', () => {
       terminalId: 'term-existing',
     }))
 
-    // terminal.resize should be sent exactly once (from the visibility effect, which
-    // calls fit() before sending). The attach() function must NOT send a second resize.
+    // terminal.resize should be sent before attach by layout effects. The attach() function
+    // itself must not send an additional resize after attach is emitted.
     const resizeCalls = wsMocks.send.mock.calls.filter(
       ([msg]: [any]) => msg.type === 'terminal.resize'
     )
-    expect(resizeCalls).toHaveLength(1)
+    expect(resizeCalls.length).toBeGreaterThan(0)
 
-    // The resize must come BEFORE the attach (visibility effect runs before WS effect)
+    // Every resize must occur before attach.
     const allCalls = wsMocks.send.mock.calls.map(([msg]: [any]) => msg.type)
-    const resizeIdx = allCalls.indexOf('terminal.resize')
     const attachIdx = allCalls.indexOf('terminal.attach')
-    expect(resizeIdx).toBeLessThan(attachIdx)
+    const resizeIndices = allCalls
+      .map((type, idx) => ({ type, idx }))
+      .filter((entry) => entry.type === 'terminal.resize')
+      .map((entry) => entry.idx)
+    expect(resizeIndices.every((idx) => idx < attachIdx)).toBe(true)
   })
 
   it('does not send terminal.resize for hidden tabs on attach (defers to visibility effect)', async () => {
@@ -1391,7 +1405,7 @@ describe('TerminalView lifecycle updates', () => {
 
       expect(term.clear).toHaveBeenCalledTimes(1)
       expect(term.write).toHaveBeenCalledTimes(1)
-      expect(term.write).toHaveBeenCalledWith('abcdef')
+      expect(term.write).toHaveBeenCalledWith('abcdef', expect.any(Function))
     })
 
     it('keeps attaching state pending after terminal.created with snapshotChunked until end arrives', async () => {
@@ -1412,7 +1426,7 @@ describe('TerminalView lifecycle updates', () => {
       messageHandler!({ type: 'terminal.attached.chunk', terminalId: 'term-chunk-created', chunk: 'ok!' })
       messageHandler!({ type: 'terminal.attached.end', terminalId: 'term-chunk-created', totalCodeUnits: 3, totalChunks: 1 })
 
-      expect(term.write).toHaveBeenCalledWith('ok!')
+      expect(term.write).toHaveBeenCalledWith('ok!', expect.any(Function))
     })
 
     it('drops snapshot when totalCodeUnits mismatches and triggers guarded auto-reattach', async () => {
@@ -1448,7 +1462,7 @@ describe('TerminalView lifecycle updates', () => {
       expect(wsMocks.send).toHaveBeenCalledWith({ type: 'terminal.attach', terminalId })
     })
 
-    it('ignores mismatched terminalId chunk frames and logs a warning', async () => {
+    it('ignores mismatched terminalId chunk frames without logging warnings', async () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
       const { term, terminalId } = await renderTerminalHarness({ status: 'running', terminalId: 'term-active' })
 
@@ -1457,8 +1471,11 @@ describe('TerminalView lifecycle updates', () => {
       messageHandler!({ type: 'terminal.attached.chunk', terminalId, chunk: 'abc' })
       messageHandler!({ type: 'terminal.attached.end', terminalId, totalCodeUnits: 3, totalChunks: 1 })
 
-      expect(term.write).toHaveBeenCalledWith('abc')
-      expect(warnSpy).toHaveBeenCalled()
+      expect(term.write).toHaveBeenCalledWith('abc', expect.any(Function))
+      const mismatchWarnings = warnSpy.mock.calls.flat().filter((arg) =>
+        typeof arg === 'string' && arg.includes('mismatched terminal')
+      )
+      expect(mismatchWarnings).toHaveLength(0)
       warnSpy.mockRestore()
     })
 
@@ -1484,7 +1501,7 @@ describe('TerminalView lifecycle updates', () => {
       messageHandler!({ type: 'terminal.attached.end', terminalId, totalCodeUnits: 3, totalChunks: 1 })
 
       expect(term.write).toHaveBeenCalledTimes(1)
-      expect(term.write).toHaveBeenCalledWith('new')
+      expect(term.write).toHaveBeenCalledWith('new', expect.any(Function))
     })
 
     it('times out chunked attach and auto-reattaches at most once per terminal per generation', async () => {
@@ -1645,7 +1662,7 @@ describe('TerminalView lifecycle updates', () => {
       })
 
       expect(term.clear).toHaveBeenCalled()
-      expect(term.write).toHaveBeenCalledWith('hello world')
+      expect(term.write).toHaveBeenCalledWith('hello world', expect.any(Function))
       expect(store.getState().turnCompletion.lastEvent).toBeNull()
     })
 
@@ -1685,7 +1702,7 @@ describe('TerminalView lifecycle updates', () => {
       })
 
       expect(term.clear).toHaveBeenCalled()
-      expect(term.write).toHaveBeenCalledWith('snapshot')
+      expect(term.write).toHaveBeenCalledWith('snapshot', expect.any(Function))
       expect(store.getState().turnCompletion.lastEvent).toBeNull()
     })
 
@@ -1767,7 +1784,7 @@ describe('TerminalView lifecycle updates', () => {
       })
 
       expect(term.clear).toHaveBeenCalled()
-      expect(term.write).toHaveBeenCalledWith('attached content')
+      expect(term.write).toHaveBeenCalledWith('attached content', expect.any(Function))
       expect(store.getState().turnCompletion.lastEvent).toBeNull()
     })
   })

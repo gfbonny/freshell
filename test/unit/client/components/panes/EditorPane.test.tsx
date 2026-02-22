@@ -181,7 +181,7 @@ describe('EditorPane', () => {
     expect(screen.queryByRole('button', { name: /preview/i })).not.toBeInTheDocument()
   })
 
-  it('renders markdown preview when viewMode is preview', () => {
+  it('renders markdown preview when viewMode is preview', async () => {
     render(
       <Provider store={store}>
         <EditorPane
@@ -196,7 +196,7 @@ describe('EditorPane', () => {
       </Provider>
     )
 
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Hello World')
+    expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('Hello World')
     expect(screen.queryByTestId('monaco-mock')).not.toBeInTheDocument()
   })
 

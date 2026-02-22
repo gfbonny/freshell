@@ -234,10 +234,10 @@ describe('App Component - Share Button', () => {
     fireEvent.click(openShareButton)
   }
 
-  it('renders the share action in settings', () => {
+  it('renders the share action in settings', async () => {
     renderApp()
     fireEvent.click(screen.getByTitle('Go settings'))
-    expect(screen.getByRole('button', { name: 'Open share panel' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Open share panel' })).toBeInTheDocument()
   })
 
   it('renders the outlined terminal work area top border with a thin connector strip', () => {

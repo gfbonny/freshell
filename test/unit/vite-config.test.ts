@@ -113,6 +113,7 @@ describe('vite config', () => {
 
       expect(apiTarget).toBe(expectedUrl)
       expect(wsTarget).toBe(expectedUrl)
+      expect(config.build?.chunkSizeWarningLimit).toBe(1400)
     } finally {
       if (originalBackendHost !== undefined) {
         process.env.VITE_BACKEND_HOST = originalBackendHost

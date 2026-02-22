@@ -43,6 +43,7 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: 'dist/client',
       sourcemap: mode === 'development',
+      chunkSizeWarningLimit: 1400,
     },
     server: {
       host: getNetworkHost(),

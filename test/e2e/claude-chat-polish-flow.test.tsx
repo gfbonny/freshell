@@ -85,6 +85,24 @@ describe('freshclaude polish e2e: left-border message layout', () => {
     expect(userMsg.className).toContain('border-l-[3px]')
     expect(assistantMsg.className).toContain('border-l-2')
   })
+
+  it('renders assistant markdown-formatted text content', async () => {
+    const store = makeStore()
+    store.dispatch(sessionCreated({ requestId: 'req-1', sessionId: 'sess-1' }))
+    store.dispatch(addAssistantMessage({
+      sessionId: 'sess-1',
+      content: [{ type: 'text', text: '# Hello Markdown' }],
+    }))
+    store.dispatch(setSessionStatus({ sessionId: 'sess-1', status: 'idle' }))
+
+    render(
+      <Provider store={store}>
+        <ClaudeChatView tabId="t1" paneId="p1" paneContent={BASE_PANE} />
+      </Provider>,
+    )
+
+    expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('Hello Markdown')
+  })
 })
 
 describe('freshclaude polish e2e: tool block expand/collapse', () => {

@@ -234,6 +234,21 @@ function loadInitialPanesState(): PanesState {
 
 const initialState: PanesState = loadInitialPanesState()
 
+/**
+ * Recursively walk a pane tree to find the leaf pane ID whose terminal
+ * content has the given terminalId. Returns undefined if no match.
+ */
+function findPaneIdByTerminalId(node: PaneNode, terminalId: string): string | undefined {
+  if (node.type === 'leaf') {
+    if (node.content.kind === 'terminal' && node.content.terminalId === terminalId) {
+      return node.id
+    }
+    return undefined
+  }
+  return findPaneIdByTerminalId(node.children[0], terminalId)
+    ?? findPaneIdByTerminalId(node.children[1], terminalId)
+}
+
 // Helper to find and replace a node (leaf or split) in the tree
 function findAndReplace(
   node: PaneNode,
@@ -822,6 +837,29 @@ export const panesSlice = createSlice({
         state.zoomedPane[tabId] = paneId
       }
     },
+
+    /**
+     * Walk all tabs' pane trees and update the title for any pane whose
+     * terminal content has the given terminalId. Used when a session rename
+     * from the history view should cascade to the pane title bar.
+     */
+    updatePaneTitleByTerminalId: (
+      state,
+      action: PayloadAction<{ terminalId: string; title: string }>
+    ) => {
+      const { terminalId, title } = action.payload
+      for (const tabId of Object.keys(state.layouts)) {
+        const paneId = findPaneIdByTerminalId(state.layouts[tabId], terminalId)
+        if (paneId) {
+          if (!state.paneTitles[tabId]) state.paneTitles[tabId] = {}
+          state.paneTitles[tabId][paneId] = title
+          // Mark as user-set so programmatic updates don't overwrite it
+          if (!state.paneTitleSetByUser) state.paneTitleSetByUser = {}
+          if (!state.paneTitleSetByUser[tabId]) state.paneTitleSetByUser[tabId] = {}
+          state.paneTitleSetByUser[tabId][paneId] = true
+        }
+      }
+    },
   },
 })
 
@@ -841,6 +879,7 @@ export const {
   removeLayout,
   hydratePanes,
   updatePaneTitle,
+  updatePaneTitleByTerminalId,
   requestPaneRename,
   clearPaneRenameRequest,
   toggleZoom,
