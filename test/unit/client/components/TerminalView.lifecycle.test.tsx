@@ -1710,7 +1710,7 @@ describe('TerminalView lifecycle updates', () => {
       })
     })
 
-    it('resets stale persisted sequence when a fresh stream restarts at sequence 1', async () => {
+    it('preserves persisted high-water when a hydration replay starts at sequence 1', async () => {
       localStorage.setItem(TERMINAL_CURSOR_STORAGE_KEY, JSON.stringify({
         'term-v2-seq-reset': {
           seq: 12,
@@ -1730,7 +1730,7 @@ describe('TerminalView lifecycle updates', () => {
       expect(wsMocks.send).toHaveBeenCalledWith({
         type: 'terminal.attach',
         terminalId,
-        sinceSeq: 3,
+        sinceSeq: 12,
       })
     })
 
