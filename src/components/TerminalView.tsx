@@ -1250,7 +1250,9 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           const mode = contentRef.current?.mode || 'shell'
           handleTerminalOutput(raw, mode, tid)
           applySeqState(frameDecision.state, { terminalId: tid, persistCursor: true })
-          if (!frameDecision.state.pendingReplay) {
+          const completedAttachOnFrame = !frameDecision.state.pendingReplay
+            && (Boolean(previousSeqState.pendingReplay) || previousSeqState.awaitingFreshSequence)
+          if (completedAttachOnFrame) {
             setIsAttaching(false)
             markViewportHydrationComplete()
           }
@@ -1265,9 +1267,12 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           } catch {
             // disposed
           }
-          const nextSeqState = onOutputGap(seqStateRef.current, { fromSeq: msg.fromSeq, toSeq: msg.toSeq })
+          const previousSeqState = seqStateRef.current
+          const nextSeqState = onOutputGap(previousSeqState, { fromSeq: msg.fromSeq, toSeq: msg.toSeq })
           applySeqState(nextSeqState, { terminalId: tid, persistCursor: true })
-          if (!nextSeqState.pendingReplay) {
+          const completedAttachOnGap = !nextSeqState.pendingReplay
+            && (Boolean(previousSeqState.pendingReplay) || previousSeqState.awaitingFreshSequence)
+          if (completedAttachOnGap) {
             setIsAttaching(false)
             markViewportHydrationComplete()
           }
