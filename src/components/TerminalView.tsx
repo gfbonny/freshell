@@ -1216,7 +1216,6 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
             willUpdate: !!(msg.effectiveResumeSessionId && msg.effectiveResumeSessionId !== contentRef.current?.resumeSessionId),
           })
           terminalIdRef.current = newId
-          clearTerminalCursor(newId)
           lastSeqRef.current = 0
           updateContent({ terminalId: newId, status: 'running' })
           // Also update tab for title purposes

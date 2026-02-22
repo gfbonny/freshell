@@ -170,12 +170,13 @@ export function saveTerminalCursor(terminalId: string, seq: number): void {
 
   const shouldPrune = Object.keys(map).length > MAX_ENTRIES
     || now - lastPruneAt >= PRUNE_INTERVAL_MS
+  const nextMap = shouldPrune
+    ? pruneCursorMap(map, now)
+    : map
   if (shouldPrune) {
-    cache = pruneCursorMap(map, now)
     lastPruneAt = now
-  } else {
-    cache = map
   }
+  cache = nextMap
 
   schedulePersist()
 }
