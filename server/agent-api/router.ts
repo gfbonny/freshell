@@ -162,10 +162,6 @@ export function createAgentApiRouter({ layoutStore, registry, wsHandler }: { lay
     const paneId = resolved.paneId || rawTarget
     const paneSnapshot = layoutStore.getPaneSnapshot?.(paneId)
     let terminalId = paneSnapshot?.terminalId || layoutStore.resolvePaneToTerminal?.(paneId)
-    if (!terminalId && layoutStore.resolveTarget) {
-      const target = layoutStore.resolveTarget(rawTarget)
-      if (target?.paneId) terminalId = layoutStore.resolvePaneToTerminal?.(target.paneId)
-    }
     const term = terminalId ? registry.get?.(terminalId) : undefined
 
     const rawStart = req.query.S

@@ -10,7 +10,9 @@ type UiSnapshot = {
   timestamp?: number
 }
 
-type Leaf = { id: string; content?: Record<string, unknown> & { kind?: string; terminalId?: string } }
+type PaneContentSnapshot = Record<string, unknown> & { kind?: string; terminalId?: string }
+
+type Leaf = { id: string; content?: PaneContentSnapshot }
 
 type PaneSnapshot = {
   tabId: string
@@ -18,7 +20,7 @@ type PaneSnapshot = {
   index: number
   kind?: string
   terminalId?: string
-  paneContent?: Record<string, unknown> & { kind?: string; terminalId?: string }
+  paneContent?: PaneContentSnapshot
 }
 
 export class LayoutStore {
