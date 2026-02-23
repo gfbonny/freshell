@@ -771,6 +771,7 @@ describe('TerminalView lifecycle updates', () => {
       type: 'terminal.attach',
       terminalId: 'term-existing',
       sinceSeq: 0,
+      attachRequestId: expect.any(String),
     }))
 
     // terminal.resize should be sent before attach by layout effects. The attach() function
@@ -854,6 +855,7 @@ describe('TerminalView lifecycle updates', () => {
       type: 'terminal.attach',
       terminalId: 'term-hidden',
       sinceSeq: 0,
+      attachRequestId: expect.any(String),
     }))
 
     // No terminal.resize should be sent: visibility effect skips hidden tabs,
@@ -1498,11 +1500,12 @@ describe('TerminalView lifecycle updates', () => {
       )
 
       await waitFor(() => {
-        expect(wsMocks.send).toHaveBeenCalledWith({
+        expect(wsMocks.send).toHaveBeenCalledWith(expect.objectContaining({
           type: 'terminal.attach',
           terminalId: 'term-non-blocking',
           sinceSeq: 0,
-        })
+          attachRequestId: expect.any(String),
+        }))
       })
 
       expect(queryByTestId('loader')).toBeNull()
@@ -1520,11 +1523,12 @@ describe('TerminalView lifecycle updates', () => {
       )
 
       await waitFor(() => {
-        expect(wsMocks.send).toHaveBeenCalledWith({
+        expect(wsMocks.send).toHaveBeenCalledWith(expect.objectContaining({
           type: 'terminal.attach',
           terminalId: 'term-non-blocking',
           sinceSeq: 0,
-        })
+          attachRequestId: expect.any(String),
+        }))
       })
 
       expect(queryByTestId('loader')).toBeNull()
@@ -1619,11 +1623,98 @@ describe('TerminalView lifecycle updates', () => {
     it('sends sinceSeq=0 when attaching without previously rendered output', async () => {
       const { terminalId } = await renderTerminalHarness({ status: 'running', terminalId: 'term-v2-attach' })
       reconnectHandler?.()
-      expect(wsMocks.send).toHaveBeenCalledWith({
+      expect(wsMocks.send).toHaveBeenCalledWith(expect.objectContaining({
         type: 'terminal.attach',
         terminalId,
         sinceSeq: 0,
+        attachRequestId: expect.any(String),
+      }))
+    })
+
+    it('drops stale terminal.output from an older attachRequestId generation', async () => {
+      const { terminalId, term } = await renderTerminalHarness({
+        status: 'running',
+        terminalId: 'term-attach-gen',
+        clearSends: false,
       })
+
+      const firstAttach = wsMocks.send.mock.calls
+        .map(([msg]) => msg)
+        .find((msg) => msg?.type === 'terminal.attach' && msg?.terminalId === terminalId)
+      expect(firstAttach?.attachRequestId).toBeTruthy()
+
+      wsMocks.send.mockClear()
+      reconnectHandler?.()
+
+      const secondAttach = wsMocks.send.mock.calls
+        .map(([msg]) => msg)
+        .find((msg) => msg?.type === 'terminal.attach' && msg?.terminalId === terminalId)
+
+      expect(secondAttach?.attachRequestId).toBeTruthy()
+      expect(secondAttach?.attachRequestId).not.toBe(firstAttach?.attachRequestId)
+
+      messageHandler!({
+        type: 'terminal.output',
+        terminalId,
+        seqStart: 1,
+        seqEnd: 1,
+        data: 'STALE',
+        attachRequestId: firstAttach!.attachRequestId,
+      } as any)
+      messageHandler!({
+        type: 'terminal.output',
+        terminalId,
+        seqStart: 2,
+        seqEnd: 2,
+        data: 'FRESH',
+        attachRequestId: secondAttach!.attachRequestId,
+      } as any)
+      messageHandler!({
+        type: 'terminal.output',
+        terminalId,
+        seqStart: 3,
+        seqEnd: 3,
+        data: 'UNTAGGED',
+      } as any)
+
+      const writes = term.write.mock.calls.map(([d]) => String(d)).join('')
+      expect(writes).toContain('FRESH')
+      expect(writes).not.toContain('STALE')
+      expect(writes).toContain('UNTAGGED')
+    })
+
+    it('accepts terminal.created auto-attach messages without attachRequestId after prior attach generation state', async () => {
+      const { requestId, term } = await renderTerminalHarness({
+        status: 'running',
+        terminalId: 'term-old-generation',
+      })
+
+      reconnectHandler?.()
+      wsMocks.send.mockClear()
+
+      messageHandler!({
+        type: 'terminal.created',
+        requestId,
+        terminalId: 'term-created-no-id',
+        createdAt: Date.now(),
+      } as any)
+      messageHandler!({
+        type: 'terminal.attach.ready',
+        terminalId: 'term-created-no-id',
+        headSeq: 1,
+        replayFromSeq: 2,
+        replayToSeq: 1,
+      } as any)
+      messageHandler!({
+        type: 'terminal.output',
+        terminalId: 'term-created-no-id',
+        seqStart: 2,
+        seqEnd: 2,
+        data: 'created-live',
+      } as any)
+
+      const writes = term.write.mock.calls.map(([d]) => String(d)).join('')
+      expect(writes).toContain('created-live')
     })
 
     it('uses the highest rendered sequence in reconnect attach requests', async () => {
@@ -1639,11 +1730,12 @@ describe('TerminalView lifecycle updates', () => {
       wsMocks.send.mockClear()
       reconnectHandler?.()
 
-      expect(wsMocks.send).toHaveBeenCalledWith({
+      expect(wsMocks.send).toHaveBeenCalledWith(expect.objectContaining({
         type: 'terminal.attach',
         terminalId,
         sinceSeq: 3,
-      })
+        attachRequestId: expect.any(String),
+      }))
     })
 
     it('reattaches with latest rendered sequence after terminal view remount', async () => {
@@ -1660,11 +1752,12 @@ describe('TerminalView lifecycle updates', () => {
       )
 
       await waitFor(() => {
-        expect(wsMocks.send).toHaveBeenCalledWith({
+        expect(wsMocks.send).toHaveBeenCalledWith(expect.objectContaining({
           type: 'terminal.attach',
           terminalId,
           sinceSeq: 0,
-        })
+          attachRequestId: expect.any(String),
+        }))
       })
     })
 
@@ -1682,11 +1775,12 @@ describe('TerminalView lifecycle updates', () => {
       )
 
       await waitFor(() => {
-        expect(wsMocks.send).toHaveBeenCalledWith({
+        expect(wsMocks.send).toHaveBeenCalledWith(expect.objectContaining({
           type: 'terminal.attach',
           terminalId,
           sinceSeq: 3,
-        })
+          attachRequestId: expect.any(String),
+        }))
       })
     })
 
@@ -1704,11 +1798,12 @@ describe('TerminalView lifecycle updates', () => {
       )
 
       await waitFor(() => {
-        expect(wsMocks.send).toHaveBeenCalledWith({
+        expect(wsMocks.send).toHaveBeenCalledWith(expect.objectContaining({
           type: 'terminal.attach',
           terminalId,
           sinceSeq: 3,
-        })
+          attachRequestId: expect.any(String),
+        }))
       })
 
       wsMocks.send.mockClear()
@@ -1719,11 +1814,12 @@ describe('TerminalView lifecycle updates', () => {
       )
 
       await waitFor(() => {
-        expect(wsMocks.send).toHaveBeenCalledWith({
+        expect(wsMocks.send).toHaveBeenCalledWith(expect.objectContaining({
           type: 'terminal.attach',
           terminalId,
           sinceSeq: 0,
-        })
+          attachRequestId: expect.any(String),
+        }))
       })
 
       act(() => {
@@ -1770,11 +1866,12 @@ describe('TerminalView lifecycle updates', () => {
 
       reconnectHandler?.()
 
-      expect(wsMocks.send).toHaveBeenCalledWith({
+      expect(wsMocks.send).toHaveBeenCalledWith(expect.objectContaining({
         type: 'terminal.attach',
         terminalId,
         sinceSeq: 10,
-      })
+        attachRequestId: expect.any(String),
+      }))
     })
 
     it('keeps reconnect attach on high-water cursor when reconnect fires during remount hydration', async () => {
@@ -1801,21 +1898,23 @@ describe('TerminalView lifecycle updates', () => {
       )
 
       await waitFor(() => {
-        expect(wsMocks.send).toHaveBeenCalledWith({
+        expect(wsMocks.send).toHaveBeenCalledWith(expect.objectContaining({
           type: 'terminal.attach',
           terminalId,
           sinceSeq: 0,
-        })
+          attachRequestId: expect.any(String),
+        }))
       })
 
       wsMocks.send.mockClear()
       reconnectHandler?.()
 
-      expect(wsMocks.send).toHaveBeenCalledWith({
+      expect(wsMocks.send).toHaveBeenCalledWith(expect.objectContaining({
         type: 'terminal.attach',
         terminalId,
         sinceSeq: 11,
-      })
+        attachRequestId: expect.any(String),
+      }))
     })
 
     it('keeps viewport replay output when reconnect attach starts before the viewport replay arrives', async () => {
@@ -1835,11 +1934,12 @@ describe('TerminalView lifecycle updates', () => {
       // Simulate a reconnect attach racing ahead of the first viewport replay.
       wsMocks.send.mockClear()
       reconnectHandler?.()
-      expect(wsMocks.send).toHaveBeenCalledWith({
+      expect(wsMocks.send).toHaveBeenCalledWith(expect.objectContaining({
         type: 'terminal.attach',
         terminalId,
         sinceSeq: 12,
-      })
+        attachRequestId: expect.any(String),
+      }))
 
       act(() => {
         messageHandler!({
@@ -1895,11 +1995,12 @@ describe('TerminalView lifecycle updates', () => {
 
       wsMocks.send.mockClear()
       reconnectHandler?.()
-      expect(wsMocks.send).toHaveBeenCalledWith({
+      expect(wsMocks.send).toHaveBeenCalledWith(expect.objectContaining({
         type: 'terminal.attach',
         terminalId,
         sinceSeq: 12,
-      })
+        attachRequestId: expect.any(String),
+      }))
     })
 
     it('ignores overlapping output ranges and keeps forward-only rendering', async () => {
@@ -1933,11 +2034,12 @@ describe('TerminalView lifecycle updates', () => {
       expect(term.writeln).toHaveBeenCalledWith(expect.stringContaining('Output gap 2-5: slow link backlog'))
 
       reconnectHandler?.()
-      expect(wsMocks.send).toHaveBeenCalledWith({
+      expect(wsMocks.send).toHaveBeenCalledWith(expect.objectContaining({
         type: 'terminal.attach',
         terminalId,
         sinceSeq: 5,
-      })
+        attachRequestId: expect.any(String),
+      }))
     })
 
     it('renders replay frames after attach.ready when replay starts above 1', async () => {
@@ -2023,11 +2125,12 @@ describe('TerminalView lifecycle updates', () => {
       })
 
       reconnectHandler?.()
-      expect(wsMocks.send).toHaveBeenCalledWith({
+      expect(wsMocks.send).toHaveBeenCalledWith(expect.objectContaining({
         type: 'terminal.attach',
         terminalId: 'term-v2-created',
         sinceSeq: 7,
-      })
+        attachRequestId: expect.any(String),
+      }))
     })
   })
 

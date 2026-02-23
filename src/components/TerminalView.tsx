@@ -228,6 +228,12 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   const requestIdRef = useRef<string>(terminalContent?.createRequestId || '')
   const terminalIdRef = useRef<string | undefined>(terminalContent?.terminalId)
   const seqStateRef = useRef<AttachSeqState>(createAttachSeqState())
+  const attachCounterRef = useRef(0)
+  const currentAttachRef = useRef<{
+    requestId: string
+    intent: AttachIntent
+    terminalId: string
+  } | null>(null)
   const needsViewportHydrationRef = useRef(true)
   const pendingDeferredHydrationRef = useRef(false)
   const awaitingViewportHydrationRef = useRef(false)
@@ -1077,6 +1083,27 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     pendingDeferredHydrationRef.current = false
   }, [])
 
+  const isCurrentAttachMessage = useCallback((msg: {
+    type: string
+    terminalId: string
+    attachRequestId?: string
+  }) => {
+    const current = currentAttachRef.current
+    if (!current) return true
+    if (!msg.attachRequestId) {
+      if (debugRef.current) {
+        log.debug('Accepting untagged same-terminal stream message', {
+          paneId: paneIdRef.current,
+          terminalId: msg.terminalId,
+          type: msg.type,
+          currentAttachRequestId: current.requestId,
+        })
+      }
+      return true
+    }
+    return msg.attachRequestId === current.requestId
+  }, [])
+
   const attachTerminal = useCallback((
     tid: string,
     intent: AttachIntent,
@@ -1109,10 +1136,18 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       }
     }
 
+    const attachRequestId = `${paneIdRef.current}:${++attachCounterRef.current}:${nanoid(6)}`
+    currentAttachRef.current = {
+      requestId: attachRequestId,
+      intent,
+      terminalId: tid,
+    }
+
     ws.send({
       type: 'terminal.attach',
       terminalId: tid,
       sinceSeq,
+      attachRequestId,
     })
     // NOTE: Do NOT send terminal.resize here. At this point fit() hasn't run yet,
     // so term.cols/rows are xterm defaults (80×24), not the actual viewport size.
@@ -1242,6 +1277,19 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         const reqId = requestIdRef.current
 
         if (msg.type === 'terminal.output' && msg.terminalId === tid) {
+          if (!isCurrentAttachMessage(msg)) {
+            if (debugRef.current) {
+              log.debug('Ignoring stale attach generation message', {
+                paneId: paneIdRef.current,
+                terminalId: msg.terminalId,
+                attachRequestId: msg.attachRequestId,
+                currentAttachRequestId: currentAttachRef.current?.requestId,
+                type: msg.type,
+              })
+            }
+            return
+          }
+
           if (typeof msg.seqStart !== 'number' || typeof msg.seqEnd !== 'number') {
             if (import.meta.env.DEV) {
               log.warn('Ignoring terminal.output without sequence range', {
@@ -1285,6 +1333,19 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         }
 
         if (msg.type === 'terminal.output.gap' && msg.terminalId === tid) {
+          if (!isCurrentAttachMessage(msg)) {
+            if (debugRef.current) {
+              log.debug('Ignoring stale attach generation message', {
+                paneId: paneIdRef.current,
+                terminalId: msg.terminalId,
+                attachRequestId: msg.attachRequestId,
+                currentAttachRequestId: currentAttachRef.current?.requestId,
+                type: msg.type,
+              })
+            }
+            return
+          }
+
           const reason = msg.reason === 'replay_window_exceeded'
             ? 'reconnect window exceeded'
             : 'slow link backlog'
@@ -1305,6 +1366,19 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         }
 
         if (msg.type === 'terminal.attach.ready' && msg.terminalId === tid) {
+          if (!isCurrentAttachMessage(msg)) {
+            if (debugRef.current) {
+              log.debug('Ignoring stale attach generation message', {
+                paneId: paneIdRef.current,
+                terminalId: msg.terminalId,
+                attachRequestId: msg.attachRequestId,
+                currentAttachRequestId: currentAttachRef.current?.requestId,
+                type: msg.type,
+              })
+            }
+            return
+          }
+
           const nextSeqState = onAttachReady(seqStateRef.current, {
             headSeq: msg.headSeq,
             replayFromSeq: msg.replayFromSeq,
@@ -1324,6 +1398,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         if (msg.type === 'terminal.created' && msg.requestId === reqId) {
           clearRateLimitRetry()
           const newId = msg.terminalId as string
+          currentAttachRef.current = null
           if (debugRef.current) log.debug('[TRACE resumeSessionId] terminal.created received', {
             paneId: paneIdRef.current,
             requestId: reqId,
@@ -1352,6 +1427,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         }
 
         if (msg.type === 'terminal.exit' && msg.terminalId === tid) {
+          currentAttachRef.current = null
           clearTerminalCursor(tid)
           // Clear terminalIdRef AND the stored terminalId to prevent any subsequent
           // operations (resize, input) from sending commands to the dead terminal,
