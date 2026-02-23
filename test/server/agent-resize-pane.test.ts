@@ -94,7 +94,11 @@ describe('agent resize-pane api', () => {
     const payloads = [
       { x: 200 },
       { y: -5 },
+      { x: 0 },
+      { y: 100 },
       { sizes: ['bad', 30] },
+      { sizes: [0, 50] },
+      { sizes: [50, 100] },
       { sizes: [120, 20] },
     ]
 

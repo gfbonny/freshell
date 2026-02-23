@@ -9,6 +9,18 @@ import { resolveScreenshotOutputPath } from './screenshot-path.js'
 
 const truthy = (value: unknown) => value === true || value === 'true' || value === '1' || value === 'yes'
 
+type ResizeLayoutStore = {
+  getSplitSizes?: (tabId: string | undefined, splitId: string) => [number, number] | undefined
+  resolveTarget?: (target: string) => { paneId?: string }
+  findSplitForPane?: (paneId: string) => { tabId: string; splitId: string } | undefined
+}
+
+type ResolvedResizeTarget = {
+  tabId?: string
+  splitId: string
+  message?: string
+}
+
 const parseRegex = (raw: string) => {
   if (raw.startsWith('/') && raw.lastIndexOf('/') > 0) {
     const last = raw.lastIndexOf('/')
@@ -51,7 +63,7 @@ export function createAgentApiRouter({ layoutStore, registry, wsHandler }: { lay
     return Number.isFinite(n) ? n : undefined
   }
 
-  const isValidPercent = (value: number) => Number.isFinite(value) && value >= 0 && value <= 100
+  const isValidPercent = (value: number) => Number.isFinite(value) && value >= 1 && value <= 99
   const clampPercent = (value: number) => Math.min(99, Math.max(1, value))
   const normalizePairToHundred = (a: number, b: number): [number, number] => {
     const left = clampPercent(a)
@@ -59,18 +71,6 @@ export function createAgentApiRouter({ layoutStore, registry, wsHandler }: { lay
     const total = left + right
     const normalizedLeft = clampPercent(Math.round((left / total) * 100))
     return [normalizedLeft, 100 - normalizedLeft]
-  }
-
-  type ResizeLayoutStore = {
-    getSplitSizes?: (tabId: string | undefined, splitId: string) => [number, number] | undefined
-    resolveTarget?: (target: string) => { paneId?: string }
-    findSplitForPane?: (paneId: string) => { tabId: string; splitId: string } | undefined
-  }
-
-  type ResolvedResizeTarget = {
-    tabId?: string
-    splitId: string
-    message?: string
   }
 
   const resolveResizeTarget = (store: ResizeLayoutStore, rawTarget: string, requestedTabId?: string): ResolvedResizeTarget => {
@@ -556,7 +556,7 @@ export function createAgentApiRouter({ layoutStore, registry, wsHandler }: { lay
       return res.status(400).json(fail('sizes values must be numeric'))
     }
     if (hasExplicitTuple && (!isValidPercent(explicitTuple[0] as number) || !isValidPercent(explicitTuple[1] as number))) {
-      return res.status(400).json(fail('sizes values must be within 0..100'))
+      return res.status(400).json(fail('sizes values must be within 1..99'))
     }
 
     const hasX = Object.prototype.hasOwnProperty.call(body, 'x')
@@ -569,10 +569,10 @@ export function createAgentApiRouter({ layoutStore, registry, wsHandler }: { lay
       return res.status(400).json(fail('y must be numeric'))
     }
     if (explicitX !== undefined && !isValidPercent(explicitX)) {
-      return res.status(400).json(fail('x must be within 0..100'))
+      return res.status(400).json(fail('x must be within 1..99'))
     }
     if (explicitY !== undefined && !isValidPercent(explicitY)) {
-      return res.status(400).json(fail('y must be within 0..100'))
+      return res.status(400).json(fail('y must be within 1..99'))
     }
 
     const boundedX = explicitX === undefined ? undefined : clampPercent(explicitX)
