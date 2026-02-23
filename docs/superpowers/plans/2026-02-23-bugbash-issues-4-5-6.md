@@ -56,7 +56,7 @@ Expected: FAIL on missing `C-u`/generic ctrl mappings.
 
 ```ts
 function translateCtrlChord(token: string): string | undefined {
-  const m = /^C-([A-Za-z])$/.exec(token)
+  const m = /^C-([A-Z])$/.exec(token)
   if (!m) return undefined
   return String.fromCharCode(m[1].charCodeAt(0) - 64)
 }
@@ -119,7 +119,10 @@ Expected: FAIL (current behavior injects default `50`).
 
 ```ts
 getSplitSizes(tabId: string | undefined, splitId: string): [number, number] | undefined {
-  // locate split in target tab or inferred tab, return tuple if found
+  // choose tab by explicit tabId or by scanning all tabs
+  // DFS the layout tree for node.type === 'split' && node.id === splitId
+  // return node.sizes as [number, number] when found
+  // return undefined when missing
 }
 ```
 
@@ -171,6 +174,11 @@ const explicitX = parseOptionalNumber(req.body?.x)
 const explicitY = parseOptionalNumber(req.body?.y)
 const boundedX = explicitX === undefined ? undefined : clampPercent(explicitX)
 const boundedY = explicitY === undefined ? undefined : clampPercent(explicitY)
+const hasExplicitTuple = Array.isArray(req.body?.sizes)
+
+if (!hasExplicitTuple && boundedX === undefined && boundedY === undefined) {
+  return res.status(400).json(fail('x or y required when sizes[] is not provided'))
+}
 
 // 3) Normalize missing axis:
 //    - preserve existing axis when available
@@ -272,6 +280,13 @@ Expected: FAIL before implementation.
 
 - [ ] **Step 5: Add `capabilities.uiScreenshotV1` to shared hello schema**
 
+```ts
+capabilities: z.object({
+  sessionsPatchV1: z.boolean().optional(),
+  uiScreenshotV1: z.boolean().optional(),
+}).optional()
+```
+
 - [ ] **Step 6: Send `uiScreenshotV1: true` from browser WS client hello**
 
 - [ ] **Step 7: Track screenshot capability in WS server client state and target selection**
@@ -287,6 +302,11 @@ function createScreenshotError(code: ScreenshotErrorCode, message: string): Erro
 
 // Add this field to the existing ClientState type in ws-handler.ts.
 // Do not replace the full type.
+type ClientState = {
+  // ...existing fields
+  supportsUiScreenshotV1: boolean
+}
+
 state.supportsUiScreenshotV1 = !!m.capabilities?.uiScreenshotV1
 
 private findTargetUiSocket(
@@ -327,6 +347,7 @@ if (code === 'SCREENSHOT_TIMEOUT') {
 if (code === 'SCREENSHOT_CONNECTION_CLOSED') {
   return res.status(503).json(fail('UI connection closed before screenshot response; ensure a browser UI tab is connected and retry.'))
 }
+// Keep existing generic 500 fallback for unknown/untyped errors.
 ```
 
 - [ ] **Step 9: Re-run targeted tests**
@@ -367,9 +388,9 @@ Run in terminal A:
 - `PORT=3344 npm run dev:server`
 
 Run in terminal B:
-- `FRESHELL_URL=http://127.0.0.1:3344 FRESHELL_TOKEN=<token> node node_modules/tsx/dist/cli.mjs server/cli/index.ts send-keys <paneId> C-U`
-- `FRESHELL_URL=http://127.0.0.1:3344 FRESHELL_TOKEN=<token> node node_modules/tsx/dist/cli.mjs server/cli/index.ts resize-pane -t <paneId> --y 33`
-- `FRESHELL_URL=http://127.0.0.1:3344 FRESHELL_TOKEN=<token> node node_modules/tsx/dist/cli.mjs server/cli/index.ts screenshot-view --name manual-no-ui-check`
+- `FRESHELL_URL=http://127.0.0.1:3344 FRESHELL_TOKEN=<token> npx tsx server/cli/index.ts send-keys <paneId> C-U`
+- `FRESHELL_URL=http://127.0.0.1:3344 FRESHELL_TOKEN=<token> npx tsx server/cli/index.ts resize-pane -t <paneId> --y 33`
+- `FRESHELL_URL=http://127.0.0.1:3344 FRESHELL_TOKEN=<token> npx tsx server/cli/index.ts screenshot-view --name manual-no-ui-check`
 
 Expected:
 - `send-keys C-U` clears current shell line (no literal `C-U` in pane).
