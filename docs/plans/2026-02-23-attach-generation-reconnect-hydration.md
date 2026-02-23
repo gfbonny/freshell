@@ -41,6 +41,7 @@
 Add a new test in `test/unit/server/ws-handler-backpressure.test.ts` under the existing `describe('TerminalStreamBroker catastrophic bufferedAmount handling', ...)` block so you reuse `FakeBrokerRegistry` + fake-timer setup.
 The test should directly exercise `TerminalStreamBroker.attach` with a request ID.
 If the surrounding describe block does not already use fake timers, wrap this test with `vi.useFakeTimers()` / `vi.useRealTimers()` because it depends on `vi.advanceTimersByTime(5)`:
+`FakeBrokerRegistry.attach(terminalId)` can remain unchanged; JavaScript ignores the extra args passed by broker (`ws`, `options`) in this test double.
 
 ```ts
 it('echoes attachRequestId on attach.ready, output, and output.gap for a client attachment', async () => {
@@ -238,6 +239,7 @@ git commit -m "feat(terminal-stream): tag attach replay/output payloads with att
 Add a test proving reattach to same terminal/socket replaces the active generation and does not re-flush stale queued frames (duplicate delivery bug):
 
 Place this test in the same fake-timer broker describe block used in Task 1 (`TerminalStreamBroker catastrophic bufferedAmount handling`) because it also uses `vi.advanceTimersByTime(5)`.
+Use `sinceSeq: 1` on the second attach so replay ring behavior does not re-introduce `old-frame` and mask the stale-queue bug.
 
 ```ts
 it('superseding attach on same socket clears stale queued frames and avoids duplicate old-frame delivery', async () => {
@@ -249,7 +251,7 @@ it('superseding attach on same socket clears stale queued frames and avoids dupl
   await broker.attach(ws as any, 'term-supersede', 0, 'attach-old')
   registry.emit('terminal.output.raw', { terminalId: 'term-supersede', data: 'old-frame', at: Date.now() })
 
-  await broker.attach(ws as any, 'term-supersede', 0, 'attach-new')
+  await broker.attach(ws as any, 'term-supersede', 1, 'attach-new')
   registry.emit('terminal.output.raw', { terminalId: 'term-supersede', data: 'new-frame', at: Date.now() })
   vi.advanceTimersByTime(5)
 
@@ -257,9 +259,8 @@ it('superseding attach on same socket clears stale queued frames and avoids dupl
     .map(([raw]) => (typeof raw === 'string' ? JSON.parse(raw) : raw))
     .filter((m) => m?.type === 'terminal.output')
 
-  expect(outputs.some((m) => m.data.includes('new-frame') && m.attachRequestId === 'attach-new')).toBe(true)
-  expect(outputs.filter((m) => String(m.data).includes('old-frame'))).toHaveLength(1)
-  expect(outputs.some((m) => String(m.data).includes('old-frame') && m.attachRequestId === 'attach-new')).toBe(true)
+  expect(outputs.some((m) => String(m.data).includes('new-frame') && m.attachRequestId === 'attach-new')).toBe(true)
+  expect(outputs.some((m) => String(m.data).includes('old-frame'))).toBe(false)
 
   broker.close()
 })
@@ -273,7 +274,7 @@ Run:
 npm run test -- test/unit/server/ws-handler-backpressure.test.ts -t "superseding attach"
 ```
 
-Expected: FAIL before the fix because stale queued `old-frame` is delivered a second time after superseding attach.
+Expected: FAIL before the fix because stale queued `old-frame` is still delivered after superseding attach even though the second attach resumes from `sinceSeq: 1`.
 
 **Step 3: Implement queue reset support and call it on attach start**
 
@@ -624,7 +625,6 @@ const suppressHydrationReplayMiss =
   msg.reason === 'replay_window_exceeded'
   && currentAttach?.terminalId === msg.terminalId
   && currentAttach.intent === 'viewport_hydrate'
-  && awaitingViewportHydrationRef.current
 
 if (!suppressHydrationReplayMiss) {
   const reason = msg.reason === 'replay_window_exceeded'
