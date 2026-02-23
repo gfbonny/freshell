@@ -2050,6 +2050,33 @@ describe('TerminalView lifecycle updates', () => {
       }))
     })
 
+    it('suppresses replay_window_exceeded banner for bootstrap keepalive attach generation (sinceSeq=0)', async () => {
+      const { terminalId, term } = await renderTerminalHarness({
+        status: 'running',
+        terminalId: 'term-bootstrap-gap',
+        hidden: true,
+        clearSends: false,
+      })
+
+      const attach = wsMocks.send.mock.calls
+        .map(([msg]) => msg)
+        .find((msg) => msg?.type === 'terminal.attach' && msg?.terminalId === terminalId)
+      expect(attach?.sinceSeq).toBe(0)
+      expect(attach?.attachRequestId).toBeTruthy()
+
+      term.writeln.mockClear()
+      messageHandler!({
+        type: 'terminal.output.gap',
+        terminalId,
+        fromSeq: 1,
+        toSeq: 402944,
+        reason: 'replay_window_exceeded',
+        attachRequestId: attach!.attachRequestId,
+      } as any)
+
+      expect(term.writeln).not.toHaveBeenCalled()
+    })
+
     it('renders terminal.output.gap marker and advances sinceSeq for subsequent attach', async () => {
       const { terminalId, term } = await renderTerminalHarness({ status: 'running', terminalId: 'term-v2-gap' })
 

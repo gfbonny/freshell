@@ -233,6 +233,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     requestId: string
     intent: AttachIntent
     terminalId: string
+    sinceSeq: number
   } | null>(null)
   const needsViewportHydrationRef = useRef(true)
   const pendingDeferredHydrationRef = useRef(false)
@@ -1141,6 +1142,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       requestId: attachRequestId,
       intent,
       terminalId: tid,
+      sinceSeq,
     }
 
     ws.send({
@@ -1347,12 +1349,12 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           }
 
           const currentAttach = currentAttachRef.current
-          const suppressHydrationReplayMiss =
+          const suppressReplayWindowBanner =
             msg.reason === 'replay_window_exceeded'
             && currentAttach?.terminalId === msg.terminalId
-            && currentAttach.intent === 'viewport_hydrate'
+            && (currentAttach.intent === 'viewport_hydrate' || currentAttach.sinceSeq === 0)
 
-          if (!suppressHydrationReplayMiss) {
+          if (!suppressReplayWindowBanner) {
             const reason = msg.reason === 'replay_window_exceeded'
               ? 'reconnect window exceeded'
               : 'slow link backlog'
