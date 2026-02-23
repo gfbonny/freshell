@@ -207,7 +207,7 @@ describe('agent cli screenshot smoke', () => {
       const literalSend = await runCliJson<{ status: string }>(server.url, [
         'send-keys',
         terminalPaneId,
-        '--literal=true',
+        '-l',
         `echo ${termCanary}`,
       ])
       expect(literalSend.status).toBe('ok')
