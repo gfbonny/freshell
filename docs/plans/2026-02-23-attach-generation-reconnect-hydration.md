@@ -4,7 +4,7 @@
 
 **Goal:** Eliminate stale attach/replay races and stop noisy `reconnect window exceeded` warnings during visible refresh hydration while preserving forward-only sequence correctness.
 
-**Architecture:** Add an `attachRequestId` to each `terminal.attach` request and have the server echo that ID on `terminal.attach.ready`, `terminal.output`, and `terminal.output.gap` for that attachment. On the client, treat `attachRequestId` as the attach generation token and drop stale messages from older generations, scoped per terminal ID so one terminal's attach generation cannot suppress another terminal's messages. Because `terminal.created` auto-attach currently does not originate from `attachTerminal`, explicitly clear client attach-generation state in the `terminal.created` handler so untagged create-path replay/output is accepted. Keep gap sequence advancement behavior, but suppress the hydration-only replay miss banner (`replay_window_exceeded`) for `viewport_hydrate` attaches.
+**Architecture:** Add an `attachRequestId` to each `terminal.attach` request and have the server echo that ID on `terminal.attach.ready`, `terminal.output`, and `terminal.output.gap` for that attachment. On the client, treat `attachRequestId` as the attach generation token and drop stale tagged messages from older generations. For safety, if a same-terminal stream message arrives without `attachRequestId`, accept it (and log in debug) rather than silently dropping data. Because `terminal.created` auto-attach currently does not originate from `attachTerminal`, explicitly clear client attach-generation state in the `terminal.created` handler so untagged create-path replay/output is accepted. Keep gap sequence advancement behavior, but suppress the hydration-only replay miss banner (`replay_window_exceeded`) for `viewport_hydrate` attaches.
 
 **Tech Stack:** React 18 + Redux Toolkit + xterm.js, Node.js + ws, Zod shared protocol types, Vitest (unit + server integration + e2e-style client tests).
 
@@ -335,6 +335,7 @@ Add tests that verify:
 2. Messages from an older attach generation are ignored.
 3. Existing exact-match `terminal.attach` assertions are updated for the new field.
 4. `terminal.created` auto-attach messages (which may not carry `attachRequestId`) are still accepted after a prior attach generation existed.
+5. Same-terminal untagged output messages are accepted (non-dropping fallback) so missing server tags cannot silently hide output.
 
 Example test skeleton:
 
@@ -379,9 +380,18 @@ it('drops stale terminal.output from an older attachRequestId generation', async
     attachRequestId: secondAttach!.attachRequestId,
   } as any)
 
+  messageHandler!({
+    type: 'terminal.output',
+    terminalId,
+    seqStart: 3,
+    seqEnd: 3,
+    data: 'UNTAGGED',
+  } as any)
+
   const writes = term.write.mock.calls.map(([d]) => String(d)).join('')
   expect(writes).toContain('FRESH')
   expect(writes).not.toContain('STALE')
+  expect(writes).toContain('UNTAGGED')
 })
 ```
 
@@ -466,15 +476,17 @@ const currentAttachRef = useRef<{
   terminalId: string
 } | null>(null)
 
-const isCurrentAttachMessage = (msg: { terminalId?: string; attachRequestId?: string }) => {
+const isCurrentAttachMessage = (msg: { attachRequestId?: string }) => {
   const current = currentAttachRef.current
   if (!current) return true
-  if (msg.terminalId && msg.terminalId !== current.terminalId) return true
   if (!msg.attachRequestId) {
-    // Contract: same-terminal stream messages must carry attachRequestId once
-    // attach generation filtering is active (except immediately after terminal.created
-    // where currentAttachRef is cleared).
-    return false
+    // Fallback safety: do not silently drop output if any server path omits
+    // attachRequestId. Keep this log at debug level to aid detection.
+    if (debugRef.current) log.debug('Accepting untagged same-terminal stream message', {
+      paneId: paneIdRef.current,
+      currentAttachRequestId: current.requestId,
+    })
+    return true
   }
   return msg.attachRequestId === current.requestId
 }
@@ -497,6 +509,7 @@ ws.send({
 In each message branch (`terminal.attach.ready`, `terminal.output`, `terminal.output.gap`), ignore stale generation messages early:
 
 ```ts
+// Important: call this only inside branches that already check msg.terminalId === tid.
 if (!isCurrentAttachMessage(msg)) {
   if (debugRef.current) log.debug('Ignoring stale attach generation message', {
     paneId: paneIdRef.current,
@@ -577,6 +590,15 @@ it('suppresses replay_window_exceeded banner during viewport_hydrate attach gene
   } as any)
 
   expect(term.writeln).not.toHaveBeenCalled()
+
+  // Ensure correctness path still advances sequence even when the banner is suppressed.
+  wsMocks.send.mockClear()
+  reconnectHandler?.()
+  expect(wsMocks.send).toHaveBeenCalledWith(expect.objectContaining({
+    type: 'terminal.attach',
+    terminalId,
+    sinceSeq: 50,
+  }))
 })
 ```
 
