@@ -4,7 +4,7 @@
 
 **Goal:** Fix three operator-facing tmux-ergonomics bugs together: control-key translation in `send-keys`, single-axis `resize-pane` semantics, and screenshot API availability/timeouts when no capture-capable UI is present.
 
-**Architecture:** Keep behavior changes at protocol/command boundaries so existing UI state shape remains stable. Add explicit WebSocket screenshot capability negotiation and route-level error mapping so screenshot failures are immediate and actionable instead of timing out. For resize semantics, preserve unspecified split axis from current layout state (or derive safe default) so single-axis updates do what operators expect.
+**Architecture:** Keep behavior changes at protocol/command boundaries so existing UI state shape remains stable. Add explicit WebSocket screenshot capability negotiation and route-level error mapping so screenshot failures are immediate and actionable instead of timing out. For resize semantics, normalize single-axis and tuple inputs into deterministic 100-sum split percentages so automation has predictable outcomes.
 
 **Tech Stack:** TypeScript, Node/Express, WebSocket (`ws`), React WS client handshake, Vitest + supertest + e2e CLI tests.
 
@@ -55,7 +55,7 @@ Expected: FAIL on missing `C-u`/generic ctrl mappings.
 - Modify: `server/cli/keys.ts`
 
 ```ts
-function translateCtrlChord(token: string): string | undefined {
+function translateCtrlLetterChord(token: string): string | undefined {
   const m = /^C-([A-Z])$/.exec(token)
   if (!m) return undefined
   return String.fromCharCode(m[1].charCodeAt(0) - 64)
@@ -66,7 +66,7 @@ export function translateKeys(keys: string[]) {
     const upper = key.toUpperCase()
     const mapped = KEYMAP[upper]
     if (mapped) return mapped
-    return translateCtrlChord(upper) ?? key
+    return translateCtrlLetterChord(upper) ?? key
   }).join('')
 }
 ```
@@ -93,14 +93,19 @@ git commit -m "fix(cli): translate common ctrl chords for send-keys"
 - [ ] **Step 1: Write failing tests**
 
 ```ts
-it('preserves existing x when only y is provided', async () => {
+it('normalizes missing axis to keep split totals at 100 when only y is provided', async () => {
   // setup split sizes [70, 30], call POST /api/panes/<pane>/resize { y: 33 }
-  // expect resize to apply [70, 33]
+  // expect resize to apply [67, 33]
 })
 
 it('derives missing axis from complement when existing sizes unavailable', async () => {
   // mock store without getSplitSizes, call with { y: 33 }
   // expect resizePane called with [67, 33]
+})
+
+it('keeps explicit sizes[] path and normalizes tuple totals to 100', async () => {
+  // call POST /api/panes/<split-or-pane>/resize with { sizes: [80, 30] }
+  // expect resizePane called with normalized [73, 27] (or equivalent normalized pair summing to 100)
 })
 ```
 
@@ -109,7 +114,7 @@ it('derives missing axis from complement when existing sizes unavailable', async
 Run: `npx vitest run test/server/agent-resize-pane.test.ts --config vitest.server.config.ts`
 Expected: FAIL (current behavior injects default `50`).
 
-### Task 3: Implement safe single-axis normalization/preservation
+### Task 3: Implement safe single-axis normalization
 
 **Files:**
 - Modify: `server/agent-api/router.ts`
@@ -135,6 +140,20 @@ const parseOptionalNumber = (value: unknown): number | undefined => {
 }
 
 const clampPercent = (value: number) => Math.min(99, Math.max(1, value))
+const normalizePairToHundred = (a: number, b: number): [number, number] => {
+  const left = clampPercent(a)
+  const right = clampPercent(b)
+  const total = left + right
+  if (total <= 0) return [50, 50]
+  const normalizedLeft = clampPercent(Math.round((left / total) * 100))
+  return [normalizedLeft, 100 - normalizedLeft]
+}
+
+type ResizeLayoutStore = {
+  getSplitSizes?: (tabId: string | undefined, splitId: string) => [number, number] | undefined
+  resolveTarget?: (target: string) => { paneId?: string }
+  findSplitForPane?: (paneId: string) => { tabId: string; splitId: string } | undefined
+}
 
 type ResolvedResizeTarget = {
   tabId?: string
@@ -142,7 +161,7 @@ type ResolvedResizeTarget = {
   message?: string
 }
 
-function resolveResizeTarget(layoutStore: any, rawTarget: string, requestedTabId?: string): ResolvedResizeTarget {
+function resolveResizeTarget(layoutStore: ResizeLayoutStore, rawTarget: string, requestedTabId?: string): ResolvedResizeTarget {
   const directSizes = layoutStore.getSplitSizes?.(requestedTabId, rawTarget)
   if (Array.isArray(directSizes)) {
     return { tabId: requestedTabId, splitId: rawTarget }
@@ -166,7 +185,7 @@ function resolveResizeTarget(layoutStore: any, rawTarget: string, requestedTabId
 //    b) if not found, resolve target -> pane -> parent split
 const resolved = resolveResizeTarget(layoutStore, rawTarget, req.body?.tabId)
 // resolved => { tabId?: string, splitId: string, message?: string }
-if (resolved.message === 'split not found') return res.json(approx(undefined, 'split not found'))
+if (resolved.message === 'split not found') return res.status(404).json(fail('split not found'))
 
 // 2) Read current split sizes from the resolved split id (not raw target).
 const current = layoutStore.getSplitSizes?.(resolved.tabId, resolved.splitId)
@@ -175,27 +194,29 @@ const explicitY = parseOptionalNumber(req.body?.y)
 const boundedX = explicitX === undefined ? undefined : clampPercent(explicitX)
 const boundedY = explicitY === undefined ? undefined : clampPercent(explicitY)
 const hasExplicitTuple = Array.isArray(req.body?.sizes)
-const explicitSizes = hasExplicitTuple
-  ? [parseOptionalNumber(req.body.sizes[0]), parseOptionalNumber(req.body.sizes[1])] as const
+const explicitTuple = hasExplicitTuple
+  ? [parseOptionalNumber(req.body.sizes[0]), parseOptionalNumber(req.body.sizes[1])]
   : undefined
 
-if (!hasExplicitTuple && boundedX === undefined && boundedY === undefined) {
-  return res.status(400).json(fail('x or y required when sizes[] is not provided'))
+if (hasExplicitTuple && req.body.sizes.length !== 2) {
+  return res.status(400).json(fail('sizes must contain exactly two values'))
 }
 
 // 3) Normalize missing axis:
-//    - preserve existing axis when available
-//    - otherwise derive complement to 100 when only one axis provided
-//    - final fallback remains 50/50
-const nextX = boundedX
-  ?? (boundedY !== undefined ? (current?.[0] ?? (100 - boundedY)) : (current?.[0] ?? 50))
-const nextY = boundedY
-  ?? (boundedX !== undefined ? (current?.[1] ?? (100 - boundedX)) : (current?.[1] ?? 50))
-
-const normalizedSizes: [number, number] =
-  hasExplicitTuple
-    ? [clampPercent(explicitSizes?.[0] ?? current?.[0] ?? 50), clampPercent(explicitSizes?.[1] ?? current?.[1] ?? 50)]
-    : [nextX, nextY]
+//    - always keep pair sum normalized to 100
+//    - preserve existing API compatibility when no x/y/sizes are provided
+const normalizedSizes: [number, number] = hasExplicitTuple
+  ? normalizePairToHundred(
+      explicitTuple?.[0] ?? current?.[0] ?? 50,
+      explicitTuple?.[1] ?? current?.[1] ?? 50,
+    )
+  : boundedX !== undefined && boundedY !== undefined
+    ? normalizePairToHundred(boundedX, boundedY)
+    : boundedX !== undefined
+      ? [boundedX, 100 - boundedX]
+      : boundedY !== undefined
+        ? [100 - boundedY, boundedY]
+        : normalizePairToHundred(current?.[0] ?? 50, current?.[1] ?? 50)
 const result = layoutStore.resizePane(resolved.tabId, resolved.splitId, normalizedSizes)
 ```
 
@@ -205,10 +226,9 @@ const result = layoutStore.resizePane(resolved.tabId, resolved.splitId, normaliz
 - Modify: `test/e2e/agent-cli-flow.test.ts`
 
 ```ts
-it('resize-pane preserves unspecified axis', async () => {
-  // mock store returns current sizes [72, 28]
+it('resize-pane normalizes single-axis updates to a 100-sum split', async () => {
   // run CLI resize-pane -t pane_1 --y 33
-  // expect store.resizePane(..., [72, 33])
+  // expect store.resizePane(..., [67, 33])
 })
 ```
 
@@ -223,7 +243,7 @@ Expected: PASS.
 
 ```bash
 git add server/agent-api/router.ts server/agent-api/layout-store.ts test/server/agent-resize-pane.test.ts test/e2e/agent-cli-flow.test.ts
-git commit -m "fix(api): make resize-pane single-axis updates preserve other axis"
+git commit -m "fix(api): normalize resize-pane single-axis and tuple semantics"
 ```
 
 ## Chunk 3: Issue #6 screenshot API availability and timeout ergonomics
@@ -405,7 +425,7 @@ Run in terminal B:
 
 Expected:
 - `send-keys C-U` clears current shell line (no literal `C-U` in pane).
-- single-axis resize preserves/derives other axis predictably (no implicit `50` reset).
+- single-axis resize yields deterministic 100-sum values (no implicit `50` reset surprises).
 - screenshot command returns immediate clear availability error if no capture-capable UI tab.
 
 - [ ] **Step 4: Run independent review on final code commit (@fresheyes)**
