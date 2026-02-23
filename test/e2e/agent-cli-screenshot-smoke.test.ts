@@ -206,6 +206,7 @@ describe('agent cli screenshot smoke', () => {
 
       const literalSend = await runCliJson<{ status: string }>(server.url, [
         'send-keys',
+        '-t',
         terminalPaneId,
         '-l',
         `echo ${termCanary}`,
