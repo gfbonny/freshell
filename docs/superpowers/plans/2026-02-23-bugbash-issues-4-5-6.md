@@ -184,7 +184,10 @@ function resolveResizeTarget(layoutStore: ResizeLayoutStore, rawTarget: string, 
 //    b) if not found, resolve target -> pane -> parent split
 const resolved = resolveResizeTarget(layoutStore, rawTarget, req.body?.tabId)
 // resolved => { tabId?: string, splitId: string, message?: string }
-if (resolved.message === 'split not found') return res.json(approx(undefined, 'split not found'))
+if (resolved.message === 'split not found') {
+  // Keep legacy response envelope compatibility (`status: ok`) for callers.
+  return res.json(ok({ message: 'split not found' }, 'split not found'))
+}
 
 // 2) Read current split sizes from the resolved split id (not raw target).
 const current = layoutStore.getSplitSizes?.(resolved.tabId, resolved.splitId)
@@ -369,6 +372,7 @@ const timeout = setTimeout(() => {
 pending.reject(createScreenshotError('SCREENSHOT_CONNECTION_CLOSED', 'UI connection closed before screenshot response'))
 // Apply the same code in ws-handler connection-close cleanup paths
 // (both socket close and server close loops), not only inside requestUiScreenshot().
+pending.reject(createScreenshotError('SCREENSHOT_CONNECTION_CLOSED', 'WebSocket server closed before screenshot response'))
 ```
 
 - [ ] **Step 8: Return clearer status codes in screenshot API route**
