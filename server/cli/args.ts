@@ -23,14 +23,25 @@ const FLAGS_ALLOWING_DASH_PREFIX_VALUES = new Set([
   'target',
 ])
 
+const COMMAND_FLAG_KEYS_ALLOWING_DASH_PREFIX_VALUES: Partial<Record<string, Set<string>>> = {
+  // attach uses -p for pane target; allow dash-prefixed pane ids like "-abc123".
+  attach: new Set(['p']),
+}
+
 function isNegativeNumericToken(token: string): boolean {
   return /^-\d+(?:\.\d+)?(?:[eE][-+]?\d+)?$/.test(token)
 }
 
-function canUseAsFlagValue(token: string | undefined, key: string): token is string {
+function allowsDashPrefixedValue(command: string | undefined, key: string): boolean {
+  if (FLAGS_ALLOWING_DASH_PREFIX_VALUES.has(key)) return true
+  if (!command) return false
+  return COMMAND_FLAG_KEYS_ALLOWING_DASH_PREFIX_VALUES[command]?.has(key) ?? false
+}
+
+function canUseAsFlagValue(token: string | undefined, key: string, command: string | undefined): token is string {
   if (!token) return false
   if (token === '--') return false
-  return !token.startsWith('-') || isNegativeNumericToken(token) || FLAGS_ALLOWING_DASH_PREFIX_VALUES.has(key)
+  return !token.startsWith('-') || isNegativeNumericToken(token) || allowsDashPrefixedValue(command, key)
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {
@@ -64,7 +75,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       }
       const key = raw
       const next = argv[i + 1]
-      if (canUseAsFlagValue(next, key)) {
+      if (canUseAsFlagValue(next, key, command)) {
         flags[key] = next
         i += 2
         continue
@@ -82,7 +93,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
         continue
       }
       const next = argv[i + 1]
-      if (canUseAsFlagValue(next, key)) {
+      if (canUseAsFlagValue(next, key, command)) {
         flags[key] = next
         i += 2
         continue

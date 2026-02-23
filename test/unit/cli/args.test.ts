@@ -30,3 +30,10 @@ it('parses dash-prefixed pane ids for target flags', () => {
   expect(parsed.flags.t).toBe('-FFH7C5JAoRTjK8Qu8RXR')
   expect(parsed.flags.editor).toBe('/tmp/sample.txt')
 })
+
+it('parses dash-prefixed pane ids for attach short pane flag', () => {
+  const parsed = parseArgs(['attach', '-t', 'term_1', '-p', '-FFH7C5JAoRTjK8Qu8RXR'])
+  expect(parsed.command).toBe('attach')
+  expect(parsed.flags.t).toBe('term_1')
+  expect(parsed.flags.p).toBe('-FFH7C5JAoRTjK8Qu8RXR')
+})
