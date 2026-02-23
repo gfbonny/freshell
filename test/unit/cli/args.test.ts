@@ -37,3 +37,10 @@ it('parses dash-prefixed pane ids for attach short pane flag', () => {
   expect(parsed.flags.t).toBe('term_1')
   expect(parsed.flags.p).toBe('-FFH7C5JAoRTjK8Qu8RXR')
 })
+
+it('does not treat dash-prefixed values as -p arguments outside attach', () => {
+  const parsed = parseArgs(['display', '-p', '-ABC123'])
+  expect(parsed.command).toBe('display')
+  expect(parsed.flags.p).toBe(true)
+  expect(parsed.flags.ABC123).toBe(true)
+})
