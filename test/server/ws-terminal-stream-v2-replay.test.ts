@@ -304,8 +304,9 @@ describe('terminal stream v2 replay', () => {
       ws2,
       (msg) => msg.type === 'terminal.output' && msg.terminalId === terminalId && msg.seqEnd >= 4,
     )
+    const attachRequestId = 'attach-delta-1'
 
-    ws2.send(JSON.stringify({ type: 'terminal.attach', terminalId, sinceSeq: 2 }))
+    ws2.send(JSON.stringify({ type: 'terminal.attach', terminalId, sinceSeq: 2, attachRequestId }))
 
     const ready = await readyPromise
     await replayPromise
@@ -314,10 +315,12 @@ describe('terminal stream v2 replay', () => {
 
     expect(ready.replayFromSeq).toBe(3)
     expect(ready.replayToSeq).toBe(4)
+    expect(ready.attachRequestId).toBe(attachRequestId)
     expect(replayed.length).toBe(2)
     expect(replayed[0]?.seqStart).toBe(3)
     expect(replayed[1]?.seqEnd).toBe(4)
     expect(replayed.every((frame) => frame.seqStart > 2)).toBe(true)
+    expect(replayed.every((frame) => frame.attachRequestId === attachRequestId)).toBe(true)
 
     await close2()
   })
@@ -429,6 +432,21 @@ describe('terminal stream v2 replay', () => {
   it('emits terminal.output.gap under queue overflow and keeps streaming without routine 4008 close', async () => {
     const { ws, close } = await createAuthenticatedConnection(port)
     const { terminalId } = await createTerminal(ws, 'stream-gap-create')
+    const attachRequestId = 'attach-overflow-1'
+
+    ws.send(JSON.stringify({
+      type: 'terminal.attach',
+      terminalId,
+      sinceSeq: 0,
+      attachRequestId,
+    }))
+    await waitForMessage(
+      ws,
+      (msg) =>
+        msg.type === 'terminal.attach.ready'
+        && msg.terminalId === terminalId
+        && msg.attachRequestId === attachRequestId,
+    )
 
     let closeCode: number | undefined
     ws.on('close', (code) => {
@@ -437,11 +455,13 @@ describe('terminal stream v2 replay', () => {
 
     let sawGap = false
     let sawTail = false
+    let gapAttachRequestId: string | undefined
     const completion = new Promise<void>((resolve) => {
       const listener = (data: WebSocket.Data) => {
         const msg = JSON.parse(data.toString())
         if (msg.type === 'terminal.output.gap' && msg.terminalId === terminalId) {
           sawGap = true
+          gapAttachRequestId = msg.attachRequestId
         }
         if (msg.type === 'terminal.output' && msg.terminalId === terminalId && String(msg.data).includes('TAIL-MARKER')) {
           sawTail = true
@@ -466,6 +486,7 @@ describe('terminal stream v2 replay', () => {
 
     expect(sawGap).toBe(true)
     expect(sawTail).toBe(true)
+    expect(gapAttachRequestId).toBe(attachRequestId)
     expect(closeCode).not.toBe(4008)
 
     await close()

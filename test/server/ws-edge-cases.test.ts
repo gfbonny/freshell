@@ -772,6 +772,7 @@ describe('WebSocket edge cases', () => {
         await new Promise((resolve) => setTimeout(resolve, 25))
 
         const { ws: ws2, close: close2 } = await createAuthenticatedConnection()
+        const attachRequestId = 'attach-int-1'
         const orderedEvents: Array<{ type: string; data?: string }> = []
         const eventListener = (data: WebSocket.Data) => {
           const msg = JSON.parse(data.toString())
@@ -791,7 +792,7 @@ describe('WebSocket edge cases', () => {
           (m) => m.type === 'terminal.output.gap' && m.terminalId === terminalId && m.reason === 'replay_window_exceeded',
           (m) => m.type === 'terminal.output' && m.terminalId === terminalId,
         ], 5000)
-        ws2.send(JSON.stringify({ type: 'terminal.attach', terminalId, sinceSeq: 1 }))
+        ws2.send(JSON.stringify({ type: 'terminal.attach', terminalId, sinceSeq: 1, attachRequestId }))
         const [ready, gap, replayTail] = await pending
 
         registry.simulateOutput(terminalId, 'live-after-gap-tail')
@@ -805,6 +806,9 @@ describe('WebSocket edge cases', () => {
         expect(gap.fromSeq).toBe(2)
         expect(gap.toSeq).toBe(ready.replayFromSeq - 1)
         expect(gap.reason).toBe('replay_window_exceeded')
+        expect(ready.attachRequestId).toBe(attachRequestId)
+        expect(gap.attachRequestId).toBe(attachRequestId)
+        expect(replayTail.attachRequestId).toBe(attachRequestId)
         expect(replayTail.seqStart).toBeGreaterThanOrEqual(ready.replayFromSeq)
         expect(replayTail.seqEnd).toBeLessThanOrEqual(ready.replayToSeq)
         expect(live.seqStart).toBeGreaterThan(ready.replayToSeq)
