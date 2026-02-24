@@ -1,6 +1,6 @@
 ---
 name: freshell-automation-tmux-style
-description: Use when operating Freshell itself to drive tmux-style tab/pane automation, editor/browser panes, screenshots, and multi-pane coding workflows from the CLI.
+description: "Use when interacting with Freshell panes, panels, or tabs from the CLI for tmux-style automation and multi-pane workflows, outside external-browser automation tasks."
 ---
 
 # Freshell tmux-style automation
