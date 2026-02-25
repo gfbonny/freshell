@@ -555,7 +555,7 @@ export function createAgentApiRouter({ layoutStore, registry, wsHandler }: { lay
     if (hasExplicitTuple && (explicitTuple?.[0] === undefined || explicitTuple?.[1] === undefined)) {
       return res.status(400).json(fail('sizes values must be numeric'))
     }
-    if (hasExplicitTuple && (!isValidPercent(explicitTuple[0] as number) || !isValidPercent(explicitTuple[1] as number))) {
+    if (hasExplicitTuple && (!isValidPercent(explicitTuple![0] as number) || !isValidPercent(explicitTuple![1] as number))) {
       return res.status(400).json(fail('sizes values must be within 1..99'))
     }
 
