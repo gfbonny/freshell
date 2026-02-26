@@ -104,6 +104,7 @@ const DEFAULT_DEBOUNCE_MS = 2_000
 const DEFAULT_THROTTLE_MS = 5_000
 const DEFAULT_FULL_SCAN_INTERVAL_MS = 10 * 60 * 1000 // 10 minutes
 const URGENT_REFRESH_MS = 300 // Fast refresh when a titleless session might have just gained content
+const URGENT_THROTTLE_MS = 1000 // Minimum spacing between urgent refreshes to cap worst-case frequency
 
 export class CodingCliSessionIndexer {
   private watcher: chokidar.FSWatcher | null = null
@@ -449,16 +450,18 @@ export class CodingCliSessionIndexer {
       // Re-check throttle at fire-time: an in-flight refresh may have completed
       // since scheduling, updating lastRefreshAt. Without this, a timer scheduled
       // during an in-flight refresh would fire too soon after it completes.
-      // Skip this check for urgent refreshes (titleless session gained content).
-      if (!urgent) {
-        const fireElapsed = Date.now() - this.lastRefreshAt
-        if (this.throttleMs > 0 && fireElapsed < this.throttleMs) {
-          this.refreshTimer = setTimeout(() => {
-            this.refreshTimer = null
-            this.refresh().catch((err) => logger.warn({ err }, 'Refresh failed'))
-          }, this.throttleMs - fireElapsed)
-          return
-        }
+      // Urgent refreshes use a shorter throttle floor to stay responsive while
+      // capping worst-case frequency for sessions that stay titleless under load.
+      const effectiveThrottle = urgent
+        ? (this.throttleMs > 0 ? Math.min(URGENT_THROTTLE_MS, this.throttleMs) : 0)
+        : this.throttleMs
+      const fireElapsed = Date.now() - this.lastRefreshAt
+      if (effectiveThrottle > 0 && fireElapsed < effectiveThrottle) {
+        this.refreshTimer = setTimeout(() => {
+          this.refreshTimer = null
+          this.refresh().catch((err) => logger.warn({ err }, 'Refresh failed'))
+        }, effectiveThrottle - fireElapsed)
+        return
       }
       this.refresh().catch((err) => logger.warn({ err }, 'Refresh failed'))
     }, delay)

@@ -1077,11 +1077,42 @@ describe('CodingCliSessionIndexer', () => {
       ;(indexer as any).markDirty(fileA)
       indexer.scheduleRefresh()
 
-      // Urgent refresh should fire quickly (within 500ms), not after the
-      // normal 2-5s debounce/throttle window
+      // Urgent refresh should fire within the urgent throttle window (~1s),
+      // not after the normal 2-5s debounce/throttle window
       await vi.waitFor(
         () => { expect(handler).toHaveBeenCalledTimes(1) },
-        { timeout: 1000, interval: 50 },
+        { timeout: 2000, interval: 50 },
+      )
+
+      indexer.stop()
+    })
+
+    it('does not throttle urgent refreshes when throttleMs is 0', async () => {
+      const fileA = path.join(tempDir, 'session-a.jsonl')
+      await fsp.writeFile(fileA, JSON.stringify({ cwd: '/project/a' }) + '\n')
+
+      const provider = makeProvider([fileA])
+      const indexer = new CodingCliSessionIndexer([provider], {
+        debounceMs: 50,
+        throttleMs: 0,
+        fullScanIntervalMs: 0,
+      })
+
+      await indexer.refresh()
+      expect(indexer.getProjects()[0].sessions[0].title).toBeUndefined()
+
+      const handler = vi.fn()
+      indexer.onUpdate(handler)
+
+      await fsp.writeFile(fileA, JSON.stringify({ cwd: '/project/a', title: 'Hello' }) + '\n')
+      ;(indexer as any).markDirty(fileA)
+      indexer.scheduleRefresh()
+
+      // With throttleMs: 0, urgent refresh should fire at the URGENT_REFRESH_MS
+      // delay (300ms) without any additional throttle
+      await vi.waitFor(
+        () => { expect(handler).toHaveBeenCalledTimes(1) },
+        { timeout: 800, interval: 50 },
       )
 
       indexer.stop()
