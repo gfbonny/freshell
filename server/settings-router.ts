@@ -169,7 +169,12 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
   })
 
   const handleSettingsPatch = async (req: any, res: any) => {
-    const parsed = SettingsPatchSchema.safeParse(req.body || {})
+    // Strip deprecated keys that may linger in persisted client state
+    const body = req.body || {}
+    if (body.sidebar && typeof body.sidebar === 'object') {
+      delete body.sidebar.ignoreCodexSubagentSessions
+    }
+    const parsed = SettingsPatchSchema.safeParse(body)
     if (!parsed.success) {
       return res.status(400).json({ error: 'Invalid request', details: parsed.error.issues })
     }
