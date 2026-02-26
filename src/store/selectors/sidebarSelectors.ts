@@ -147,11 +147,10 @@ function isExcludedByFirstUserMessage(
   mustStart: boolean,
 ): boolean {
   if (!firstUserMessage || exclusions.length === 0) return false
-  const normalizedMessage = firstUserMessage.toLowerCase()
   return exclusions.some((term) => (
     mustStart
-      ? normalizedMessage.startsWith(term)
-      : normalizedMessage.includes(term)
+      ? firstUserMessage.startsWith(term)
+      : firstUserMessage.includes(term)
   ))
 }
 
@@ -160,7 +159,7 @@ export function filterSessionItemsByVisibility(
   settings: VisibilitySettings,
 ): SidebarSessionItem[] {
   const exclusions = settings.excludeFirstChatSubstrings
-    .map((term) => term.trim().toLowerCase())
+    .map((term) => term.trim())
     .filter((term) => term.length > 0)
 
   return items.filter((item) => {

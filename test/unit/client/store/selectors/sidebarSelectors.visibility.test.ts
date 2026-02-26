@@ -136,7 +136,7 @@ describe('filterSessionItemsByVisibility', () => {
       expect(result.map((i) => i.id)).toEqual(['2'])
     })
 
-    it('matches exclusion substrings case-insensitively', () => {
+    it('does not match exclusion substrings with different case', () => {
       const items = [
         createSessionItem({ id: '1', firstUserMessage: '__AUTO__ generate report please' }),
         createSessionItem({ id: '2', firstUserMessage: 'normal prompt' }),
@@ -149,7 +149,7 @@ describe('filterSessionItemsByVisibility', () => {
         excludeFirstChatMustStart: false,
       })
 
-      expect(result.map((i) => i.id)).toEqual(['2'])
+      expect(result.map((i) => i.id)).toEqual(['1', '2'])
     })
 
     it('requires prefix match when excludeFirstChatMustStart is true', () => {
@@ -169,7 +169,7 @@ describe('filterSessionItemsByVisibility', () => {
       expect(result.map((i) => i.id)).toEqual(['2', '3'])
     })
 
-    it('applies prefix matching case-insensitively', () => {
+    it('does not match prefix with different case', () => {
       const items = [
         createSessionItem({ id: '1', firstUserMessage: '__AUTO__ generate report' }),
         createSessionItem({ id: '2', firstUserMessage: 'please run __AUTO__ helper' }),
@@ -182,7 +182,7 @@ describe('filterSessionItemsByVisibility', () => {
         excludeFirstChatMustStart: true,
       })
 
-      expect(result.map((i) => i.id)).toEqual(['2'])
+      expect(result.map((i) => i.id)).toEqual(['1', '2'])
     })
   })
 })
