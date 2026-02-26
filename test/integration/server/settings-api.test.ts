@@ -483,6 +483,17 @@ describe('Settings API Integration', () => {
       expect(res.body.error).toBe('Invalid request')
     })
 
+    it('accepts sidebar patch containing deprecated ignoreCodexSubagentSessions key', async () => {
+      const res = await request(app)
+        .patch('/api/settings')
+        .set('x-auth-token', TEST_AUTH_TOKEN)
+        .send({ sidebar: { width: 300, ignoreCodexSubagentSessions: true } })
+
+      expect(res.status).toBe(200)
+      expect(res.body.sidebar.width).toBe(300)
+      expect(res.body.sidebar).not.toHaveProperty('ignoreCodexSubagentSessions')
+    })
+
     it('rejects invalid sidebar sortMode enum', async () => {
       const res = await request(app)
         .patch('/api/settings')
