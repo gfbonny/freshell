@@ -136,6 +136,22 @@ describe('filterSessionItemsByVisibility', () => {
       expect(result.map((i) => i.id)).toEqual(['2'])
     })
 
+    it('matches exclusion substrings case-insensitively', () => {
+      const items = [
+        createSessionItem({ id: '1', firstUserMessage: '__AUTO__ generate report please' }),
+        createSessionItem({ id: '2', firstUserMessage: 'normal prompt' }),
+      ]
+
+      const result = filterSessionItemsByVisibility(items, {
+        showSubagents: true,
+        showNoninteractiveSessions: true,
+        excludeFirstChatSubstrings: ['__auto__'],
+        excludeFirstChatMustStart: false,
+      })
+
+      expect(result.map((i) => i.id)).toEqual(['2'])
+    })
+
     it('requires prefix match when excludeFirstChatMustStart is true', () => {
       const items = [
         createSessionItem({ id: '1', firstUserMessage: '__AUTO__ generate report' }),
@@ -151,6 +167,22 @@ describe('filterSessionItemsByVisibility', () => {
       })
 
       expect(result.map((i) => i.id)).toEqual(['2', '3'])
+    })
+
+    it('applies prefix matching case-insensitively', () => {
+      const items = [
+        createSessionItem({ id: '1', firstUserMessage: '__AUTO__ generate report' }),
+        createSessionItem({ id: '2', firstUserMessage: 'please run __AUTO__ helper' }),
+      ]
+
+      const result = filterSessionItemsByVisibility(items, {
+        showSubagents: true,
+        showNoninteractiveSessions: true,
+        excludeFirstChatSubstrings: ['__auto__'],
+        excludeFirstChatMustStart: true,
+      })
+
+      expect(result.map((i) => i.id)).toEqual(['2'])
     })
   })
 })

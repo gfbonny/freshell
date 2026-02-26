@@ -141,23 +141,32 @@ export interface VisibilitySettings {
   excludeFirstChatMustStart: boolean
 }
 
+function isExcludedByFirstUserMessage(
+  firstUserMessage: string | undefined,
+  exclusions: string[],
+  mustStart: boolean,
+): boolean {
+  if (!firstUserMessage || exclusions.length === 0) return false
+  const normalizedMessage = firstUserMessage.toLowerCase()
+  return exclusions.some((term) => (
+    mustStart
+      ? normalizedMessage.startsWith(term)
+      : normalizedMessage.includes(term)
+  ))
+}
+
 export function filterSessionItemsByVisibility(
   items: SidebarSessionItem[],
   settings: VisibilitySettings,
 ): SidebarSessionItem[] {
   const exclusions = settings.excludeFirstChatSubstrings
+    .map((term) => term.trim().toLowerCase())
+    .filter((term) => term.length > 0)
+
   return items.filter((item) => {
     if (!settings.showSubagents && item.isSubagent) return false
     if (!settings.showNoninteractiveSessions && item.isNonInteractive) return false
-    const firstUserMessage = item.firstUserMessage
-    if (firstUserMessage && exclusions.length > 0) {
-      const shouldHide = exclusions.some((term) =>
-        settings.excludeFirstChatMustStart
-          ? firstUserMessage.startsWith(term)
-          : firstUserMessage.includes(term)
-      )
-      if (shouldHide) return false
-    }
+    if (isExcludedByFirstUserMessage(item.firstUserMessage, exclusions, settings.excludeFirstChatMustStart)) return false
     return true
   })
 }
@@ -260,5 +269,20 @@ export const makeSelectSortedSessionItems = () =>
       })
       const filtered = filterSessionItems(visible, filter)
       return sortSessionItems(filtered, sortMode)
+    }
+  )
+
+export const makeSelectKnownSessionKeys = () =>
+  createSelector(
+    [selectProjects],
+    (projects) => {
+      const keys = new Set<string>()
+      for (const project of projects || []) {
+        for (const session of project.sessions || []) {
+          const provider = session.provider || 'claude'
+          keys.add(`${provider}:${session.sessionId}`)
+        }
+      }
+      return keys
     }
   )

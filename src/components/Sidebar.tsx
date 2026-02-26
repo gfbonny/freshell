@@ -11,7 +11,7 @@ import { getWsClient } from '@/lib/ws-client'
 import { searchSessions, type SearchResult } from '@/lib/api'
 import { getProviderLabel } from '@/lib/coding-cli-utils'
 import type { BackgroundTerminal, CodingCliProviderName } from '@/store/types'
-import { makeSelectSortedSessionItems, type SidebarSessionItem } from '@/store/selectors/sidebarSelectors'
+import { makeSelectKnownSessionKeys, makeSelectSortedSessionItems, type SidebarSessionItem } from '@/store/selectors/sidebarSelectors'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
 import { ProviderIcon } from '@/components/icons/provider-icons'
 import { getActiveSessionRefForTab } from '@/lib/session-utils'
@@ -80,6 +80,7 @@ export default function Sidebar({
     return `${ref.provider}:${ref.sessionId}`
   })
   const selectSortedItems = useMemo(() => makeSelectSortedSessionItems(), [])
+  const selectKnownSessionKeys = useMemo(() => makeSelectKnownSessionKeys(), [])
 
   const ws = useMemo(() => getWsClient(), [])
   const [terminals, setTerminals] = useState<BackgroundTerminal[]>([])
@@ -160,16 +161,7 @@ export default function Sidebar({
   // Build session list with selector for local filtering (title tier)
   const localFilteredItems = useAppSelector((state) => selectSortedItems(state, terminals, filter))
   const allItems = useAppSelector((state) => selectSortedItems(state, terminals, ''))
-  const knownSessionKeys = useAppSelector((state) => {
-    const keys = new Set<string>()
-    for (const project of state.sessions.projects || []) {
-      for (const session of project.sessions || []) {
-        const provider = session.provider || 'claude'
-        keys.add(`${provider}:${session.sessionId}`)
-      }
-    }
-    return keys
-  })
+  const knownSessionKeys = useAppSelector((state) => selectKnownSessionKeys(state))
   const itemsByKey = useMemo(() => {
     const map = new Map<string, SidebarSessionItem>()
     for (const item of allItems) {

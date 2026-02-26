@@ -172,6 +172,15 @@ export interface CodingCliSession {
   isNonInteractive?: boolean
 }
 
+export const FIRST_USER_MESSAGE_MAX_CHARS = 4000
+
+export function normalizeFirstUserMessage(content: string): string | undefined {
+  const trimmed = content.trim()
+  if (!trimmed) return undefined
+  if (trimmed.length <= FIRST_USER_MESSAGE_MAX_CHARS) return trimmed
+  return trimmed.slice(0, FIRST_USER_MESSAGE_MAX_CHARS)
+}
+
 export interface ProjectGroup {
   projectPath: string
   sessions: CodingCliSession[]

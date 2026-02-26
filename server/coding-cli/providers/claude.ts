@@ -5,7 +5,7 @@ import { extractTitleFromMessage } from '../../title-utils.js'
 import { isValidClaudeSessionId } from '../../claude-session-id.js'
 import { getClaudeHome } from '../../claude-home.js'
 import type { CodingCliProvider } from '../provider.js'
-import type { NormalizedEvent, ParsedSessionMeta, TokenSummary } from '../types.js'
+import { normalizeFirstUserMessage, type NormalizedEvent, type ParsedSessionMeta, type TokenSummary } from '../types.js'
 import { parseClaudeEvent, isMessageEvent, isResultEvent, isToolResultContent, isToolUseContent, isTextContent } from '../../claude-stream-types.js'
 import { looksLikePath, isSystemContext, extractFromIdeContext, resolveGitCheckoutRoot } from '../utils.js'
 
@@ -202,15 +202,6 @@ type ParseSessionOptions = {
   fallbackSessionId?: string
   compactThresholdTokens?: number
   contextTokens?: number
-}
-
-const FIRST_USER_MESSAGE_MAX_CHARS = 4000
-
-function normalizeFirstUserMessage(content: string): string | undefined {
-  const trimmed = content.trim()
-  if (!trimmed) return undefined
-  if (trimmed.length <= FIRST_USER_MESSAGE_MAX_CHARS) return trimmed
-  return trimmed.slice(0, FIRST_USER_MESSAGE_MAX_CHARS)
 }
 
 /** Parse session metadata from jsonl content (pure function for testing) */

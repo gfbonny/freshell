@@ -3,7 +3,7 @@ import os from 'os'
 import fsp from 'fs/promises'
 import { extractTitleFromMessage } from '../../title-utils.js'
 import type { CodingCliProvider } from '../provider.js'
-import type { NormalizedEvent, ParsedSessionMeta, TokenPayload, TokenSummary } from '../types.js'
+import { normalizeFirstUserMessage, type NormalizedEvent, type ParsedSessionMeta, type TokenPayload, type TokenSummary } from '../types.js'
 import { looksLikePath, isSystemContext, extractFromIdeContext, resolveGitRepoRoot } from '../utils.js'
 
 const CODEX_MAX_PLAUSIBLE_CONTEXT_TOKENS_WITHOUT_WINDOW = 5_000_000
@@ -12,7 +12,6 @@ const CODEX_MAX_PLAUSIBLE_CONTEXT_TOKENS_WITHOUT_WINDOW = 5_000_000
 // explicit auto-compact limit, approximate it by scaling from the effective window.
 const CODEX_AUTO_COMPACT_DEFAULT_PERCENT = 90
 const CODEX_EFFECTIVE_CONTEXT_WINDOW_DEFAULT_PERCENT = 95
-const FIRST_USER_MESSAGE_MAX_CHARS = 4000
 
 export function defaultCodexHome(): string {
   return process.env.CODEX_HOME || path.join(os.homedir(), '.codex')
@@ -39,13 +38,6 @@ function normalizeCompactPercent(numerator: number, denominator?: number): numbe
   if (!denominator || denominator <= 0) return undefined
   const ratio = Math.round((numerator / denominator) * 100)
   return Math.max(0, Math.min(100, ratio))
-}
-
-function normalizeFirstUserMessage(content: string): string | undefined {
-  const trimmed = content.trim()
-  if (!trimmed) return undefined
-  if (trimmed.length <= FIRST_USER_MESSAGE_MAX_CHARS) return trimmed
-  return trimmed.slice(0, FIRST_USER_MESSAGE_MAX_CHARS)
 }
 
 function deriveCodexCompactThresholdTokens(
