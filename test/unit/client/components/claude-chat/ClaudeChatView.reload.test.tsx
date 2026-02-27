@@ -242,6 +242,114 @@ describe('ClaudeChatView reload/restore behavior', () => {
     expect(screen.getByText('Hello')).toBeInTheDocument()
   })
 
+  it('reactively updates when replayHistory fires (no manual rerender)', async () => {
+    const store = makeStore()
+    render(
+      <Provider store={store}>
+        <ClaudeChatView tabId="t1" paneId="p1" paneContent={RELOAD_PANE} />
+      </Provider>,
+    )
+
+    // Initially shows restoring
+    expect(screen.getByText(/restoring/i)).toBeInTheDocument()
+
+    // Dispatch replayHistory — the component should re-render via Redux subscription
+    // WITHOUT requiring an explicit rerender() call
+    act(() => {
+      store.dispatch(replayHistory({
+        sessionId: 'sess-reload-1',
+        messages: [
+          {
+            role: 'user',
+            content: [{ type: 'text', text: 'Reactive test message' }],
+            timestamp: '2026-01-01T00:00:00Z',
+          },
+        ],
+      }))
+    })
+
+    // Messages should be visible without manual rerender
+    expect(screen.queryByText(/restoring/i)).not.toBeInTheDocument()
+    expect(screen.getByText('Reactive test message')).toBeInTheDocument()
+  })
+
+  it('reactively updates when sdk.history + sdk.status arrive back-to-back (production flow)', () => {
+    const store = makeStore()
+    render(
+      <Provider store={store}>
+        <ClaudeChatView tabId="t1" paneId="p1" paneContent={RELOAD_PANE} />
+      </Provider>,
+    )
+
+    // Initially shows restoring
+    expect(screen.getByText(/restoring/i)).toBeInTheDocument()
+
+    // Simulate the real server response: sdk.history then sdk.status arrive back-to-back
+    // Both are dispatched synchronously in the same event loop tick (as they would be
+    // when two WS messages arrive in rapid succession)
+    act(() => {
+      store.dispatch(replayHistory({
+        sessionId: 'sess-reload-1',
+        messages: [
+          {
+            role: 'user',
+            content: [{ type: 'text', text: 'Back-to-back test' }],
+            timestamp: '2026-01-01T00:00:00Z',
+          },
+        ],
+      }))
+      store.dispatch(setSessionStatus({
+        sessionId: 'sess-reload-1',
+        status: 'idle',
+      }))
+    })
+
+    // Messages should be visible — both dispatches should be processed
+    expect(screen.queryByText(/restoring/i)).not.toBeInTheDocument()
+    expect(screen.getByText('Back-to-back test')).toBeInTheDocument()
+  })
+
+  it('reactively updates when sdk.history and sdk.status arrive in separate event loop ticks', () => {
+    const store = makeStore()
+    render(
+      <Provider store={store}>
+        <ClaudeChatView tabId="t1" paneId="p1" paneContent={RELOAD_PANE} />
+      </Provider>,
+    )
+
+    // Initially shows restoring
+    expect(screen.getByText(/restoring/i)).toBeInTheDocument()
+
+    // sdk.history arrives first (separate event loop tick)
+    act(() => {
+      store.dispatch(replayHistory({
+        sessionId: 'sess-reload-1',
+        messages: [
+          {
+            role: 'user',
+            content: [{ type: 'text', text: 'Separate tick test' }],
+            timestamp: '2026-01-01T00:00:00Z',
+          },
+        ],
+      }))
+    })
+
+    // After first dispatch, messages should already be visible
+    expect(screen.queryByText(/restoring/i)).not.toBeInTheDocument()
+    expect(screen.getByText('Separate tick test')).toBeInTheDocument()
+
+    // sdk.status arrives in a separate tick
+    act(() => {
+      store.dispatch(setSessionStatus({
+        sessionId: 'sess-reload-1',
+        status: 'idle',
+      }))
+    })
+
+    // Messages should still be visible after status update
+    expect(screen.getByText('Separate tick test')).toBeInTheDocument()
+  })
+
   it('falls back to welcome screen after restore timeout (stale sessionId)', () => {
     vi.useFakeTimers()
     const store = makeStore()
