@@ -13,7 +13,7 @@ import FreshclaudeSettings from './FreshclaudeSettings'
 import ThinkingIndicator from './ThinkingIndicator'
 import { useStreamDebounce } from './useStreamDebounce'
 import CollapsedTurn from './CollapsedTurn'
-import type { ChatMessage } from '@/store/claudeChatTypes'
+import type { ChatMessage, ChatSessionState } from '@/store/claudeChatTypes'
 import { api } from '@/lib/api'
 
 const DEFAULT_MODEL = 'claude-opus-4-6'
@@ -46,10 +46,25 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
   const pendingSessionId = useAppSelector(
     (s) => s.claudeChat.pendingCreates[paneContent.createRequestId],
   )
+  const sessionId = paneContent.sessionId
   const session = useAppSelector(
-    (s) => paneContent.sessionId ? s.claudeChat.sessions[paneContent.sessionId] : undefined,
+    (s) => sessionId ? s.claudeChat.sessions[sessionId] : undefined,
   )
   const availableModels = useAppSelector((s) => s.claudeChat.availableModels)
+
+  // Track whether we're waiting for a session restore (persisted sessionId, history not yet loaded).
+  // Fresh creates set historyLoaded=true immediately; reloads wait for sdk.history.
+  // Times out after 5s to handle stale sessionIds from server restarts.
+  const isRestoring = !!paneContent.sessionId && !session?.historyLoaded
+  const [restoreTimedOut, setRestoreTimedOut] = useState(false)
+  useEffect(() => {
+    if (!isRestoring) {
+      setRestoreTimedOut(false)
+      return
+    }
+    const timer = setTimeout(() => setRestoreTimedOut(true), 5_000)
+    return () => clearTimeout(timer)
+  }, [isRestoring])
 
   // Wire sessionId from pendingCreates back into the pane content
   useEffect(() => {
@@ -334,11 +349,19 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
       {/* Message area wrapper (relative for scroll-to-bottom button positioning) */}
       <div className="relative flex-1 min-h-0">
       <div ref={scrollContainerRef} onScroll={handleScroll} className="h-full overflow-y-auto p-4 space-y-3" data-context="freshclaude-chat" data-session-id={paneContent.sessionId}>
-        {!session?.messages.length && (
+        {/* Restoring: persisted sessionId but history not yet loaded (reload/back-nav).
+             Falls back to welcome screen after timeout (e.g. server restarted, session lost). */}
+        {isRestoring && !restoreTimedOut && (
+          <div className="text-center text-muted-foreground text-sm py-8">
+            <p>Restoring session...</p>
+          </div>
+        )}
+
+        {/* Welcome: no sessionId, session exists but empty, or restore timed out */}
+        {!session?.messages.length && (!isRestoring || restoreTimedOut) && (
           <div className="text-center text-muted-foreground text-sm py-8">
             <p className="font-medium mb-2">freshclaude</p>
             <p>Rich chat UI for Claude Code sessions.</p>
-            <p className="text-xs mt-2">Session: {paneContent.sessionId ?? 'pending'}</p>
           </div>
         )}
 
