@@ -1,6 +1,8 @@
 import { useState, useCallback, useRef, useEffect, type ReactNode, type ReactElement, isValidElement } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { Copy, Check, ExternalLink } from 'lucide-react'
 
 type MarkdownRendererProps = {
@@ -99,9 +101,14 @@ function PreBlock({ children, ...props }: React.ComponentProps<'pre'>) {
         </span>
         <CopyButton code={codeText} />
       </div>
-      <pre {...props} className="!mt-0 !mb-0 !rounded-none !border-0">
-        {children}
-      </pre>
+      <SyntaxHighlighter
+        language={language ?? 'text'}
+        style={oneDark}
+        customStyle={{ margin: 0, borderRadius: 0, border: 'none' }}
+        showLineNumbers={false}
+      >
+        {codeText.replace(/\n$/, '')}
+      </SyntaxHighlighter>
     </div>
   )
 }
