@@ -144,7 +144,9 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
     if (!paneContent.sessionId) return
     dispatch(addUserMessage({ sessionId: paneContent.sessionId, text }))
     ws.send({ type: 'sdk.send', sessionId: paneContent.sessionId, text })
-  }, [paneContent.sessionId, dispatch, ws])
+    // Always scroll to bottom when the user sends a message
+    scrollToBottom()
+  }, [paneContent.sessionId, dispatch, ws, scrollToBottom])
 
   const handleInterrupt = useCallback(() => {
     if (!paneContent.sessionId) return
