@@ -146,4 +146,44 @@ describe('FreshclaudeSettings', () => {
     fireEvent.click(screen.getByRole('button', { name: /settings/i }))
     expect(onDismiss).toHaveBeenCalled()
   })
+
+  describe('model display names', () => {
+    it('shows human-readable names for dynamic model options with raw IDs', () => {
+      render(
+        <FreshclaudeSettings
+          {...defaults}
+          sessionStarted={false}
+          defaultOpen={true}
+          modelOptions={[
+            { value: 'claude-opus-4-6', displayName: 'claude-opus-4-6' },
+            { value: 'claude-sonnet-4-5-20250929', displayName: 'claude-sonnet-4-5-20250929' },
+          ]}
+          onChange={vi.fn()}
+        />
+      )
+      const modelSelect = screen.getByLabelText('Model')
+      const options = modelSelect.querySelectorAll('option')
+      expect(options[0].textContent).toBe('Opus 4.6')
+      expect(options[1].textContent).toBe('Sonnet 4.5')
+    })
+
+    it('preserves already-formatted display names from SDK', () => {
+      render(
+        <FreshclaudeSettings
+          {...defaults}
+          sessionStarted={false}
+          defaultOpen={true}
+          modelOptions={[
+            { value: 'claude-opus-4-6', displayName: 'Opus 4.6' },
+            { value: 'claude-sonnet-4-5-20250929', displayName: 'Sonnet 4.5' },
+          ]}
+          onChange={vi.fn()}
+        />
+      )
+      const modelSelect = screen.getByLabelText('Model')
+      const options = modelSelect.querySelectorAll('option')
+      expect(options[0].textContent).toBe('Opus 4.6')
+      expect(options[1].textContent).toBe('Sonnet 4.5')
+    })
+  })
 })

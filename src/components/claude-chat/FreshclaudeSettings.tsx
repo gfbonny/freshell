@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils'
 import { Switch } from '@/components/ui/switch'
 import { useMobile } from '@/hooks/useMobile'
 import type { ClaudeChatPaneContent } from '@/store/paneTypes'
+import { formatModelDisplayName } from '../../../shared/format-model-name'
 
 type SettingsFields = Pick<ClaudeChatPaneContent, 'model' | 'permissionMode' | 'effort' | 'showThinking' | 'showTools' | 'showTimecodes'>
 
@@ -102,7 +103,7 @@ export default function FreshclaudeSettings({
 
   // Use dynamic model options when available, fall back to hardcoded
   const resolvedModelOptions = modelOptions
-    ? modelOptions.map((m) => ({ value: m.value, label: m.displayName }))
+    ? modelOptions.map((m) => ({ value: m.value, label: formatModelDisplayName(m.displayName) }))
     : MODEL_OPTIONS
 
   return (
