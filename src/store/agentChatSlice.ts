@@ -1,14 +1,14 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit'
-import type { ClaudeChatState, ChatContentBlock, ChatSessionState, QuestionDefinition } from './claudeChatTypes'
+import type { AgentChatState, ChatContentBlock, ChatSessionState, QuestionDefinition } from './agentChatTypes'
 
-const initialState: ClaudeChatState = {
+const initialState: AgentChatState = {
   sessions: {},
   pendingCreates: {},
   availableModels: [],
 }
 
 /** Create a default empty session if one doesn't already exist. */
-function ensureSession(state: ClaudeChatState, sessionId: string): ChatSessionState {
+function ensureSession(state: AgentChatState, sessionId: string): ChatSessionState {
   if (!state.sessions[sessionId]) {
     state.sessions[sessionId] = {
       sessionId,
@@ -26,8 +26,8 @@ function ensureSession(state: ClaudeChatState, sessionId: string): ChatSessionSt
   return state.sessions[sessionId]
 }
 
-const claudeChatSlice = createSlice({
-  name: 'claudeChat',
+const agentChatSlice = createSlice({
+  name: 'agentChat',
   initialState,
   reducers: {
     sessionCreated(state, action: PayloadAction<{ requestId: string; sessionId: string }>) {
@@ -235,6 +235,6 @@ export const {
   clearPendingCreate,
   removeSession,
   setAvailableModels,
-} = claudeChatSlice.actions
+} = agentChatSlice.actions
 
-export default claudeChatSlice.reducer
+export default agentChatSlice.reducer
