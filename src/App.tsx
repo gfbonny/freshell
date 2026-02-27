@@ -337,6 +337,10 @@ export default function App() {
           dispatch(setStatus('disconnected'))
           dispatch(setError('Authentication failed'))
         }
+        // Tear down WS subscriptions that were registered before the HTTP
+        // fetches (cleanup + stopTabRegistrySync are already assigned by now).
+        cleanup?.()
+        stopTabRegistrySync?.()
         return true
       }
 
