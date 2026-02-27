@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ClaudeChatPaneContent } from '@/store/paneTypes'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { updatePaneContent } from '@/store/panesSlice'
@@ -47,6 +47,20 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
     (s) => paneContent.sessionId ? s.claudeChat.sessions[paneContent.sessionId] : undefined,
   )
   const availableModels = useAppSelector((s) => s.claudeChat.availableModels)
+
+  // Track whether we're waiting for a session restore (persisted sessionId, history not yet loaded).
+  // Fresh creates set historyLoaded=true immediately; reloads wait for sdk.history.
+  // Times out after 5s to handle stale sessionIds from server restarts.
+  const isRestoring = !!paneContent.sessionId && !session?.historyLoaded
+  const [restoreTimedOut, setRestoreTimedOut] = useState(false)
+  useEffect(() => {
+    if (!isRestoring) {
+      setRestoreTimedOut(false)
+      return
+    }
+    const timer = setTimeout(() => setRestoreTimedOut(true), 5_000)
+    return () => clearTimeout(timer)
+  }, [isRestoring])
 
   // Wire sessionId from pendingCreates back into the pane content
   useEffect(() => {
@@ -315,11 +329,19 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
 
       {/* Message area */}
       <div ref={scrollContainerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto p-4 space-y-3" data-context="freshclaude-chat" data-session-id={paneContent.sessionId}>
-        {!session?.messages.length && (
+        {/* Restoring: persisted sessionId but history not yet loaded (reload/back-nav).
+             Falls back to welcome screen after timeout (e.g. server restarted, session lost). */}
+        {isRestoring && !restoreTimedOut && (
+          <div className="text-center text-muted-foreground text-sm py-8">
+            <p>Restoring session...</p>
+          </div>
+        )}
+
+        {/* Welcome: no sessionId, session exists but empty, or restore timed out */}
+        {!session?.messages.length && (!isRestoring || restoreTimedOut) && (
           <div className="text-center text-muted-foreground text-sm py-8">
             <p className="font-medium mb-2">freshclaude</p>
             <p>Rich chat UI for Claude Code sessions.</p>
-            <p className="text-xs mt-2">Session: {paneContent.sessionId ?? 'pending'}</p>
           </div>
         )}
 
