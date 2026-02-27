@@ -68,7 +68,7 @@ export interface ChatSessionState {
   historyLoaded?: boolean
 }
 
-export interface ClaudeChatState {
+export interface AgentChatState {
   sessions: Record<string, ChatSessionState>
   /** Maps createRequestId -> sessionId for correlating sdk.created responses */
   pendingCreates: Record<string, string>
