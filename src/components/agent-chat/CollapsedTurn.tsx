@@ -1,6 +1,6 @@
 import { memo, useState, useMemo } from 'react'
 import { ChevronRight } from 'lucide-react'
-import type { ChatMessage } from '@/store/claudeChatTypes'
+import type { ChatMessage } from '@/store/agentChatTypes'
 import MessageBubble from './MessageBubble'
 
 interface CollapsedTurnProps {

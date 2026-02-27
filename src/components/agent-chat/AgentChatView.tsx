@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { nanoid } from 'nanoid'
-import type { ClaudeChatPaneContent } from '@/store/paneTypes'
+import type { AgentChatPaneContent } from '@/store/paneTypes'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { updatePaneContent } from '@/store/panesSlice'
-import { addUserMessage, clearPendingCreate, removePermission, removeQuestion } from '@/store/claudeChatSlice'
+import { addUserMessage, clearPendingCreate, removePermission, removeQuestion } from '@/store/agentChatSlice'
 import { getWsClient } from '@/lib/ws-client'
 import { cn } from '@/lib/utils'
 import { ChevronDown } from 'lucide-react'
@@ -11,25 +11,25 @@ import MessageBubble from './MessageBubble'
 import PermissionBanner from './PermissionBanner'
 import QuestionBanner from './QuestionBanner'
 import ChatComposer, { type ChatComposerHandle } from './ChatComposer'
-import FreshclaudeSettings from './FreshclaudeSettings'
+import AgentChatSettings from './AgentChatSettings'
 import ThinkingIndicator from './ThinkingIndicator'
 import { useStreamDebounce } from './useStreamDebounce'
 import CollapsedTurn from './CollapsedTurn'
-import type { ChatMessage, ChatSessionState } from '@/store/claudeChatTypes'
+import type { ChatMessage, ChatSessionState } from '@/store/agentChatTypes'
 import { api } from '@/lib/api'
 
 const DEFAULT_MODEL = 'claude-opus-4-6'
 const DEFAULT_PERMISSION_MODE = 'bypassPermissions'
 const DEFAULT_EFFORT = 'high'
 
-interface ClaudeChatViewProps {
+interface AgentChatViewProps {
   tabId: string
   paneId: string
-  paneContent: ClaudeChatPaneContent
+  paneContent: AgentChatPaneContent
   hidden?: boolean
 }
 
-export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: ClaudeChatViewProps) {
+export default function AgentChatView({ tabId, paneId, paneContent, hidden }: AgentChatViewProps) {
   const dispatch = useAppDispatch()
   const ws = getWsClient()
   const createSentRef = useRef(false)
@@ -47,13 +47,13 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
 
   // Resolve pendingCreates -> pane sessionId
   const pendingSessionId = useAppSelector(
-    (s) => s.claudeChat.pendingCreates[paneContent.createRequestId],
+    (s) => s.agentChat.pendingCreates[paneContent.createRequestId],
   )
   const sessionId = paneContent.sessionId
   const session = useAppSelector(
-    (s) => sessionId ? s.claudeChat.sessions[sessionId] : undefined,
+    (s) => sessionId ? s.agentChat.sessions[sessionId] : undefined,
   )
-  const availableModels = useAppSelector((s) => s.claudeChat.availableModels)
+  const availableModels = useAppSelector((s) => s.agentChat.availableModels)
 
   // Track whether we're waiting for a session restore (persisted sessionId, history not yet loaded).
   // Fresh creates set historyLoaded=true immediately; reloads wait for sdk.history.
@@ -387,7 +387,7 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
           {paneContent.initialCwd && (
             <span className="truncate">{paneContent.initialCwd}</span>
           )}
-          <FreshclaudeSettings
+          <AgentChatSettings
             model={paneContent.model ?? DEFAULT_MODEL}
             permissionMode={paneContent.permissionMode ?? DEFAULT_PERMISSION_MODE}
             effort={paneContent.effort ?? DEFAULT_EFFORT}

@@ -3,12 +3,12 @@ import { Settings } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Switch } from '@/components/ui/switch'
 import { useMobile } from '@/hooks/useMobile'
-import type { ClaudeChatPaneContent } from '@/store/paneTypes'
+import type { AgentChatPaneContent } from '@/store/paneTypes'
 import { formatModelDisplayName } from '../../../shared/format-model-name'
 
-type SettingsFields = Pick<ClaudeChatPaneContent, 'model' | 'permissionMode' | 'effort' | 'showThinking' | 'showTools' | 'showTimecodes'>
+type SettingsFields = Pick<AgentChatPaneContent, 'model' | 'permissionMode' | 'effort' | 'showThinking' | 'showTools' | 'showTimecodes'>
 
-interface FreshclaudeSettingsProps {
+interface AgentChatSettingsProps {
   model: string
   permissionMode: string
   effort: string
@@ -42,7 +42,7 @@ const EFFORT_OPTIONS = [
   { value: 'max', label: 'Max' },
 ]
 
-export default function FreshclaudeSettings({
+export default function AgentChatSettings({
   model,
   permissionMode,
   effort,
@@ -54,7 +54,7 @@ export default function FreshclaudeSettings({
   modelOptions,
   onChange,
   onDismiss,
-}: FreshclaudeSettingsProps) {
+}: AgentChatSettingsProps) {
   const instanceId = useId()
   const isMobile = useMobile()
   const [open, setOpen] = useState(defaultOpen)
@@ -175,7 +175,7 @@ export default function FreshclaudeSettings({
                 : 'absolute right-0 top-full mt-1 w-64',
             )}
             role="dialog"
-            aria-label="freshclaude settings"
+            aria-label="Agent chat settings"
           >
             <div className="space-y-3">
             {/* Model */}
@@ -218,7 +218,7 @@ export default function FreshclaudeSettings({
                 aria-label="Effort"
                 value={effort}
                 disabled={sessionStarted}
-                onChange={(e) => onChange({ effort: e.target.value as ClaudeChatPaneContent['effort'] })}
+                onChange={(e) => onChange({ effort: e.target.value as AgentChatPaneContent['effort'] })}
                 className="w-full rounded border bg-background px-2 py-1 text-xs disabled:opacity-50"
               >
                 {EFFORT_OPTIONS.map((opt) => (

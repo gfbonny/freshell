@@ -1,16 +1,16 @@
 import { copyText } from '@/lib/clipboard'
 
-export async function copyFreshclaudeCodeBlock(el: HTMLElement | null) {
+export async function copyAgentChatCodeBlock(el: HTMLElement | null) {
   const text = el?.textContent?.trim()
   if (text) await copyText(text)
 }
 
-export async function copyFreshclaudeToolInput(el: HTMLElement | null) {
+export async function copyAgentChatToolInput(el: HTMLElement | null) {
   const text = el?.textContent?.trim()
   if (text) await copyText(text)
 }
 
-export async function copyFreshclaudeToolOutput(el: HTMLElement | null) {
+export async function copyAgentChatToolOutput(el: HTMLElement | null) {
   const text = el?.textContent?.trim()
   if (text) await copyText(text)
 }
@@ -58,19 +58,19 @@ function extractDiffLines(el: HTMLElement, include: 'new' | 'old'): string {
   return lines.join('\n')
 }
 
-export async function copyFreshclaudeDiffNew(el: HTMLElement | null) {
+export async function copyAgentChatDiffNew(el: HTMLElement | null) {
   if (!el) return
   const text = extractDiffLines(el, 'new')
   if (text) await copyText(text)
 }
 
-export async function copyFreshclaudeDiffOld(el: HTMLElement | null) {
+export async function copyAgentChatDiffOld(el: HTMLElement | null) {
   if (!el) return
   const text = extractDiffLines(el, 'old')
   if (text) await copyText(text)
 }
 
-export async function copyFreshclaudeFilePath(el: HTMLElement | null) {
+export async function copyAgentChatFilePath(el: HTMLElement | null) {
   const path = el?.getAttribute('data-file-path')
   if (path) await copyText(path)
 }

@@ -1,7 +1,7 @@
 import { memo } from 'react'
 import { ShieldAlert, Terminal, FileText, Pencil, Eye } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { PermissionRequest } from '@/store/claudeChatTypes'
+import type { PermissionRequest } from '@/store/agentChatTypes'
 
 interface PermissionBannerProps {
   permission: PermissionRequest

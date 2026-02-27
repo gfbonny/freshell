@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { MessageCircleQuestion } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { QuestionRequest, QuestionDefinition } from '@/store/claudeChatTypes'
+import type { QuestionRequest, QuestionDefinition } from '@/store/agentChatTypes'
 
 interface QuestionBannerProps {
   question: QuestionRequest

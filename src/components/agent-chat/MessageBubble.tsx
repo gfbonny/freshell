@@ -1,6 +1,6 @@
 import { memo, useMemo } from 'react'
 import { cn } from '@/lib/utils'
-import type { ChatContentBlock } from '@/store/claudeChatTypes'
+import type { ChatContentBlock } from '@/store/agentChatTypes'
 import { LazyMarkdown } from '@/components/markdown/LazyMarkdown'
 import ToolBlock from './ToolBlock'
 
