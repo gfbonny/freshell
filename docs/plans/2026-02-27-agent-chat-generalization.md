@@ -4,7 +4,7 @@
 
 **Goal:** Generalize the `claude-chat` pane type into a provider-configurable `agent-chat` pane, making freshclaude the first provider in a registry that supports different defaults, chrome, and (eventually) harnesses.
 
-**Architecture:** Rename `claude-chat` → `agent-chat` everywhere, add a `provider` field to the pane content, and introduce an `AGENT_CHAT_PROVIDER_CONFIGS` registry (mirroring the terminal pane's `CODING_CLI_PROVIDER_CONFIGS` pattern). Each provider config defines label, icon, defaults, and which settings to expose. The SDK bridge and WS protocol stay unchanged — they're transport-layer concerns.
+**Architecture:** Rename `claude-chat` → `agent-chat` everywhere, add a `provider` field to the pane content, and introduce an `AGENT_CHAT_PROVIDER_CONFIGS` registry (mirroring the terminal pane's `CODING_CLI_PROVIDER_CONFIGS` pattern). Each provider config defines label, defaults, which settings to expose, and the underlying coding CLI provider for directory preferences. No persistence migration — old `claude-chat` panes are dropped on load. The SDK bridge and WS protocol stay unchanged — they're transport-layer concerns.
 
 **Tech Stack:** TypeScript, React, Redux Toolkit, Zod, Vitest
 
@@ -116,6 +116,10 @@ export interface AgentChatProviderConfig {
   name: AgentChatProviderName
   /** Display label in UI */
   label: string
+  /** Underlying coding CLI provider used for directory preferences and CLI availability checks */
+  codingCliProvider: CodingCliProviderName
+  /** React component for the pane icon (e.g. FreshclaudeIcon) */
+  icon: React.ComponentType<{ className?: string }>
   /** Default model ID */
   defaultModel: string
   /** Default permission mode */
@@ -156,6 +160,8 @@ export const AGENT_CHAT_PROVIDER_CONFIGS: AgentChatProviderConfig[] = [
   {
     name: 'freshclaude',
     label: 'freshclaude',
+    codingCliProvider: 'claude',
+    icon: FreshclaudeIcon,  // import from '@/components/icons/provider-icons'
     defaultModel: 'claude-opus-4-6',
     defaultPermissionMode: 'bypassPermissions',
     defaultEffort: 'high',
@@ -440,12 +446,12 @@ export type PanePickerType = 'shell' | 'cmd' | 'powershell' | 'wsl' | 'browser' 
 Build agent-chat picker options from config:
 ```typescript
 const agentChatOptions: PickerOption[] = AGENT_CHAT_PROVIDER_CONFIGS
-  .filter((config) => availableClis['claude'] && enabledProviders.includes('claude'))
+  .filter((config) => availableClis[config.codingCliProvider] && enabledProviders.includes(config.codingCliProvider))
   .map((config) => ({
     type: config.name as PanePickerType,
     label: config.label,
     icon: null,
-    providerName: 'claude' as CodingCliProviderName,
+    providerName: config.codingCliProvider,
     shortcut: config.pickerShortcut,
   }))
 ```
@@ -468,6 +474,21 @@ if (isAgentChatProviderName(type)) {
 }
 ```
 
+**Key detail in `PaneContainer.tsx` `handleDirectoryConfirm()`**: Fix directory preference mapping. The old code mapped `'claude-web'` → `'claude'` for the `codingCli.providers` settings key. Now use `codingCliProvider` from the provider config:
+```typescript
+// OLD: const settingsKey = providerType === 'claude-web' ? 'claude' : providerType
+// NEW:
+const agentConfig = getAgentChatProviderConfig(providerType)
+const settingsKey = agentConfig ? agentConfig.codingCliProvider : providerType
+```
+Similarly update the label derivation:
+```typescript
+// OLD: const providerLabel = providerType === 'claude-web' ? 'freshclaude' : getProviderLabel(providerType)
+// NEW:
+const providerLabel = agentConfig ? agentConfig.label : getProviderLabel(providerType)
+```
+```
+
 **Step 2: Run typecheck**
 
 Run: `cd /home/user/code/freshell/.worktrees/agent-chat && npx tsc --noEmit`
@@ -483,101 +504,115 @@ git commit -m "refactor: update all consumers from claude-chat to agent-chat nam
 
 ---
 
-### Task 6: Persistence Migration
+### Task 6: Drop Old `claude-chat` Persisted Panes
 
 **Files:**
 - Modify: `src/store/persistMiddleware.ts`
 - Modify: `src/store/persistedState.ts`
-- Modify: `test/unit/client/store/persistMiddleware.test.ts` (or create if needed)
+- Modify: `test/unit/client/store/panesPersistence.test.ts`
 
-Existing persisted pane layouts have `kind: 'claude-chat'` in localStorage. We need a migration to rename them to `kind: 'agent-chat'` and add the `provider: 'freshclaude'` field.
+No data migration — old `claude-chat` panes are simply dropped on load. Users reopen them as `agent-chat` panes.
 
 **Step 1: Write the failing test**
 
 ```typescript
-// In test for persistMiddleware
-it('migrates claude-chat panes to agent-chat with provider field', () => {
-  const oldLayout = {
-    type: 'leaf',
-    id: 'pane1',
-    content: {
-      kind: 'claude-chat',
-      createRequestId: 'req1',
-      status: 'idle',
-      sessionId: 'sess1',
+// In test/unit/client/store/panesPersistence.test.ts
+it('drops claude-chat panes during v4→v5 migration', () => {
+  const v4Data = {
+    version: 4,
+    layouts: {
+      tab1: {
+        type: 'leaf',
+        id: 'pane1',
+        content: {
+          kind: 'claude-chat',
+          createRequestId: 'req1',
+          status: 'idle',
+          sessionId: 'sess1',
+        },
+      },
     },
+    activePane: {},
+    paneTitles: {},
+    paneTitleSetByUser: {},
   }
-  const migrated = migrateNode(oldLayout)
-  expect(migrated.content.kind).toBe('agent-chat')
-  expect(migrated.content.provider).toBe('freshclaude')
+  localStorage.setItem('freshell:panes', JSON.stringify(v4Data))
+  const result = loadPersistedPanes()
+  // The claude-chat leaf should be replaced with a picker pane
+  expect(result!.layouts.tab1.content.kind).toBe('picker')
+  expect(result!.version).toBe(5)
 })
 ```
 
 **Step 2: Run test to verify it fails**
 
+Run: `cd /home/user/code/freshell/.worktrees/agent-chat && npx vitest run test/unit/client/store/panesPersistence.test.ts`
 Expected: FAIL
 
-**Step 3: Update `migratePaneContent()` in `persistMiddleware.ts`**
+**Step 3: Bump `PANES_SCHEMA_VERSION` from 4 to 5 in `persistedState.ts`**
+
+**Step 4: Add v4→v5 migration in `loadPersistedPanesUncached()` in `persistMiddleware.ts`**
+
+Add a new migration block after the existing `currentVersion < 2` block:
 
 ```typescript
-function migratePaneContent(content: any): any {
-  if (!content || typeof content !== 'object') return content
-
-  // Migrate claude-chat → agent-chat
-  if (content.kind === 'claude-chat') {
-    return {
-      ...content,
-      kind: 'agent-chat',
-      provider: 'freshclaude',
-      createRequestId: content.createRequestId || nanoid(),
-      status: content.status || 'creating',
-    }
+// Version 4 -> 5: drop claude-chat panes (renamed to agent-chat; no data migration)
+if (currentVersion < 5) {
+  const droppedLayouts: Record<string, any> = {}
+  for (const [tabId, node] of Object.entries(layouts)) {
+    droppedLayouts[tabId] = dropClaudeChatNodes(node)
   }
-
-  if (content.kind !== 'terminal') return content
-
-  // Existing terminal migration...
-  if (content.createRequestId && content.status) return content
-  return {
-    ...content,
-    createRequestId: content.createRequestId || nanoid(),
-    status: content.status || 'creating',
-    mode: content.mode || 'shell',
-    shell: content.shell || 'system',
-  }
+  layouts = droppedLayouts
 }
 ```
 
-**Step 4: Bump `PANES_SCHEMA_VERSION` from 4 to 5 in `persistedState.ts`**
-
-Add migration step comment in `loadPersistedPanesUncached()`:
+Where `dropClaudeChatNodes` recursively walks the tree:
 ```typescript
-// Version 4 -> 5: migrate claude-chat → agent-chat with provider field
+function dropClaudeChatNodes(node: any): any {
+  if (!node) return node
+  if (node.type === 'leaf') {
+    if (node.content?.kind === 'claude-chat') {
+      return { ...node, content: { kind: 'picker' } }
+    }
+    return node
+  }
+  if (node.type === 'split' && Array.isArray(node.children) && node.children.length >= 2) {
+    return {
+      ...node,
+      children: [
+        dropClaudeChatNodes(node.children[0]),
+        dropClaudeChatNodes(node.children[1]),
+      ],
+    }
+  }
+  return node
+}
 ```
 
 **Step 5: Run test to verify it passes**
 
+Run: `cd /home/user/code/freshell/.worktrees/agent-chat && npx vitest run test/unit/client/store/panesPersistence.test.ts`
 Expected: PASS
 
 **Step 6: Commit**
 
 ```bash
 cd /home/user/code/freshell/.worktrees/agent-chat
-git add src/store/persistMiddleware.ts src/store/persistedState.ts test/...
-git commit -m "feat: add persistence migration for claude-chat → agent-chat pane rename"
+git add src/store/persistMiddleware.ts src/store/persistedState.ts test/unit/client/store/panesPersistence.test.ts
+git commit -m "feat: drop old claude-chat panes during v4→v5 persistence migration"
 ```
 
 ---
 
-### Task 7: Update Settings Key (Server + Config)
+### Task 7: Update Settings Key (Client, Server Schema, Config)
 
 **Files:**
 - Modify: `src/store/types.ts`
 - Modify: `src/store/settingsSlice.ts`
-- Modify: `server/index.ts` (if settings API handles `freshclaude` key)
-- Modify: `server/config-store.ts` (or equivalent)
+- Modify: `server/settings-router.ts` — **CRITICAL**: rename `freshclaude` → `agentChat` in `SettingsPatchSchema`
+- Modify: `server/config-store.ts`
 
-The settings key changes from `freshclaude` to `agentChat`. We need backward compat: if persisted config has `freshclaude`, read it as `agentChat`.
+The settings key changes from `freshclaude` to `agentChat`. Without updating the server's Zod schema in `settings-router.ts`, the PATCH endpoint will reject requests with 400.
 
 **Step 1: Update `AppSettings` in `types.ts`**
 
@@ -595,25 +630,52 @@ agentChat?: {
 agentChat: {},  // was: freshclaude: {}
 ```
 
-**Step 3: Add migration in config loading**
+Also update `mergeSettings()` to spread `agentChat` instead of `freshclaude`.
 
-In the server config loader (wherever `~/.freshell/config.json` is read), if the loaded config has a `freshclaude` key but no `agentChat` key, copy `freshclaude` → `agentChat` and remove the old key. This is a one-time migration.
+**Step 3: Update `SettingsPatchSchema` in `server/settings-router.ts`**
 
-**Step 4: Update the settings PATCH handler in `AgentChatView`**
+Replace:
+```typescript
+    freshclaude: z
+      .object({
+        defaultModel: z.string().optional(),
+        defaultPermissionMode: z.string().optional(),
+        defaultEffort: z.enum(['low', 'medium', 'high', 'max']).optional(),
+      })
+      .strict()
+      .optional(),
+```
+With:
+```typescript
+    agentChat: z
+      .object({
+        defaultModel: z.string().optional(),
+        defaultPermissionMode: z.string().optional(),
+        defaultEffort: z.enum(['low', 'medium', 'high', 'max']).optional(),
+      })
+      .strict()
+      .optional(),
+```
+
+**Step 4: Add migration in config loading**
+
+In `server/config-store.ts`, when loading `~/.freshell/config.json`, if the loaded config has a `freshclaude` key but no `agentChat` key, copy `freshclaude` → `agentChat` and delete the old key. This is a one-time migration.
+
+**Step 5: Update the settings PATCH handler in `AgentChatView`**
 
 Already done in Task 5 (`{ freshclaude: ... }` → `{ agentChat: ... }`).
 
-**Step 5: Run tests**
+**Step 6: Run tests**
 
-Run: `cd /home/user/code/freshell/.worktrees/agent-chat && npx vitest run test/unit/client/store/settingsSlice.test.ts test/unit/server/config-store.test.ts`
+Run: `cd /home/user/code/freshell/.worktrees/agent-chat && npx vitest run test/unit/client/store/settingsSlice.test.ts test/unit/server/config-store.test.ts test/unit/server/settings-router.test.ts`
 Expected: PASS (update test expectations as needed)
 
-**Step 6: Commit**
+**Step 7: Commit**
 
 ```bash
 cd /home/user/code/freshell/.worktrees/agent-chat
-git add src/store/types.ts src/store/settingsSlice.ts server/...
-git commit -m "refactor: rename freshclaude settings key → agentChat with backward compat"
+git add src/store/types.ts src/store/settingsSlice.ts server/settings-router.ts server/config-store.ts test/...
+git commit -m "refactor: rename freshclaude settings key → agentChat (client + server schema + config migration)"
 ```
 
 ---
@@ -813,17 +875,19 @@ git commit -m "refactor: rename all test files from claude-chat to agent-chat"
 
 **Step 1: Update PaneIcon to look up icon from provider config**
 
-Currently it hardcodes `FreshclaudeIcon` for `claude-chat`. Update to:
+Since `AgentChatProviderConfig` now has an `icon` field, use it:
 
 ```typescript
 if (content.kind === 'agent-chat') {
-  // For now, all agent-chat providers use the claude icon.
-  // When we add more providers, look up from provider config.
-  return <FreshclaudeIcon className={className} />
+  const config = getAgentChatProviderConfig(content.provider)
+  if (config) {
+    const Icon = config.icon
+    return <Icon className={className} />
+  }
+  // Fallback for unknown provider
+  return <LayoutGrid className={className} />
 }
 ```
-
-Or better, add an `icon` field to the provider config (optional enhancement — can be deferred since there's only one provider now).
 
 **Step 2: Update test**
 
@@ -914,6 +978,8 @@ git commit -m "chore: clean up remaining claude-chat references"
 - `src/lib/tab-registry-snapshot.ts`
 - `src/lib/sdk-message-handler.ts`
 - `server/tabs-registry/types.ts`
+- `server/settings-router.ts`
+- `server/config-store.ts`
 
 ### Renamed test files (~15):
 - `test/unit/client/claudeChatSlice.test.ts` → `agentChatSlice.test.ts`
