@@ -104,15 +104,40 @@ export default function FreshclaudeSettings({
   }, [open, handleClose])
 
   // Start with the hardcoded list, then append any dynamic models not already present.
-  // Filter out SDK shorthand aliases (e.g. "default", "opus", "haiku") — they duplicate
-  // models we already list with full IDs.
+  // When the SDK provides a model whose normalized label matches a hardcoded entry
+  // (e.g. a newer dated ID like claude-sonnet-4-5-20251101 → "Sonnet 4.5"), replace
+  // the hardcoded value so users get the current model ID without duplicates.
   const resolvedModelOptions = (() => {
     if (!modelOptions) return MODEL_OPTIONS
-    const knownValues = new Set(MODEL_OPTIONS.map((m) => m.value))
+
+    // Map normalized label → SDK value for models with full claude-* IDs.
+    // When multiple dated IDs map to the same label, keep the latest one.
+    const sdkByLabel = new Map<string, string>()
+    for (const m of modelOptions) {
+      if (m.value.startsWith('claude-')) {
+        const label = formatModelDisplayName(m.displayName)
+        const existing = sdkByLabel.get(label)
+        if (!existing || m.value > existing) {
+          sdkByLabel.set(label, m.value)
+        }
+      }
+    }
+
+    // Replace hardcoded values with SDK values when labels match
+    const usedLabels = new Set<string>()
+    const base = MODEL_OPTIONS.map((m) => {
+      usedLabels.add(m.label)
+      const sdkValue = sdkByLabel.get(m.label)
+      return sdkValue ? { value: sdkValue, label: m.label } : m
+    })
+
+    // Append genuinely new SDK models not matching any hardcoded label
     const extras = modelOptions
-      .filter((m) => m.value.startsWith('claude-') && !knownValues.has(m.value))
+      .filter((m) => m.value.startsWith('claude-'))
       .map((m) => ({ value: m.value, label: formatModelDisplayName(m.displayName) }))
-    return [...MODEL_OPTIONS, ...extras]
+      .filter((m) => !usedLabels.has(m.label))
+
+    return [...base, ...extras]
   })()
 
   return (
