@@ -3,7 +3,7 @@ import os from 'os'
 import fsp from 'fs/promises'
 import { extractTitleFromMessage } from '../../title-utils.js'
 import type { CodingCliProvider } from '../provider.js'
-import type { NormalizedEvent, ParsedSessionMeta, TokenPayload, TokenSummary } from '../types.js'
+import { normalizeFirstUserMessage, type NormalizedEvent, type ParsedSessionMeta, type TokenPayload, type TokenSummary } from '../types.js'
 import { looksLikePath, isSystemContext, extractFromIdeContext, resolveGitRepoRoot } from '../utils.js'
 
 const CODEX_MAX_PLAUSIBLE_CONTEXT_TOKENS_WITHOUT_WINDOW = 5_000_000
@@ -196,12 +196,20 @@ function parseCodexTokenEnvelope(payload: any): {
   }
 }
 
+function isCodexSubagentSource(source: unknown): boolean {
+  if (!source || typeof source !== 'object') return false
+  const candidate = source as { subagent?: { thread_spawn?: unknown } }
+  return !!candidate.subagent?.thread_spawn
+}
+
 export function parseCodexSessionContent(content: string): ParsedSessionMeta {
   const lines = content.split(/\r?\n/).filter(Boolean)
   let sessionId: string | undefined
   let cwd: string | undefined
   let title: string | undefined
   let summary: string | undefined
+  let firstUserMessage: string | undefined
+  let isSubagent: boolean | undefined
   let isNonInteractive: boolean | undefined
   let gitBranch: string | undefined
   let isDirty: boolean | undefined
@@ -230,6 +238,9 @@ export function parseCodexSessionContent(content: string): ParsedSessionMeta {
       if (isDirty === undefined && typeof payload?.git?.isDirty === 'boolean') {
         isDirty = payload.git.isDirty
       }
+      if (isSubagent === undefined && isCodexSubagentSource(payload.source)) {
+        isSubagent = true
+      }
       if (payload.source === 'exec') {
         isNonInteractive = true
       }
@@ -242,9 +253,13 @@ export function parseCodexSessionContent(content: string): ParsedSessionMeta {
       }
     }
 
-    if (!title && obj?.type === 'response_item' && obj?.payload?.type === 'message' && obj?.payload?.role === 'user') {
+    if (obj?.type === 'response_item' && obj?.payload?.type === 'message' && obj?.payload?.role === 'user') {
       const text = extractTextContent(obj.payload.content)
-      if (text.trim()) {
+      const normalized = normalizeFirstUserMessage(text)
+      if (!firstUserMessage && normalized) {
+        firstUserMessage = normalized
+      }
+      if (!title && text.trim()) {
         // Try to extract user request from IDE-formatted context first
         const ideRequest = extractFromIdeContext(text)
         if (ideRequest) {
@@ -278,7 +293,9 @@ export function parseCodexSessionContent(content: string): ParsedSessionMeta {
     cwd,
     title,
     summary,
+    firstUserMessage,
     messageCount: lines.length,
+    isSubagent,
     isNonInteractive,
     gitBranch,
     isDirty,
@@ -319,6 +336,10 @@ export const codexProvider: CodingCliProvider = {
 
   getSessionGlob() {
     return path.join(this.homeDir, 'sessions', '**', '*.jsonl')
+  },
+
+  getSessionRoots() {
+    return [path.join(this.homeDir, 'sessions')]
   },
 
   async listSessionFiles() {

@@ -1,6 +1,7 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit'
 import type { AppSettings, SidebarSortMode, CodingCliProviderName } from './types'
 import type { DeepPartial } from '@/lib/type-utils'
+import { normalizeTrimmedStringList } from '@shared/string-list'
 
 export function resolveDefaultLoggingDebug(isDev: boolean = import.meta.env.DEV): boolean {
   return !!isDev
@@ -26,13 +27,15 @@ export const defaultSettings: AppSettings = {
   },
   safety: {
     autoKillIdleMinutes: 180,
-    warnBeforeKillMinutes: 5,
   },
   sidebar: {
     sortMode: 'recency-pinned',
     showProjectBadges: true,
     showSubagents: false,
     showNoninteractiveSessions: false,
+    hideEmptySessions: true,
+    excludeFirstChatSubstrings: [],
+    excludeFirstChatMustStart: false,
     width: 288,
     collapsed: false,
   },
@@ -117,6 +120,8 @@ export function mergeSettings(base: AppSettings, patch: DeepPartial<AppSettings>
     sidebar: {
       ...merged.sidebar,
       sortMode: migrateSortMode(merged.sidebar?.sortMode),
+      excludeFirstChatSubstrings: normalizeTrimmedStringList(merged.sidebar?.excludeFirstChatSubstrings),
+      excludeFirstChatMustStart: !!merged.sidebar?.excludeFirstChatMustStart,
     },
     codingCli: {
       ...merged.codingCli,

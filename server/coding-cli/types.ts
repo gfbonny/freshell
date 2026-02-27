@@ -130,8 +130,10 @@ export interface ParsedSessionMeta {
   cwd?: string
   title?: string
   summary?: string
+  firstUserMessage?: string
   messageCount?: number
   projectPath?: string
+  isSubagent?: boolean
   isNonInteractive?: boolean
   gitBranch?: string
   isDirty?: boolean
@@ -161,6 +163,7 @@ export interface CodingCliSession {
   messageCount?: number
   title?: string
   summary?: string
+  firstUserMessage?: string
   cwd?: string
   gitBranch?: string
   isDirty?: boolean
@@ -168,6 +171,15 @@ export interface CodingCliSession {
   sourceFile?: string
   isSubagent?: boolean
   isNonInteractive?: boolean
+}
+
+export const FIRST_USER_MESSAGE_MAX_CHARS = 4000
+
+export function normalizeFirstUserMessage(content: string): string | undefined {
+  const trimmed = content.trim()
+  if (!trimmed) return undefined
+  if (trimmed.length <= FIRST_USER_MESSAGE_MAX_CHARS) return trimmed
+  return trimmed.slice(0, FIRST_USER_MESSAGE_MAX_CHARS)
 }
 
 export interface ProjectGroup {

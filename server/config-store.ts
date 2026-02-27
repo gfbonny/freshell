@@ -3,6 +3,7 @@ import path from 'path'
 import os from 'os'
 import { logger } from './logger.js'
 import type { CodingCliProviderName } from './coding-cli/types.js'
+import { normalizeTrimmedStringList } from '../shared/string-list.js'
 
 /**
  * Simple promise-based mutex to serialize write operations.
@@ -57,7 +58,6 @@ export type AppSettings = {
   }
   safety: {
     autoKillIdleMinutes: number
-    warnBeforeKillMinutes: number
   }
   panes: {
     defaultNewPane: 'ask' | 'shell' | 'browser' | 'editor'
@@ -71,6 +71,9 @@ export type AppSettings = {
     showProjectBadges: boolean
     showSubagents: boolean
     showNoninteractiveSessions: boolean
+    hideEmptySessions: boolean
+    excludeFirstChatSubstrings: string[]
+    excludeFirstChatMustStart: boolean
     width: number
     collapsed: boolean
   }
@@ -154,7 +157,6 @@ export const defaultSettings: AppSettings = {
   },
   safety: {
     autoKillIdleMinutes: 180,
-    warnBeforeKillMinutes: 5,
   },
   notifications: {
     soundEnabled: true,
@@ -171,6 +173,9 @@ export const defaultSettings: AppSettings = {
     showProjectBadges: true,
     showSubagents: false,
     showNoninteractiveSessions: false,
+    hideEmptySessions: true,
+    excludeFirstChatSubstrings: [],
+    excludeFirstChatMustStart: false,
     width: 288,
     collapsed: false,
   },
@@ -410,7 +415,18 @@ function mergeSettings(base: AppSettings, patch: AppSettingsPatch): AppSettings 
     safety: { ...base.safety, ...(patch.safety || {}) },
     notifications: { ...base.notifications, ...(patch.notifications || {}) },
     panes: { ...base.panes, ...(patch.panes || {}) },
-    sidebar: { ...base.sidebar, ...(patch.sidebar || {}) },
+    sidebar: {
+      ...base.sidebar,
+      ...(patch.sidebar || {}),
+      excludeFirstChatSubstrings: normalizeTrimmedStringList(
+        (patch.sidebar && Object.prototype.hasOwnProperty.call(patch.sidebar, 'excludeFirstChatSubstrings'))
+          ? patch.sidebar.excludeFirstChatSubstrings
+          : base.sidebar.excludeFirstChatSubstrings
+      ),
+      excludeFirstChatMustStart: (patch.sidebar && Object.prototype.hasOwnProperty.call(patch.sidebar, 'excludeFirstChatMustStart'))
+        ? !!patch.sidebar.excludeFirstChatMustStart
+        : !!base.sidebar.excludeFirstChatMustStart,
+    },
     codingCli: {
       ...base.codingCli,
       ...(patch.codingCli || {}),

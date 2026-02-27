@@ -273,9 +273,10 @@ describe('files-router path validation', () => {
         .send({ path: '/home/user/file.ts', line: 42, column: 10 })
 
       expect(res.status).toBe(200)
+      const expectedPathWithLocation = `${path.resolve('/home/user/file.ts')}:42:10`
       expect(mockSpawn).toHaveBeenCalledWith(
         'cursor',
-        ['-r', '-g', '/home/user/file.ts:42:10'],
+        ['-r', '-g', expectedPathWithLocation],
         expect.any(Object),
       )
     })
@@ -293,9 +294,10 @@ describe('files-router path validation', () => {
         .send({ path: '/home/user/file.ts' })
 
       expect(res.status).toBe(200)
+      const expectedPath = path.resolve('/home/user/file.ts')
       expect(mockSpawn).toHaveBeenCalledWith(
         'code',
-        ['-g', '/home/user/file.ts'],
+        ['-g', expectedPath],
         expect.any(Object),
       )
     })

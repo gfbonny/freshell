@@ -30,6 +30,7 @@ import { nanoid } from '@reduxjs/toolkit'
 import type { AppView } from '@/components/Sidebar'
 import { CODING_CLI_PROVIDER_CONFIGS } from '@/lib/coding-cli-utils'
 import { createLogger } from '@/lib/client-logger'
+import { parseNormalizedLineList } from '@shared/string-list'
 
 
 const log = createLogger('SettingsView')
@@ -188,12 +189,18 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
   const [terminalAdvancedOpen, setTerminalAdvancedOpen] = useState(false)
   const [defaultCwdInput, setDefaultCwdInput] = useState(settings.defaultCwd ?? '')
   const [defaultCwdError, setDefaultCwdError] = useState<string | null>(null)
+  const [excludeFirstChatInput, setExcludeFirstChatInput] = useState(
+    () => (settings.sidebar?.excludeFirstChatSubstrings ?? []).join('\n'),
+  )
   const [deviceNameInputs, setDeviceNameInputs] = useState<Record<string, string>>({})
   const terminalAdvancedId = useId()
   const pendingRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const defaultCwdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const defaultCwdValidationRef = useRef(0)
   const lastSettingsDefaultCwdRef = useRef(settings.defaultCwd ?? '')
+  const lastSettingsExcludeFirstChatRef = useRef(
+    (settings.sidebar?.excludeFirstChatSubstrings ?? []).join('\n'),
+  )
   const previewTheme = useMemo(
     () => getTerminalTheme(settings.terminal.theme, settings.theme),
     [settings.terminal.theme, settings.theme],
@@ -249,6 +256,14 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
     }
     lastSettingsDefaultCwdRef.current = next
   }, [defaultCwdInput, settings.defaultCwd])
+
+  useEffect(() => {
+    const next = (settings.sidebar?.excludeFirstChatSubstrings ?? []).join('\n')
+    if (excludeFirstChatInput === lastSettingsExcludeFirstChatRef.current) {
+      setExcludeFirstChatInput(next)
+    }
+    lastSettingsExcludeFirstChatRef.current = next
+  }, [excludeFirstChatInput, settings.sidebar?.excludeFirstChatSubstrings])
 
   const commitDefaultCwd = useCallback((nextValue: string | undefined) => {
     if (nextValue === settings.defaultCwd) return
@@ -690,6 +705,7 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
               />
             </SettingsRow>
 
+
             <SettingsRow label="Show non-interactive sessions">
               <Toggle
                 checked={settings.sidebar?.showNoninteractiveSessions ?? false}
@@ -697,6 +713,50 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
                   dispatch(updateSettingsLocal({ sidebar: { showNoninteractiveSessions: checked } }))
                   scheduleSave({ sidebar: { showNoninteractiveSessions: checked } })
                 }}
+              />
+            </SettingsRow>
+
+            <SettingsRow
+              label="Hide empty sessions"
+              description="Hide sessions that have no messages yet (e.g. newly started Claude Code sessions)."
+            >
+              <Toggle
+                checked={settings.sidebar?.hideEmptySessions ?? true}
+                onChange={(checked) => {
+                  dispatch(updateSettingsLocal({ sidebar: { hideEmptySessions: checked } }))
+                  scheduleSave({ sidebar: { hideEmptySessions: checked } })
+                }}
+                aria-label="Hide empty sessions"
+              />
+            </SettingsRow>
+
+            <SettingsRow
+              label="Hide sessions by first chat"
+              description="One substring per line. Matching sessions are hidden from the sidebar."
+            >
+              <textarea
+                value={excludeFirstChatInput}
+                onChange={(event) => {
+                  const nextInput = event.target.value
+                  setExcludeFirstChatInput(nextInput)
+                  const excludeFirstChatSubstrings = parseNormalizedLineList(nextInput)
+                  dispatch(updateSettingsLocal({ sidebar: { excludeFirstChatSubstrings } }))
+                  scheduleSave({ sidebar: { excludeFirstChatSubstrings } })
+                }}
+                className="min-h-20 w-full rounded-md bg-muted border-0 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-border md:w-[24rem]"
+                placeholder="__AUTO__"
+                aria-label="Sidebar first chat exclusion substrings"
+              />
+            </SettingsRow>
+
+            <SettingsRow label="First chat must start with match">
+              <Toggle
+                checked={settings.sidebar?.excludeFirstChatMustStart ?? false}
+                onChange={(checked) => {
+                  dispatch(updateSettingsLocal({ sidebar: { excludeFirstChatMustStart: checked } }))
+                  scheduleSave({ sidebar: { excludeFirstChatMustStart: checked } })
+                }}
+                aria-label="Require first chat exclusion substring at start"
               />
             </SettingsRow>
           </SettingsSection>
@@ -983,20 +1043,6 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
                 onChange={(v) => {
                   dispatch(updateSettingsLocal({ safety: { autoKillIdleMinutes: v } }))
                   scheduleSave({ safety: { autoKillIdleMinutes: v } })
-                }}
-              />
-            </SettingsRow>
-
-            <SettingsRow label="Warn before kill (minutes)">
-              <RangeSlider
-                value={settings.safety.warnBeforeKillMinutes}
-                min={1}
-                max={60}
-                step={1}
-                format={(v) => String(v)}
-                onChange={(v) => {
-                  dispatch(updateSettingsLocal({ safety: { warnBeforeKillMinutes: v } }))
-                  scheduleSave({ safety: { warnBeforeKillMinutes: v } })
                 }}
               />
             </SettingsRow>

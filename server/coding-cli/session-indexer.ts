@@ -97,13 +97,19 @@ type CachedSessionEntry = {
 export type SessionIndexerOptions = {
   debounceMs?: number
   throttleMs?: number
+  fullScanIntervalMs?: number
 }
 
 const DEFAULT_DEBOUNCE_MS = 2_000
 const DEFAULT_THROTTLE_MS = 5_000
+const DEFAULT_FULL_SCAN_INTERVAL_MS = 10 * 60 * 1000 // 10 minutes
+const URGENT_REFRESH_MS = 300 // Fast refresh when a titleless session might have just gained content
+const URGENT_THROTTLE_MS = 1000 // Minimum spacing between urgent refreshes to cap worst-case frequency
 
 export class CodingCliSessionIndexer {
   private watcher: chokidar.FSWatcher | null = null
+  private rootWatcher: chokidar.FSWatcher | null = null
+  private fullScanTimer: NodeJS.Timeout | null = null
   private projects: ProjectGroup[] = []
   private onUpdateHandlers = new Set<(projects: ProjectGroup[]) => void>()
   private refreshTimer: NodeJS.Timeout | null = null
@@ -117,15 +123,19 @@ export class CodingCliSessionIndexer {
   private lastRefreshAt = 0
   private readonly debounceMs: number
   private readonly throttleMs: number
+  private readonly fullScanIntervalMs: number
   private knownSessionIds = new Set<string>()
   private seenSessionIds = new Map<string, number>()
   private onNewSessionHandlers = new Set<(session: CodingCliSession) => void>()
   private initialized = false
   private sessionKeyToFilePath = new Map<string, string>()
+  private urgentRefreshNeeded = false
 
   constructor(private providers: CodingCliProvider[], options: SessionIndexerOptions = {}) {
     this.debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS
     this.throttleMs = options.throttleMs ?? DEFAULT_THROTTLE_MS
+    this.fullScanIntervalMs = options.fullScanIntervalMs ??
+      Number(process.env.CODING_CLI_FULL_SCAN_INTERVAL_MS || DEFAULT_FULL_SCAN_INTERVAL_MS)
   }
 
   async start() {
@@ -153,13 +163,71 @@ export class CodingCliSessionIndexer {
       schedule()
     })
     this.watcher.on('error', (err) => logger.warn({ err }, 'Coding CLI watcher error'))
+
+    // Watch parent directories of provider roots for late directory creation/removal.
+    // When a provider root (e.g. ~/.codex/sessions) doesn't exist at startup, chokidar's
+    // glob watcher silently ignores it. This root watcher detects when the directory
+    // appears and triggers a full rescan.
+    this.startRootWatcher()
+
+    // Periodic safety full-scan to catch anything the file watchers might miss.
+    if (this.fullScanIntervalMs > 0) {
+      this.fullScanTimer = setInterval(() => {
+        this.needsFullScan = true
+        this.scheduleRefresh()
+      }, this.fullScanIntervalMs)
+    }
   }
 
   stop() {
     this.watcher?.close().catch(() => {})
     this.watcher = null
+    this.rootWatcher?.close().catch(() => {})
+    this.rootWatcher = null
     if (this.refreshTimer) clearTimeout(this.refreshTimer)
     this.refreshTimer = null
+    if (this.fullScanTimer) clearInterval(this.fullScanTimer)
+    this.fullScanTimer = null
+  }
+
+  private startRootWatcher() {
+    const rootSet = new Set<string>()
+    for (const provider of this.providers) {
+      for (const root of provider.getSessionRoots()) {
+        rootSet.add(normalizeFilePath(root))
+      }
+    }
+
+    if (rootSet.size === 0) return
+
+    // Watch the parent directory of each root so we detect when the root itself is created.
+    const parentDirs = new Set<string>()
+    for (const root of rootSet) {
+      parentDirs.add(path.dirname(root))
+    }
+
+    this.rootWatcher = chokidar.watch(Array.from(parentDirs), {
+      ignoreInitial: true,
+      depth: 0,
+    })
+
+    this.rootWatcher.on('addDir', (dirPath) => {
+      if (rootSet.has(normalizeFilePath(dirPath))) {
+        logger.info({ dirPath }, 'Provider session root created, scheduling full scan')
+        this.needsFullScan = true
+        this.scheduleRefresh()
+      }
+    })
+
+    this.rootWatcher.on('unlinkDir', (dirPath) => {
+      if (rootSet.has(normalizeFilePath(dirPath))) {
+        logger.info({ dirPath }, 'Provider session root removed, scheduling full scan')
+        this.needsFullScan = true
+        this.scheduleRefresh()
+      }
+    })
+
+    this.rootWatcher.on('error', (err) => logger.warn({ err }, 'Root watcher error'))
   }
 
   onUpdate(handler: (projects: ProjectGroup[]) => void): () => void {
@@ -202,6 +270,14 @@ export class CodingCliSessionIndexer {
     const normalized = normalizeFilePath(filePath)
     this.deletedFiles.delete(normalized)
     this.dirtyFiles.add(normalized)
+
+    // If the cached session has no title, this change might be the first user
+    // message arriving. Flag for urgent refresh so the session appears in the
+    // sidebar without the normal debounce/throttle delay.
+    const cached = this.fileCache.get(normalized)
+    if (cached?.baseSession && !cached.baseSession.title) {
+      this.urgentRefreshNeeded = true
+    }
   }
 
   private markDeleted(filePath: string) {
@@ -344,12 +420,13 @@ export class CodingCliSessionIndexer {
       messageCount: meta.messageCount,
       title: meta.title,
       summary: meta.summary,
+      ...(meta.firstUserMessage ? { firstUserMessage: meta.firstUserMessage } : {}),
       cwd: meta.cwd,
       gitBranch: meta.gitBranch,
       isDirty: meta.isDirty,
       tokenUsage: meta.tokenUsage,
       sourceFile: filePath,
-      isSubagent: isSubagentSession(filePath) || undefined,
+      isSubagent: meta.isSubagent || isSubagentSession(filePath) || undefined,
       isNonInteractive: meta.isNonInteractive || undefined,
     }
 
@@ -364,19 +441,26 @@ export class CodingCliSessionIndexer {
 
   scheduleRefresh() {
     if (this.refreshTimer) clearTimeout(this.refreshTimer)
+    const urgent = this.urgentRefreshNeeded
+    this.urgentRefreshNeeded = false
     const elapsed = Date.now() - this.lastRefreshAt
-    const delay = Math.max(this.debounceMs, this.throttleMs - elapsed)
+    const delay = urgent ? URGENT_REFRESH_MS : Math.max(this.debounceMs, this.throttleMs - elapsed)
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = null
       // Re-check throttle at fire-time: an in-flight refresh may have completed
       // since scheduling, updating lastRefreshAt. Without this, a timer scheduled
       // during an in-flight refresh would fire too soon after it completes.
+      // Urgent refreshes use a shorter throttle floor to stay responsive while
+      // capping worst-case frequency for sessions that stay titleless under load.
+      const effectiveThrottle = urgent
+        ? (this.throttleMs > 0 ? Math.min(URGENT_THROTTLE_MS, this.throttleMs) : 0)
+        : this.throttleMs
       const fireElapsed = Date.now() - this.lastRefreshAt
-      if (this.throttleMs > 0 && fireElapsed < this.throttleMs) {
+      if (effectiveThrottle > 0 && fireElapsed < effectiveThrottle) {
         this.refreshTimer = setTimeout(() => {
           this.refreshTimer = null
           this.refresh().catch((err) => logger.warn({ err }, 'Refresh failed'))
-        }, this.throttleMs - fireElapsed)
+        }, effectiveThrottle - fireElapsed)
         return
       }
       this.refresh().catch((err) => logger.warn({ err }, 'Refresh failed'))

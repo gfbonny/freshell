@@ -39,13 +39,15 @@ describe('settingsSlice', () => {
       expect(state.settings.defaultCwd).toBeUndefined()
       expect(state.settings.safety).toEqual({
         autoKillIdleMinutes: 180,
-        warnBeforeKillMinutes: 5,
       })
       expect(state.settings.sidebar).toEqual({
         sortMode: 'recency-pinned',
         showProjectBadges: true,
         showSubagents: false,
         showNoninteractiveSessions: false,
+        hideEmptySessions: true,
+        excludeFirstChatSubstrings: [],
+        excludeFirstChatMustStart: false,
         width: 288,
         collapsed: false,
       })
@@ -108,13 +110,15 @@ describe('settingsSlice', () => {
         defaultCwd: '/home/user',
         safety: {
           autoKillIdleMinutes: 60,
-          warnBeforeKillMinutes: 10,
         },
         sidebar: {
           sortMode: 'recency',
           showProjectBadges: false,
           showSubagents: false,
           showNoninteractiveSessions: false,
+          hideEmptySessions: true,
+          excludeFirstChatSubstrings: [],
+          excludeFirstChatMustStart: false,
           width: 320,
           collapsed: false,
         },
@@ -153,6 +157,10 @@ describe('settingsSlice', () => {
             ...defaultSettings.codingCli.providers,
             ...newSettings.codingCli.providers,
           },
+        },
+        editor: {
+          ...defaultSettings.editor,
+          ...newSettings.editor,
         },
         freshclaude: {},
       })
@@ -253,7 +261,6 @@ describe('settingsSlice', () => {
       )
 
       expect(state.settings.safety.autoKillIdleMinutes).toBe(60)
-      expect(state.settings.safety.warnBeforeKillMinutes).toBe(defaultSettings.safety.warnBeforeKillMinutes)
     })
 
     it('deep merges sidebar settings', () => {
@@ -271,6 +278,24 @@ describe('settingsSlice', () => {
 
       expect(state.settings.sidebar.sortMode).toBe('activity')
       expect(state.settings.sidebar.showProjectBadges).toBe(defaultSettings.sidebar.showProjectBadges)
+    })
+
+    it('normalizes first-chat exclusion substrings', () => {
+      const initialState: SettingsState = {
+        settings: defaultSettings,
+        loaded: true,
+      }
+
+      const state = settingsReducer(
+        initialState,
+        updateSettingsLocal({
+          sidebar: {
+            excludeFirstChatSubstrings: ['  __AUTO__  ', '', '__AUTO__', 'canary'],
+          },
+        })
+      )
+
+      expect(state.settings.sidebar.excludeFirstChatSubstrings).toEqual(['__AUTO__', 'canary'])
     })
 
     it('deep merges coding CLI settings', () => {
@@ -309,7 +334,7 @@ describe('settingsSlice', () => {
         updateSettingsLocal({
           theme: 'light',
           terminal: { fontSize: 16, cursorBlink: false },
-          safety: { warnBeforeKillMinutes: 10 },
+          safety: { autoKillIdleMinutes: 60 },
           sidebar: { showProjectBadges: false },
         })
       )
@@ -320,8 +345,7 @@ describe('settingsSlice', () => {
       expect(state.settings.terminal.fontFamily).toBe(defaultSettings.terminal.fontFamily)
       expect(state.settings.terminal.osc52Clipboard).toBe(defaultSettings.terminal.osc52Clipboard)
       expect(state.settings.terminal.renderer).toBe(defaultSettings.terminal.renderer)
-      expect(state.settings.safety.warnBeforeKillMinutes).toBe(10)
-      expect(state.settings.safety.autoKillIdleMinutes).toBe(defaultSettings.safety.autoKillIdleMinutes)
+      expect(state.settings.safety.autoKillIdleMinutes).toBe(60)
       expect(state.settings.sidebar.showProjectBadges).toBe(false)
       expect(state.settings.sidebar.sortMode).toBe(defaultSettings.sidebar.sortMode)
     })

@@ -54,9 +54,34 @@ function expectCodexTurnCompleteArgs(args: string[]) {
   expect(args).toContain('-c')
   expect(args).toContain('tui.notification_method=bel')
   expect(args).toContain("tui.notifications=['agent-turn-complete']")
+
+  // skills.config must be passed as a single TOML array literal (not dotted map keys)
+  // to satisfy Codex's config parser which expects a sequence, not a map.
+  const skillsConfigArg = args.find((arg) => arg.startsWith('skills.config='))
+  expect(skillsConfigArg).toBeDefined()
+
+  // Must NOT use dotted key format (skills.config.N.path=...) — that creates a TOML map
+  const dottedKeyArgs = args.filter((arg) => /^skills\.config\.\d+\./.test(arg))
+  expect(dottedKeyArgs).toHaveLength(0)
+
+  // Parse the TOML array literal to verify contents
+  const arrayLiteral = skillsConfigArg!.replace('skills.config=', '')
+  expect(arrayLiteral).toMatch(/^\[.*\]$/)
+
+  // Verify orchestration skill is present and enabled
+  expect(arrayLiteral).toMatch(/path\s*=\s*"[^"]*freshell-orchestration[^"]*"/)
+  expect(arrayLiteral).toMatch(/freshell-orchestration[^}]*enabled\s*=\s*true/)
+
+  // Verify demo/legacy skills are present and disabled
+  const hasDemoDisabled = /(?:freshell-demo-creation|demo-creating)[^}]*enabled\s*=\s*false/.test(arrayLiteral)
+    || /enabled\s*=\s*false[^}]*(?:freshell-demo-creation|demo-creating)/.test(arrayLiteral)
+  expect(hasDemoDisabled).toBe(true)
 }
 
 function expectClaudeTurnCompleteArgs(args: string[]) {
+  const pluginDirIndex = args.indexOf('--plugin-dir')
+  expect(pluginDirIndex).toBeGreaterThan(-1)
+  expect(args[pluginDirIndex + 1]).toContain('freshell-orchestration')
   const command = getClaudeStopHookCommand(args)
   expect(command).toContain("printf '\\a'")
 }
@@ -901,6 +926,38 @@ describe('buildSpawnSpec Unix paths', () => {
       const spec = buildSpawnSpec('shell', '/Users/john', 'system')
 
       expect(spec.env.MY_CUSTOM_VAR).toBe('test-value')
+    })
+
+    it('strips CI so child terminals are treated as interactive', () => {
+      process.env.CI = '1'
+
+      const spec = buildSpawnSpec('claude', '/Users/john', 'system')
+
+      expect(spec.env.CI).toBeUndefined()
+    })
+
+    it('strips NO_COLOR so child terminals can render color', () => {
+      process.env.NO_COLOR = '1'
+
+      const spec = buildSpawnSpec('claude', '/Users/john', 'system')
+
+      expect(spec.env.NO_COLOR).toBeUndefined()
+    })
+
+    it('strips FORCE_COLOR inherited from host process', () => {
+      process.env.FORCE_COLOR = '0'
+
+      const spec = buildSpawnSpec('claude', '/Users/john', 'system')
+
+      expect(spec.env.FORCE_COLOR).toBeUndefined()
+    })
+
+    it('strips COLOR inherited from host process', () => {
+      process.env.COLOR = '0'
+
+      const spec = buildSpawnSpec('claude', '/Users/john', 'system')
+
+      expect(spec.env.COLOR).toBeUndefined()
     })
   })
 
@@ -2296,6 +2353,38 @@ describe('buildSpawnSpec Unix paths', () => {
       const spec = buildSpawnSpec('shell', '/Users/john', 'system')
 
       expect(spec.env.MY_CUSTOM_VAR).toBe('test-value')
+    })
+
+    it('strips CI so child terminals are treated as interactive', () => {
+      process.env.CI = '1'
+
+      const spec = buildSpawnSpec('claude', '/Users/john', 'system')
+
+      expect(spec.env.CI).toBeUndefined()
+    })
+
+    it('strips NO_COLOR so child terminals can render color', () => {
+      process.env.NO_COLOR = '1'
+
+      const spec = buildSpawnSpec('claude', '/Users/john', 'system')
+
+      expect(spec.env.NO_COLOR).toBeUndefined()
+    })
+
+    it('strips FORCE_COLOR inherited from host process', () => {
+      process.env.FORCE_COLOR = '0'
+
+      const spec = buildSpawnSpec('claude', '/Users/john', 'system')
+
+      expect(spec.env.FORCE_COLOR).toBeUndefined()
+    })
+
+    it('strips COLOR inherited from host process', () => {
+      process.env.COLOR = '0'
+
+      const spec = buildSpawnSpec('claude', '/Users/john', 'system')
+
+      expect(spec.env.COLOR).toBeUndefined()
     })
   })
 

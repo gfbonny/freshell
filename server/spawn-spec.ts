@@ -1,5 +1,8 @@
 import { logger } from './logger.js'
 import { isValidClaudeSessionId } from './claude-session-id.js'
+import fs from 'fs'
+import path from 'path'
+import os from 'os'
 import {
   isWindows, isWsl, isWindowsLike,
   getWindowsExe, getWindowsDefaultCwd,
@@ -60,11 +63,94 @@ export function modeSupportsResume(mode: TerminalMode): boolean {
 
 type ProviderTarget = 'unix' | 'windows'
 
+const DEFAULT_FRESHELL_ORCHESTRATION_SKILL_DIR = path.join(process.cwd(), '.claude', 'skills', 'freshell-orchestration')
+const LEGACY_FRESHELL_ORCHESTRATION_SKILL_DIR = path.join(process.cwd(), '.claude', 'skills', 'freshell-automation-tmux-style')
+const DEFAULT_FRESHELL_DEMO_SKILL_DIR = path.join(process.cwd(), '.claude', 'skills', 'freshell-demo-creation')
+const LEGACY_FRESHELL_DEMO_SKILL_DIR = path.join(process.cwd(), '.claude', 'skills', 'demo-creating')
+const DEFAULT_FRESHELL_CLAUDE_PLUGIN_DIR = path.join(process.cwd(), '.claude', 'plugins', 'freshell-orchestration')
+const LEGACY_FRESHELL_CLAUDE_PLUGIN_DIR = path.join(process.cwd(), '.claude', 'plugins', 'freshell-automation-tmux-style')
+const DEFAULT_CODEX_HOME = path.join(os.homedir(), '.codex')
+
+function firstExistingPath(candidates: Array<string | undefined>): string | undefined {
+  for (const candidate of candidates) {
+    if (!candidate) continue
+    try {
+      if (fs.existsSync(candidate)) return candidate
+    } catch {
+      // Ignore filesystem errors and fall through to the next candidate.
+    }
+  }
+  return undefined
+}
+
+function encodeTomlString(value: string): string {
+  return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+}
+
+function firstExistingPaths(candidates: Array<string | undefined>): string[] {
+  const unique = new Set<string>()
+  for (const candidate of candidates) {
+    if (!candidate || unique.has(candidate)) continue
+    try {
+      if (fs.existsSync(candidate)) unique.add(candidate)
+    } catch {
+      // Ignore filesystem errors and continue collecting matches.
+    }
+  }
+  return Array.from(unique)
+}
+
+function codexSkillsDir(): string {
+  const codexHome = process.env.CODEX_HOME || DEFAULT_CODEX_HOME
+  return path.join(codexHome, 'skills')
+}
+
+function codexOrchestrationSkillArgs(): string[] {
+  const skillsDir = codexSkillsDir()
+  const skillPath = firstExistingPath([
+    process.env.FRESHELL_ORCHESTRATION_SKILL_DIR,
+    DEFAULT_FRESHELL_ORCHESTRATION_SKILL_DIR,
+    LEGACY_FRESHELL_ORCHESTRATION_SKILL_DIR,
+    path.join(skillsDir, 'freshell-orchestration'),
+    path.join(skillsDir, 'freshell-automation-tmux-style'),
+  ])
+  if (!skillPath) return []
+  const disablePaths = firstExistingPaths([
+    process.env.FRESHELL_DEMO_SKILL_DIR,
+    DEFAULT_FRESHELL_DEMO_SKILL_DIR,
+    LEGACY_FRESHELL_DEMO_SKILL_DIR,
+    path.join(skillsDir, 'demo-creating'),
+    path.join(skillsDir, 'freshell-demo-creation'),
+    LEGACY_FRESHELL_ORCHESTRATION_SKILL_DIR,
+    path.join(skillsDir, 'freshell-automation-tmux-style'),
+  ]).filter((entryPath) => entryPath !== skillPath)
+
+  const entries: Array<{ path: string; enabled: boolean }> = [
+    { path: skillPath, enabled: true },
+    ...disablePaths.map((entryPath) => ({ path: entryPath, enabled: false })),
+  ]
+  const tomlEntries = entries.map(
+    (entry) => `{path = ${encodeTomlString(entry.path)}, enabled = ${entry.enabled}}`
+  )
+  return ['-c', `skills.config=[${tomlEntries.join(', ')}]`]
+}
+
+function claudePluginArgs(): string[] {
+  const pluginDir = firstExistingPath([
+    process.env.FRESHELL_CLAUDE_PLUGIN_DIR,
+    DEFAULT_FRESHELL_CLAUDE_PLUGIN_DIR,
+    LEGACY_FRESHELL_CLAUDE_PLUGIN_DIR,
+  ])
+  if (!pluginDir) return []
+  return ['--plugin-dir', pluginDir]
+}
+
 function providerNotificationArgs(mode: TerminalMode, target: ProviderTarget): string[] {
   if (mode === 'codex') {
     return [
       '-c', 'tui.notification_method=bel',
       '-c', "tui.notifications=['agent-turn-complete']",
+      ...codexOrchestrationSkillArgs(),
     ]
   }
 
@@ -86,7 +172,7 @@ function providerNotificationArgs(mode: TerminalMode, target: ProviderTarget): s
         ],
       },
     }
-    return ['--settings', JSON.stringify(settings)]
+    return [...claudePluginArgs(), '--settings', JSON.stringify(settings)]
   }
 
   return []
@@ -186,8 +272,11 @@ function buildPowerShellCommand(command: string, args: string[]): string {
 }
 
 export function buildSpawnSpec(mode: TerminalMode, cwd: string | undefined, shell: ShellType, resumeSessionId?: string) {
+  // CLAUDECODE is set by parent Claude Code sessions and causes child
+  // claude processes to refuse to start ("nested session" error). Strip it.
+  const { CLAUDECODE: _, ...parentEnv } = process.env
   const env = {
-    ...process.env,
+    ...parentEnv,
     TERM: process.env.TERM || 'xterm-256color',
     COLORTERM: process.env.COLORTERM || 'truecolor',
   }

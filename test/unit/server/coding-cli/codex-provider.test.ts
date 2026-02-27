@@ -49,7 +49,34 @@ describe('codex-provider', () => {
     expect(meta.sessionId).toBe('session-xyz')
     expect(meta.cwd).toBe('/project/a')
     expect(meta.title).toBe('Build the feature')
+    expect(meta.firstUserMessage).toBe('Build the feature')
     expect(meta.messageCount).toBe(2)
+  })
+
+  it('flags spawned subagent sessions from session_meta source', () => {
+    const content = [
+      JSON.stringify({
+        type: 'session_meta',
+        payload: {
+          id: 'session-subagent',
+          cwd: '/project/a',
+          source: {
+            subagent: {
+              thread_spawn: {
+                parent_thread_id: 'session-parent',
+                depth: 1,
+                agent_nickname: 'Maple',
+                agent_role: 'explorer',
+              },
+            },
+          },
+        },
+      }),
+    ].join('\n')
+
+    const meta = parseCodexSessionContent(content)
+
+    expect(meta.isSubagent).toBe(true)
   })
 
   it('does not include raw payload in normalized events', () => {
@@ -692,6 +719,13 @@ describe('codex-provider', () => {
       const meta = parseCodexSessionContent(content)
 
       expect(meta.title).toBe('Fix the authentication bug in the login form')
+    })
+  })
+
+  describe('getSessionRoots()', () => {
+    it('returns the sessions directory under homeDir', () => {
+      const roots = codexProvider.getSessionRoots()
+      expect(roots).toEqual([path.join(codexProvider.homeDir, 'sessions')])
     })
   })
 })

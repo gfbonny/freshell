@@ -167,6 +167,9 @@ describe('SettingsView Component', () => {
       // Sidebar section
       expect(screen.getByText('Sort mode')).toBeInTheDocument()
       expect(screen.getByText('Show project badges')).toBeInTheDocument()
+      expect(screen.getByText('Ignore Codex subagent sessions')).toBeInTheDocument()
+      expect(screen.getByText('Hide sessions by first chat')).toBeInTheDocument()
+      expect(screen.getByText('First chat must start with match')).toBeInTheDocument()
 
       // Terminal section
       expect(screen.getByText('Font size')).toBeInTheDocument()
@@ -177,7 +180,6 @@ describe('SettingsView Component', () => {
 
       // Safety section
       expect(screen.getByText('Auto-kill idle (minutes)')).toBeInTheDocument()
-      expect(screen.getByText('Warn before kill (minutes)')).toBeInTheDocument()
       expect(screen.getByText('Default working directory')).toBeInTheDocument()
 
       // Notifications section
@@ -362,13 +364,12 @@ describe('SettingsView Component', () => {
       const store = createTestStore({
         settings: {
           ...defaultSettings,
-          safety: { autoKillIdleMinutes: 120, warnBeforeKillMinutes: 15 },
+          safety: { autoKillIdleMinutes: 120 },
         },
       })
       renderWithStore(store)
 
       expect(screen.getByText('120')).toBeInTheDocument()
-      expect(screen.getByText('15')).toBeInTheDocument()
     })
 
     it('shows lastSavedAt timestamp when available', () => {
@@ -726,6 +727,53 @@ describe('SettingsView Component', () => {
       expect(store.getState().settings.settings.sidebar.showProjectBadges).toBe(false)
     })
 
+    it('updates sidebar first-chat exclusion substrings', async () => {
+      const store = createTestStore()
+      renderWithStore(store)
+
+      const textarea = screen.getByLabelText('Sidebar first chat exclusion substrings')
+      fireEvent.change(textarea, { target: { value: '__AUTO__\ncanary' } })
+
+      expect(store.getState().settings.settings.sidebar.excludeFirstChatSubstrings).toEqual(['__AUTO__', 'canary'])
+
+      await act(async () => {
+        vi.advanceTimersByTime(500)
+      })
+
+      expect(api.patch).toHaveBeenCalledWith('/api/settings', {
+        sidebar: { excludeFirstChatSubstrings: ['__AUTO__', 'canary'] },
+      })
+    })
+
+    it('toggles first-chat must-start matching', async () => {
+      const store = createTestStore({
+        settings: {
+          ...defaultSettings,
+          sidebar: {
+            ...defaultSettings.sidebar,
+            excludeFirstChatMustStart: false,
+          },
+        },
+      })
+      renderWithStore(store)
+
+      const row = screen.getByText('First chat must start with match').closest('div')
+      expect(row).toBeTruthy()
+      const toggle = within(row!).getByRole('switch')
+      fireEvent.click(toggle)
+
+      expect(store.getState().settings.settings.sidebar.excludeFirstChatMustStart).toBe(true)
+
+      await act(async () => {
+        vi.advanceTimersByTime(500)
+      })
+
+      expect(api.patch).toHaveBeenCalledWith('/api/settings', {
+        sidebar: { excludeFirstChatMustStart: true },
+      })
+    })
+
+
     it('toggles notification sound', async () => {
       const store = createTestStore({
         settings: {
@@ -941,23 +989,6 @@ describe('SettingsView Component', () => {
       fireEvent.pointerUp(autoKillSlider)
 
       expect(store.getState().settings.settings.safety.autoKillIdleMinutes).toBe(300)
-    })
-
-    it('updates warn before kill slider', () => {
-      const store = createTestStore()
-      renderWithStore(store)
-
-      const sliders = screen.getAllByRole('slider')
-      const warnSlider = sliders.find((slider) => {
-        const min = slider.getAttribute('min')
-        const max = slider.getAttribute('max')
-        return min === '1' && max === '60'
-      })!
-
-      fireEvent.change(warnSlider, { target: { value: '10' } })
-      fireEvent.pointerUp(warnSlider)
-
-      expect(store.getState().settings.settings.safety.warnBeforeKillMinutes).toBe(10)
     })
 
     it('validates default working directory before saving', async () => {

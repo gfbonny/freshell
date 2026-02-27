@@ -817,6 +817,25 @@ describe('claude provider cross-platform tests', () => {
 
       expect(meta.cwd).toBe('/home/user/project')
       expect(meta.title).toBe('Fix the login bug')
+      expect(meta.firstUserMessage).toBe('Fix the login bug')
+    })
+
+    it('extracts first user message when content is an array of blocks', () => {
+      const realContent = [
+        '{"cwd":"/home/user/project","type":"user","message":{"role":"user","content":[{"type":"text","text":"Fix the login bug"}]}}',
+      ].join('\n')
+
+      const meta = parseSessionContent(realContent)
+
+      expect(meta.title).toBe('Fix the login bug')
+      expect(meta.firstUserMessage).toBe('Fix the login bug')
+    })
+  })
+
+  describe('getSessionRoots()', () => {
+    it('returns the projects directory under homeDir', () => {
+      const roots = claudeProvider.getSessionRoots()
+      expect(roots).toEqual([path.join(claudeProvider.homeDir, 'projects')])
     })
   })
 })

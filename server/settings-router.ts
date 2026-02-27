@@ -5,6 +5,8 @@ import { withPerfSpan } from './perf-logger.js'
 
 // --- SettingsPatchSchema (moved from settings-schema.ts) ---
 
+const CODING_CLI_PROVIDER_NAMES = ['claude', 'codex', 'opencode', 'gemini', 'kimi'] as const
+
 const CodingCliProviderConfigSchema = z
   .object({
     model: z.string().optional(),
@@ -54,7 +56,6 @@ export const SettingsPatchSchema = z
     safety: z
       .object({
         autoKillIdleMinutes: z.coerce.number().optional(),
-        warnBeforeKillMinutes: z.coerce.number().optional(),
       })
       .strict()
       .optional(),
@@ -74,6 +75,9 @@ export const SettingsPatchSchema = z
         showProjectBadges: z.coerce.boolean().optional(),
         showSubagents: z.coerce.boolean().optional(),
         showNoninteractiveSessions: z.coerce.boolean().optional(),
+        hideEmptySessions: z.coerce.boolean().optional(),
+        excludeFirstChatSubstrings: z.array(z.string()).optional(),
+        excludeFirstChatMustStart: z.coerce.boolean().optional(),
         width: z.coerce.number().optional(),
         collapsed: z.coerce.boolean().optional(),
       })
@@ -91,9 +95,10 @@ export const SettingsPatchSchema = z
           .array(z.enum(['claude', 'codex', 'opencode', 'gemini', 'kimi']))
           .optional(),
         providers: z
-          .record(
-            z.enum(['claude', 'codex', 'opencode', 'gemini', 'kimi']),
-            CodingCliProviderConfigSchema,
+          .record(z.string(), CodingCliProviderConfigSchema)
+          .refine(
+            (obj) => Object.keys(obj).every((k) => (CODING_CLI_PROVIDER_NAMES as readonly string[]).includes(k)),
+            { message: 'Unknown provider name' },
           )
           .optional(),
       })
@@ -164,7 +169,12 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
   })
 
   const handleSettingsPatch = async (req: any, res: any) => {
-    const parsed = SettingsPatchSchema.safeParse(req.body || {})
+    // Strip deprecated keys that may linger in persisted client state
+    const body = req.body || {}
+    if (body.sidebar && typeof body.sidebar === 'object') {
+      delete body.sidebar.ignoreCodexSubagentSessions
+    }
+    const parsed = SettingsPatchSchema.safeParse(body)
     if (!parsed.success) {
       return res.status(400).json({ error: 'Invalid request', details: parsed.error.issues })
     }

@@ -169,9 +169,10 @@ describe('Settings API Integration', () => {
       expect(res.body.terminal).toHaveProperty('osc52Clipboard')
       expect(res.body.terminal).toHaveProperty('renderer')
       expect(res.body.safety).toHaveProperty('autoKillIdleMinutes')
-      expect(res.body.safety).toHaveProperty('warnBeforeKillMinutes')
       expect(res.body.sidebar).toHaveProperty('sortMode')
       expect(res.body.sidebar).toHaveProperty('showProjectBadges')
+      expect(res.body.sidebar).toHaveProperty('excludeFirstChatSubstrings')
+      expect(res.body.sidebar).toHaveProperty('excludeFirstChatMustStart')
       expect(res.body.sidebar).toHaveProperty('width')
       expect(res.body.sidebar).toHaveProperty('collapsed')
     })
@@ -296,7 +297,6 @@ describe('Settings API Integration', () => {
 
       expect(res.status).toBe(200)
       expect(res.body.safety.autoKillIdleMinutes).toBe(60)
-      expect(res.body.safety.warnBeforeKillMinutes).toBe(defaultSettings.safety.warnBeforeKillMinutes)
     })
 
     it('handles empty body', async () => {
@@ -382,6 +382,22 @@ describe('Settings API Integration', () => {
       expect(res.body.terminal.scrollback).toBe(10000) // Preserved from previous patch
     })
 
+    it('persists first-chat exclusion settings and normalizes substring values', async () => {
+      const res = await request(app)
+        .patch('/api/settings')
+        .set('x-auth-token', TEST_AUTH_TOKEN)
+        .send({
+          sidebar: {
+            excludeFirstChatSubstrings: [' __AUTO__ ', '', '__AUTO__', 'canary'],
+            excludeFirstChatMustStart: true,
+          },
+        })
+
+      expect(res.status).toBe(200)
+      expect(res.body.sidebar.excludeFirstChatSubstrings).toEqual(['__AUTO__', 'canary'])
+      expect(res.body.sidebar.excludeFirstChatMustStart).toBe(true)
+    })
+
     it('handles empty body', async () => {
       const res = await request(app)
         .patch('/api/settings')
@@ -406,12 +422,12 @@ describe('Settings API Integration', () => {
       const res = await request(app)
         .patch('/api/settings')
         .set('x-auth-token', TEST_AUTH_TOKEN)
-        .send({ safety: { warnBeforeKillMinutes: 10 } })
+        .send({ safety: { autoKillIdleMinutes: 90 } })
 
       expect(res.status).toBe(200)
       expect(res.body.theme).toBe('dark')
       expect(res.body.terminal.fontSize).toBe(15)
-      expect(res.body.safety.warnBeforeKillMinutes).toBe(10)
+      expect(res.body.safety.autoKillIdleMinutes).toBe(90)
     })
   })
 
@@ -465,6 +481,17 @@ describe('Settings API Integration', () => {
 
       expect(res.status).toBe(400)
       expect(res.body.error).toBe('Invalid request')
+    })
+
+    it('accepts sidebar patch containing deprecated ignoreCodexSubagentSessions key', async () => {
+      const res = await request(app)
+        .patch('/api/settings')
+        .set('x-auth-token', TEST_AUTH_TOKEN)
+        .send({ sidebar: { width: 300, ignoreCodexSubagentSessions: true } })
+
+      expect(res.status).toBe(200)
+      expect(res.body.sidebar.width).toBe(300)
+      expect(res.body.sidebar).not.toHaveProperty('ignoreCodexSubagentSessions')
     })
 
     it('rejects invalid sidebar sortMode enum', async () => {
@@ -669,6 +696,55 @@ describe('Settings API Integration', () => {
         osc52Clipboard: 'ask',
         renderer: 'auto',
       })
+    })
+  })
+
+  describe('codingCli provider settings', () => {
+    it('accepts a single provider permissionMode change', async () => {
+      const res = await request(app)
+        .patch('/api/settings')
+        .set('x-auth-token', TEST_AUTH_TOKEN)
+        .send({ codingCli: { providers: { claude: { permissionMode: 'plan' } } } })
+
+      expect(res.status).toBe(200)
+      expect(res.body.codingCli.providers.claude.permissionMode).toBe('plan')
+    })
+
+    it('accepts a single provider model change without affecting other providers', async () => {
+      // Set up existing provider settings first
+      await request(app)
+        .patch('/api/settings')
+        .set('x-auth-token', TEST_AUTH_TOKEN)
+        .send({ codingCli: { providers: { claude: { permissionMode: 'plan' } } } })
+
+      // Patch a different provider
+      const res = await request(app)
+        .patch('/api/settings')
+        .set('x-auth-token', TEST_AUTH_TOKEN)
+        .send({ codingCli: { providers: { codex: { model: 'o3' } } } })
+
+      expect(res.status).toBe(200)
+      expect(res.body.codingCli.providers.codex.model).toBe('o3')
+      // Existing provider settings must be preserved
+      expect(res.body.codingCli.providers.claude.permissionMode).toBe('plan')
+    })
+
+    it('accepts multiple providers in a single patch', async () => {
+      const res = await request(app)
+        .patch('/api/settings')
+        .set('x-auth-token', TEST_AUTH_TOKEN)
+        .send({
+          codingCli: {
+            providers: {
+              claude: { permissionMode: 'bypassPermissions' },
+              gemini: { sandbox: 'read-only' },
+            },
+          },
+        })
+
+      expect(res.status).toBe(200)
+      expect(res.body.codingCli.providers.claude.permissionMode).toBe('bypassPermissions')
+      expect(res.body.codingCli.providers.gemini.sandbox).toBe('read-only')
     })
   })
 

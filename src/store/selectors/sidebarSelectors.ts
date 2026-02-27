@@ -21,9 +21,12 @@ export interface SidebarSessionItem {
   runningTerminalId?: string
   isSubagent?: boolean
   isNonInteractive?: boolean
+  firstUserMessage?: string
+  hasTitle: boolean
 }
 
 const EMPTY_ACTIVITY: Record<string, number> = {}
+const EMPTY_STRINGS: string[] = []
 
 const selectProjects = (state: RootState) => state.sessions.projects
 const selectTabs = (state: RootState) => state.tabs.tabs
@@ -36,6 +39,9 @@ const selectSessionActivityForSort = (state: RootState) => {
 }
 const selectShowSubagents = (state: RootState) => state.settings.settings.sidebar?.showSubagents ?? false
 const selectShowNoninteractiveSessions = (state: RootState) => state.settings.settings.sidebar?.showNoninteractiveSessions ?? false
+const selectHideEmptySessions = (state: RootState) => state.settings.settings.sidebar?.hideEmptySessions ?? true
+const selectExcludeFirstChatSubstrings = (state: RootState) => state.settings.settings.sidebar?.excludeFirstChatSubstrings ?? EMPTY_STRINGS
+const selectExcludeFirstChatMustStart = (state: RootState) => state.settings.settings.sidebar?.excludeFirstChatMustStart ?? false
 const selectTerminals = (_state: RootState, terminals: BackgroundTerminal[]) => terminals
 const selectFilter = (_state: RootState, _terminals: BackgroundTerminal[], filter: string) => filter
 
@@ -52,12 +58,16 @@ function buildSessionItems(
   sessionActivity: Record<string, number>
 ): SidebarSessionItem[] {
   const items: SidebarSessionItem[] = []
-  const runningSessionMap = new Map<string, string>()
+  const runningSessionMap = new Map<string, { terminalId: string; createdAt: number }>()
   const tabSessionMap = new Map<string, { hasTab: boolean }>()
 
   for (const terminal of terminals || []) {
     if (terminal.mode && terminal.mode !== 'shell' && terminal.status === 'running' && terminal.resumeSessionId) {
-      runningSessionMap.set(`${terminal.mode}:${terminal.resumeSessionId}`, terminal.terminalId)
+      const sessionKey = `${terminal.mode}:${terminal.resumeSessionId}`
+      const existing = runningSessionMap.get(sessionKey)
+      if (!existing || terminal.createdAt < existing.createdAt) {
+        runningSessionMap.set(sessionKey, { terminalId: terminal.terminalId, createdAt: terminal.createdAt })
+      }
     }
   }
 
@@ -90,14 +100,17 @@ function buildSessionItems(
     for (const session of project.sessions || []) {
       const provider = session.provider || 'claude'
       const key = `${provider}:${session.sessionId}`
-      const runningTerminalId = runningSessionMap.get(key)
+      const runningTerminal = runningSessionMap.get(key)
+      const runningTerminalId = runningTerminal?.terminalId
       const tabInfo = tabSessionMap.get(key)
       const ratchetedActivity = sessionActivity[key]
+      const hasTitle = !!session.title
       items.push({
         id: `session-${provider}-${session.sessionId}`,
         sessionId: session.sessionId,
         provider,
         title: session.title || session.sessionId.slice(0, 8),
+        hasTitle,
         subtitle: getProjectName(project.projectPath),
         projectPath: project.projectPath,
         projectColor: project.color,
@@ -110,6 +123,7 @@ function buildSessionItems(
         runningTerminalId,
         isSubagent: session.isSubagent,
         isNonInteractive: session.isNonInteractive,
+        firstUserMessage: session.firstUserMessage,
       })
     }
   }
@@ -132,15 +146,37 @@ function filterSessionItems(items: SidebarSessionItem[], filter: string): Sideba
 export interface VisibilitySettings {
   showSubagents: boolean
   showNoninteractiveSessions: boolean
+  hideEmptySessions: boolean
+  excludeFirstChatSubstrings: string[]
+  excludeFirstChatMustStart: boolean
+}
+
+function isExcludedByFirstUserMessage(
+  firstUserMessage: string | undefined,
+  exclusions: string[],
+  mustStart: boolean,
+): boolean {
+  if (!firstUserMessage || exclusions.length === 0) return false
+  return exclusions.some((term) => (
+    mustStart
+      ? firstUserMessage.startsWith(term)
+      : firstUserMessage.includes(term)
+  ))
 }
 
 export function filterSessionItemsByVisibility(
   items: SidebarSessionItem[],
   settings: VisibilitySettings,
 ): SidebarSessionItem[] {
+  const exclusions = settings.excludeFirstChatSubstrings
+    .map((term) => term.trim())
+    .filter((term) => term.length > 0)
+
   return items.filter((item) => {
     if (!settings.showSubagents && item.isSubagent) return false
     if (!settings.showNoninteractiveSessions && item.isNonInteractive) return false
+    if (settings.hideEmptySessions && !item.hasTitle) return false
+    if (isExcludedByFirstUserMessage(item.firstUserMessage, exclusions, settings.excludeFirstChatMustStart)) return false
     return true
   })
 }
@@ -208,11 +244,58 @@ export function sortSessionItems(items: SidebarSessionItem[], sortMode: string):
 
 export const makeSelectSortedSessionItems = () =>
   createSelector(
-    [selectProjects, selectTabs, selectPanes, selectSessionActivityForSort, selectSortMode, selectShowSubagents, selectShowNoninteractiveSessions, selectTerminals, selectFilter],
-    (projects, tabs, panes, sessionActivity, sortMode, showSubagents, showNoninteractiveSessions, terminals, filter) => {
+    [
+      selectProjects,
+      selectTabs,
+      selectPanes,
+      selectSessionActivityForSort,
+      selectSortMode,
+      selectShowSubagents,
+      selectShowNoninteractiveSessions,
+      selectHideEmptySessions,
+      selectExcludeFirstChatSubstrings,
+      selectExcludeFirstChatMustStart,
+      selectTerminals,
+      selectFilter,
+    ],
+    (
+      projects,
+      tabs,
+      panes,
+      sessionActivity,
+      sortMode,
+      showSubagents,
+      showNoninteractiveSessions,
+      hideEmptySessions,
+      excludeFirstChatSubstrings,
+      excludeFirstChatMustStart,
+      terminals,
+      filter
+    ) => {
       const items = buildSessionItems(projects, tabs, panes, terminals, sessionActivity)
-      const visible = filterSessionItemsByVisibility(items, { showSubagents, showNoninteractiveSessions })
+      const visible = filterSessionItemsByVisibility(items, {
+        showSubagents,
+        showNoninteractiveSessions,
+        hideEmptySessions,
+        excludeFirstChatSubstrings,
+        excludeFirstChatMustStart,
+      })
       const filtered = filterSessionItems(visible, filter)
       return sortSessionItems(filtered, sortMode)
+    }
+  )
+
+export const makeSelectKnownSessionKeys = () =>
+  createSelector(
+    [selectProjects],
+    (projects) => {
+      const keys = new Set<string>()
+      for (const project of projects || []) {
+        for (const session of project.sessions || []) {
+          const provider = session.provider || 'claude'
+          keys.add(`${provider}:${session.sessionId}`)
+        }
+      }
+      return keys
     }
   )

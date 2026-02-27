@@ -5,7 +5,7 @@ import { extractTitleFromMessage } from '../../title-utils.js'
 import { isValidClaudeSessionId } from '../../claude-session-id.js'
 import { getClaudeHome } from '../../claude-home.js'
 import type { CodingCliProvider } from '../provider.js'
-import type { NormalizedEvent, ParsedSessionMeta, TokenSummary } from '../types.js'
+import { normalizeFirstUserMessage, type NormalizedEvent, type ParsedSessionMeta, type TokenSummary } from '../types.js'
 import { parseClaudeEvent, isMessageEvent, isResultEvent, isToolResultContent, isToolUseContent, isTextContent } from '../../claude-stream-types.js'
 import { looksLikePath, isSystemContext, extractFromIdeContext, resolveGitCheckoutRoot } from '../utils.js'
 
@@ -14,6 +14,7 @@ export type JsonlMeta = {
   cwd?: string
   title?: string
   summary?: string
+  firstUserMessage?: string
   messageCount?: number
   gitBranch?: string
   isDirty?: boolean
@@ -203,6 +204,37 @@ type ParseSessionOptions = {
   contextTokens?: number
 }
 
+function extractUserContentText(content: unknown): string | undefined {
+  if (typeof content === 'string') return content
+  if (content && typeof content === 'object' && !Array.isArray(content)) {
+    const text = (content as { text?: unknown }).text
+    if (typeof text === 'string') return text
+    return undefined
+  }
+  if (!Array.isArray(content)) return undefined
+
+  const textParts = content.flatMap((part) => {
+    if (typeof part === 'string') return [part]
+    if (isTextContent(part) && typeof part.text === 'string') return [part.text]
+    if (part && typeof part === 'object' && typeof (part as { text?: unknown }).text === 'string') {
+      return [(part as { text: string }).text]
+    }
+    return []
+  })
+  return textParts.length > 0 ? textParts.join('\n') : undefined
+}
+
+function extractUserMessageText(obj: any): string | undefined {
+  if (obj?.role === 'user') {
+    const direct = extractUserContentText(obj?.content)
+    if (direct) return direct
+  }
+  if (obj?.message?.role === 'user') {
+    return extractUserContentText(obj?.message?.content)
+  }
+  return undefined
+}
+
 /** Parse session metadata from jsonl content (pure function for testing) */
 export function parseSessionContent(content: string, options: ParseSessionOptions = {}): JsonlMeta {
   const lines = content.split(/\r?\n/).filter(Boolean)
@@ -210,6 +242,7 @@ export function parseSessionContent(content: string, options: ParseSessionOption
   let cwd: string | undefined
   let title: string | undefined
   let summary: string | undefined
+  let firstUserMessage: string | undefined
   let gitBranch: string | undefined
   let isDirty: boolean | undefined
   let model: string | undefined
@@ -247,6 +280,7 @@ export function parseSessionContent(content: string, options: ParseSessionOption
       const modelCandidate = [obj?.model, obj?.message?.model].find((v: any) => typeof v === 'string' && v.trim())
       if (typeof modelCandidate === 'string') model = modelCandidate
     }
+    const userMessageText = extractUserMessageText(obj)
 
     const candidates = [
       obj?.cwd,
@@ -264,10 +298,7 @@ export function parseSessionContent(content: string, options: ParseSessionOption
       const t =
         obj?.title ||
         obj?.sessionTitle ||
-        (obj?.role === 'user' && typeof obj?.content === 'string' ? obj.content : undefined) ||
-        (obj?.message?.role === 'user' && typeof obj?.message?.content === 'string'
-          ? obj.message.content
-          : undefined)
+        userMessageText
 
       if (typeof t === 'string' && t.trim()) {
         // Try to extract user request from IDE-formatted context first
@@ -278,6 +309,13 @@ export function parseSessionContent(content: string, options: ParseSessionOption
           // Store up to 200 chars - UI truncates visually, tooltip shows full text
           title = extractTitleFromMessage(t, 200)
         }
+      }
+    }
+
+    if (!firstUserMessage) {
+      if (typeof userMessageText === 'string') {
+        const normalized = normalizeFirstUserMessage(userMessageText)
+        if (normalized) firstUserMessage = normalized
       }
     }
 
@@ -357,6 +395,7 @@ export function parseSessionContent(content: string, options: ParseSessionOption
     cwd,
     title,
     summary,
+    firstUserMessage,
     messageCount: lines.length,
     gitBranch,
     isDirty,
@@ -371,6 +410,10 @@ export const claudeProvider: CodingCliProvider = {
 
   getSessionGlob() {
     return path.join(this.homeDir, 'projects', '**', '*.jsonl')
+  },
+
+  getSessionRoots() {
+    return [path.join(this.homeDir, 'projects')]
   },
 
   async listSessionFiles() {
