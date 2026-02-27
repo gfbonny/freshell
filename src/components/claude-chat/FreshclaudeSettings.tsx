@@ -24,8 +24,10 @@ interface FreshclaudeSettingsProps {
 
 const MODEL_OPTIONS = [
   { value: 'claude-opus-4-6', label: 'Opus 4.6' },
-  { value: 'claude-sonnet-4-5-20250929', label: 'Sonnet 4.5' },
+  { value: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
   { value: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' },
+  { value: 'claude-sonnet-4-5-20250929', label: 'Sonnet 4.5' },
+  { value: 'claude-opus-4-5', label: 'Opus 4.5' },
 ]
 
 const PERMISSION_OPTIONS = [
@@ -101,10 +103,17 @@ export default function FreshclaudeSettings({
     return () => document.removeEventListener('keydown', handleEscape)
   }, [open, handleClose])
 
-  // Use dynamic model options when available, fall back to hardcoded
-  const resolvedModelOptions = modelOptions
-    ? modelOptions.map((m) => ({ value: m.value, label: formatModelDisplayName(m.displayName) }))
-    : MODEL_OPTIONS
+  // Start with the hardcoded list, then append any dynamic models not already present.
+  // Filter out SDK shorthand aliases (e.g. "default", "opus", "haiku") — they duplicate
+  // models we already list with full IDs.
+  const resolvedModelOptions = (() => {
+    if (!modelOptions) return MODEL_OPTIONS
+    const knownValues = new Set(MODEL_OPTIONS.map((m) => m.value))
+    const extras = modelOptions
+      .filter((m) => m.value.startsWith('claude-') && !knownValues.has(m.value))
+      .map((m) => ({ value: m.value, label: formatModelDisplayName(m.displayName) }))
+    return [...MODEL_OPTIONS, ...extras]
+  })()
 
   return (
     <div className="relative">
