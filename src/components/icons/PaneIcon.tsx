@@ -24,7 +24,7 @@ export default function PaneIcon({ content, className }: PaneIconProps) {
     return <FileText className={className} />
   }
 
-  if (content.kind === 'claude-chat') {
+  if (content.kind === 'agent-chat') {
     return <FreshclaudeIcon className={className} />
   }
 
