@@ -708,36 +708,36 @@ describe('ConfigStore', () => {
     })
   })
 
-  describe('freshclaude defaults', () => {
-    it('patchSettings merges freshclaude key', async () => {
+  describe('agentChat defaults', () => {
+    it('patchSettings merges agentChat providers', async () => {
       const store = new ConfigStore()
       await store.load()
 
       const updated = await store.patchSettings({
-        freshclaude: { defaultModel: 'claude-sonnet-4-5-20250929' },
+        agentChat: { providers: { freshclaude: { defaultModel: 'claude-sonnet-4-5-20250929' } } },
       })
 
-      expect(updated.freshclaude?.defaultModel).toBe('claude-sonnet-4-5-20250929')
+      expect(updated.agentChat?.providers?.freshclaude?.defaultModel).toBe('claude-sonnet-4-5-20250929')
     })
 
-    it('patchSettings deep-merges freshclaude without clobbering other keys', async () => {
+    it('patchSettings deep-merges agentChat providers without clobbering other keys', async () => {
       const store = new ConfigStore()
       await store.load()
 
       await store.patchSettings({
-        freshclaude: { defaultModel: 'claude-opus-4-6', defaultEffort: 'high' },
+        agentChat: { providers: { freshclaude: { defaultModel: 'claude-opus-4-6', defaultEffort: 'high' } } },
       })
       const updated = await store.patchSettings({
-        freshclaude: { defaultPermissionMode: 'default' },
+        agentChat: { providers: { freshclaude: { defaultPermissionMode: 'default' } } },
       })
 
-      expect(updated.freshclaude?.defaultModel).toBe('claude-opus-4-6')
-      expect(updated.freshclaude?.defaultPermissionMode).toBe('default')
-      expect(updated.freshclaude?.defaultEffort).toBe('high')
+      expect(updated.agentChat?.providers?.freshclaude?.defaultModel).toBe('claude-opus-4-6')
+      expect(updated.agentChat?.providers?.freshclaude?.defaultPermissionMode).toBe('default')
+      expect(updated.agentChat?.providers?.freshclaude?.defaultEffort).toBe('high')
     })
 
-    it('defaultSettings includes empty freshclaude object', () => {
-      expect(defaultSettings.freshclaude).toEqual({})
+    it('defaultSettings includes empty agentChat providers', () => {
+      expect(defaultSettings.agentChat).toEqual({ providers: {} })
     })
   })
 

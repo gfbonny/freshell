@@ -162,7 +162,7 @@ describe('settingsSlice', () => {
           ...defaultSettings.editor,
           ...newSettings.editor,
         },
-        freshclaude: {},
+        agentChat: { providers: {} },
       })
     })
 
