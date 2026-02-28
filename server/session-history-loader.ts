@@ -7,22 +7,11 @@
 import fsp from 'fs/promises'
 import path from 'path'
 import { getClaudeHome } from './claude-home.js'
+import type { ContentBlock } from '../shared/ws-protocol.js'
 
-interface ChatContentBlock {
-  type: 'text' | 'thinking' | 'tool_use' | 'tool_result'
-  text?: string
-  thinking?: string
-  id?: string
-  name?: string
-  input?: Record<string, unknown>
-  tool_use_id?: string
-  content?: string | unknown[]
-  is_error?: boolean
-}
-
-interface ChatMessage {
+export interface ChatMessage {
   role: 'user' | 'assistant'
-  content: ChatContentBlock[]
+  content: ContentBlock[]
   timestamp?: string
   model?: string
 }
@@ -61,7 +50,7 @@ export function extractChatMessagesFromJsonl(content: string): ChatMessage[] {
       // Structured format: message is a ClaudeMessage object
       messages.push({
         role: msg.role || role,
-        content: msg.content as ChatContentBlock[],
+        content: msg.content as ContentBlock[],
         ...(timestamp ? { timestamp } : {}),
         ...(msg.model ? { model: msg.model } : {}),
       })

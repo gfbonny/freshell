@@ -18,7 +18,7 @@ import type { SdkBridge } from './sdk-bridge.js'
 import type { SdkServerMessage } from '../shared/ws-protocol.js'
 import { TerminalStreamBroker } from './terminal-stream/broker.js'
 import { chunkProjects } from './ws-chunking.js'
-import { loadSessionHistory } from './session-history-loader.js'
+import { loadSessionHistory, type ChatMessage } from './session-history-loader.js'
 import { TabRegistryRecordBaseSchema, TabRegistryRecordSchema } from './tabs-registry/types.js'
 import type { TabsRegistryStore } from './tabs-registry/store.js'
 import {
@@ -1575,7 +1575,7 @@ export class WsHandler {
         // Send history replay. For resumed sessions, use the .jsonl file when it
         // has more messages than in-memory (covers the post-restart case where
         // in-memory is empty). For active sessions, in-memory is more current.
-        let historyMessages = session.messages
+        let historyMessages: ChatMessage[] = session.messages
         if (session.resumeSessionId) {
           try {
             const jsonlMessages = await loadSessionHistory(session.resumeSessionId)
