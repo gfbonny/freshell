@@ -487,7 +487,7 @@ export class ConfigStore {
     if (existing) {
       this.lastReadError = undefined
       // Migrate flat freshclaude → nested agentChat.providers.freshclaude
-      const rawSettings = existing.settings || {} as any
+      const rawSettings = (existing.settings || {}) as AppSettings & Record<string, unknown>
       if (rawSettings.freshclaude) {
         if (!rawSettings.agentChat) {
           rawSettings.agentChat = { providers: { freshclaude: rawSettings.freshclaude } }
