@@ -11,11 +11,13 @@ import {
   type Query as SdkQuery,
 } from '@anthropic-ai/claude-agent-sdk'
 import type { PermissionResult, PermissionUpdate } from '@anthropic-ai/claude-agent-sdk'
+import { formatModelDisplayName } from '../shared/format-model-name.js'
 import { logger } from './logger.js'
 import type {
   SdkSessionState,
   ContentBlock,
   SdkServerMessage,
+  QuestionDefinition,
 } from './sdk-bridge-types.js'
 
 const log = logger.child({ component: 'sdk-bridge' })
@@ -50,6 +52,7 @@ export class SdkBridge extends EventEmitter {
     const sessionId = nanoid()
     const state: SdkSessionState = {
       sessionId,
+      resumeSessionId: options.resumeSessionId,
       cwd: options.cwd,
       model: options.model,
       permissionMode: options.permissionMode,
@@ -57,6 +60,7 @@ export class SdkBridge extends EventEmitter {
       createdAt: Date.now(),
       messages: [],
       pendingPermissions: new Map(),
+      pendingQuestions: new Map(),
       costUsd: 0,
       totalInputTokens: 0,
       totalOutputTokens: 0,
@@ -79,7 +83,6 @@ export class SdkBridge extends EventEmitter {
         model: options.model,
         permissionMode: options.permissionMode as any,
         effort: options.effort,
-        ...(options.permissionMode === 'bypassPermissions' && { allowDangerouslySkipPermissions: true }),
         pathToClaudeCodeExecutable: process.env.CLAUDE_CMD || undefined,
         includePartialMessages: true,
         abortController,
@@ -88,6 +91,14 @@ export class SdkBridge extends EventEmitter {
           log.warn({ sessionId, data: data.trimEnd() }, 'SDK subprocess stderr')
         },
         canUseTool: async (toolName, input, ctx) => {
+          if (toolName === 'AskUserQuestion') {
+            return this.handleAskUserQuestion(sessionId, input as Record<string, unknown>, ctx)
+          }
+          // Read live permissionMode from session state (not closure) so runtime changes are respected
+          const currentState = this.sessions.get(sessionId)
+          if (currentState?.permissionMode === 'bypassPermissions') {
+            return { behavior: 'allow', updatedInput: input }
+          }
           return this.handlePermissionRequest(sessionId, toolName, input as Record<string, unknown>, ctx)
         },
         settingSources: ['user', 'project', 'local'],
@@ -351,6 +362,85 @@ export class SdkBridge extends EventEmitter {
     })
   }
 
+  private async handleAskUserQuestion(
+    sessionId: string,
+    input: Record<string, unknown>,
+    options: {
+      signal: AbortSignal
+      toolUseID: string
+    },
+  ): Promise<PermissionResult> {
+    const state = this.sessions.get(sessionId)
+    if (!state) return { behavior: 'deny', message: 'Session not found' }
+
+    const requestId = nanoid()
+    const rawQuestions = input.questions
+    if (!Array.isArray(rawQuestions) || rawQuestions.length === 0) {
+      return { behavior: 'allow', updatedInput: input }
+    }
+    const questions: QuestionDefinition[] = rawQuestions
+      .filter((q): q is Record<string, unknown> => q != null && typeof q === 'object')
+      .map((q) => {
+        const sanitized: QuestionDefinition = {
+          // Spread first to preserve any extra fields (e.g. SDK-provided IDs)
+          ...(q as unknown as QuestionDefinition),
+          // Then override with sanitized known fields
+          question: String(q.question ?? ''),
+          header: String(q.header ?? ''),
+          options: Array.isArray(q.options)
+            ? q.options
+                .filter((o): o is Record<string, unknown> => o != null && typeof o === 'object')
+                .map((o) => ({
+                  ...(o as unknown as { label: string; description: string }),
+                  label: String(o.label ?? ''),
+                  description: String(o.description ?? ''),
+                }))
+            : [],
+          multiSelect: Boolean(q.multiSelect),
+        }
+        return sanitized
+      })
+    if (questions.length === 0) {
+      return { behavior: 'allow', updatedInput: input }
+    }
+
+    return new Promise((resolve) => {
+      state.pendingQuestions.set(requestId, {
+        originalInput: input,
+        questions,
+        resolve,
+      })
+
+      this.broadcastToSession(sessionId, {
+        type: 'sdk.question.request',
+        sessionId,
+        requestId,
+        questions,
+      })
+    })
+  }
+
+  respondQuestion(
+    sessionId: string,
+    requestId: string,
+    answers: Record<string, string>,
+  ): boolean {
+    const state = this.sessions.get(sessionId)
+    const pending = state?.pendingQuestions.get(requestId)
+    if (!pending) return false
+
+    state!.pendingQuestions.delete(requestId)
+    pending.resolve({
+      behavior: 'allow',
+      updatedInput: {
+        ...pending.originalInput,
+        questions: pending.questions,
+        answers,
+      },
+    })
+    return true
+  }
+
   getSession(sessionId: string): SdkSessionState | undefined {
     return this.sessions.get(sessionId)
   }
@@ -380,14 +470,16 @@ export class SdkBridge extends EventEmitter {
     return true
   }
 
-  subscribe(sessionId: string, listener: (msg: SdkServerMessage) => void): (() => void) | null {
+  subscribe(sessionId: string, listener: (msg: SdkServerMessage) => void): { off: () => void; replayed: boolean } | null {
     const sp = this.processes.get(sessionId)
     if (!sp) return null
     sp.browserListeners.add(listener)
 
     // Replay buffered messages to the first subscriber
+    let replayed = false
     if (!sp.hasSubscribers) {
       sp.hasSubscribers = true
+      replayed = true
       for (const msg of sp.messageBuffer) {
         try { listener(msg) } catch (err) {
           log.warn({ err, sessionId }, 'Buffer replay error')
@@ -396,7 +488,7 @@ export class SdkBridge extends EventEmitter {
       sp.messageBuffer.length = 0
     }
 
-    return () => { sp.browserListeners.delete(listener) }
+    return { off: () => { sp.browserListeners.delete(listener) }, replayed }
   }
 
   sendUserMessage(sessionId: string, text: string, images?: Array<{ mediaType: string; data: string }>): boolean {
@@ -493,11 +585,15 @@ export class SdkBridge extends EventEmitter {
     if (!sp) return
 
     sp.query.supportedModels().then((models) => {
-      const mapped = models.map((m: any) => ({
-        value: m.value ?? m.id ?? String(m),
-        displayName: m.displayName ?? m.display_name ?? m.value ?? String(m),
-        description: m.description ?? '',
-      }))
+      const mapped = models.map((m: any) => {
+        const value = m.value ?? m.id ?? String(m)
+        const rawName = m.displayName ?? m.display_name ?? value
+        return {
+          value,
+          displayName: formatModelDisplayName(rawName),
+          description: m.description ?? '',
+        }
+      })
       this.cachedModels = mapped
       this.broadcastToSession(sessionId, {
         type: 'sdk.models',
